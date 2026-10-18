@@ -1,0 +1,11 @@
+--- a/dist/document-pull-client-uopDjRde.js	2026-09-14 11:02:33
++++ b/dist/document-pull-client-uopDjRde.js	2026-09-14 11:02:33
+@@ -7041,7 +7041,7 @@
+ 	let t = [];
+ 	for (let n of e) {
+ 		let e = t.at(-1);
+-		if (e && "text" in e && "text" in n && Dl(e) === Dl(n)) {
++		if (e && "text" in e && "text" in n && !e.metricOnly && !n.metricOnly && Dl(e) === Dl(n)) {
+ 			let r = e.text.length, i = e.text + n.text, a = [...e.punctuationCompressions ?? [], ...(n.punctuationCompressions ?? []).map((e) => ({
+ 				end: r + e.end,
+ 				adjustmentPt: e.adjustmentPt

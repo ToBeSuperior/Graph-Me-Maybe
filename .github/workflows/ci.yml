@@ -1,0 +1,105 @@
+# The same three checks as CONTRIBUTING.md: no key, no Neo4j, no document needed.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv sync --locked --extra dev
+      - run: uv run ruff check src tests/public
+      - run: uv run mypy src
+      - run: uv run pytest tests/public
+
+  windows-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv sync --locked --extra dev
+      - run: uv run pytest tests/public
+
+  assets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: wasm-pack
+        run: |
+          curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz \
+            | tar xz -C /tmp
+          install -m 755 /tmp/wasm-pack-v0.15.0-x86_64-unknown-linux-musl/wasm-pack ~/.cargo/bin/
+      - run: tools/release/build.sh assets
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assets
+          path: assets
+
+  install:
+    needs: assets
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      GRAPHME_INSTALL_SOURCE: ${{ github.workspace }}/assets
+      GRAPHME_VERSION: v0.0.0-ci
+      GRAPHME_HOME: ${{ github.workspace }}/app home
+      GRAPHME_YES: "1"
+      GRAPHME_NO_DOCKER: "1"
+      GRAPHME_NO_SHORTCUT: "1"
+      GRAPHME_NO_LAUNCH: "1"
+      UV_NO_MODIFY_PATH: "1"
+    steps:
+      - uses: actions/checkout@v4
+      # uv already there: the installer then uses it, and later steps find it on PATH
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: assets
+          path: assets
+      - if: runner.os != 'Windows'
+        run: sh install.sh
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./install.ps1
+      - name: the app answers and draws a workbook
+        shell: bash
+        run: |
+          bin="$(uv tool dir --bin)"; tools="$(uv tool dir)"
+          if command -v cygpath >/dev/null 2>&1; then bin=$(cygpath -u "$bin"); tools=$(cygpath -u "$tools"); fi
+          "$bin/graphme" app --no-browser --port 8797 > app.log 2>&1 &
+          app=$!
+          trap 'kill "$app" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do curl -fs 127.0.0.1:8797/health && break; sleep 2; done
+          curl -fs 127.0.0.1:8797/health || { cat app.log; exit 1; }
+          python_dir="$tools/graph-me-maybe"
+          py="$python_dir/bin/python"; [ -x "$py" ] || py="$python_dir/Scripts/python.exe"
+          "$py" -m graphme.samples samples
+          xlsx=$(ls samples/*.xlsx | head -1)
+          "$bin/graphme" xlsx-bundle "$xlsx" bundle --viewer "$GRAPHME_HOME/viewer" || { cat app.log; exit 1; }
+          # The path most Windows users take: no Chrome, Playwright's own Chromium.
+          "$py" -m playwright install chromium --only-shell
+          docx=$(ls samples/*.docx | head -1)
+          mkdir -p drawn
+          env -u BROWSER_PATH DIST_ROOT="$GRAPHME_HOME/viewer" \
+            "$py" -m graphme.adapters.rendering.browser_capture docx "$docx" drawn 800 1
+          test -f drawn/page-001.png

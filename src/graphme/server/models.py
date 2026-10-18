@@ -1,0 +1,302 @@
+"""What the server's API takes and gives, as types: the contract `/docs` shows and the web
+app is generated from. A field added here is a field a client can read; one the server sends
+without saying so here is dropped on the way out."""
+from __future__ import annotations
+
+from typing import Annotated, Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class _Model(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# Documents --------------------------------------------------------------------------------
+
+
+class LibraryItem(_Model):
+    name: str
+    format: str
+    in_space: bool
+    """In the graph space, or only held (or being read) by the server."""
+    document_id: str | None = None
+    """Its id in the graph space."""
+    file_id: str | None = None
+    """The id of the server's file for it, which draws its pages."""
+    state: str
+    modified: float | None = None
+    """When its file was last changed, in seconds."""
+
+
+class Library(_Model):
+    items: list[LibraryItem]
+    space_ok: bool
+    """False when the graph DB cannot be reached; the server's own files are still listed."""
+
+
+class Uploaded(_Model):
+    id: str
+    """The file's id."""
+    state: str
+    """`in_space` when its content is in the graph already, so a build passes it over; else
+    where its reading stands (`idle` until a job reads it)."""
+
+
+class Derived(_Model):
+    node: str
+    to: str
+
+
+class PageInfo(_Model):
+    index: int
+    name: str | None = None
+    width: int
+    height: int
+    derived: list[Derived] | None = None
+    seconds: float | None = None
+    pending: bool
+    error: str | None = None
+
+
+class Pages(_Model):
+    source: str
+    format: str
+    state: str
+    error: str | None = None
+    pending: bool
+    sheets: list[PageInfo]
+
+
+class PagesOf(_Model):
+    file_id: str
+    """The file that draws the pages of a document in the space."""
+
+
+# The graph space ----------------------------------------------------------------------------
+
+
+class BuildRequest(_Model):
+    folder: str | None = None
+    """A folder on the server's machine, or --"""
+    files: list[str] = Field(default_factory=list)
+    """-- files uploaded (`POST /v1/files`)."""
+    embed: bool = True
+    """Its passages embedded once it is in, when an embedding key is set."""
+
+
+class ReadRequest(_Model):
+    files: list[str]
+    """Files uploaded, read the way a build reads them and not put in the graph space."""
+
+
+class BuildState(_Model):
+    id: str
+    kind: Literal["build", "read", "embed"]
+    state: str
+    """idle | reading | linking | embedding | done | cancelled | error"""
+    done: int
+    total: int
+    source: str
+    failed: list[str]
+    documents: int
+    known: int
+    carried: int = 0
+    """Files found inside the documents given, read as documents of their own and counted in
+    `total` -- known only once the build has looked, when `total` is first said."""
+    links: int
+    """Citation links this build made. Similarity links come with embedding and are counted
+    only in the map."""
+    skipped: int = 0
+    embedded: int
+    error: str | None = None
+
+
+class MapDocument(_Model):
+    id: str
+    label: str
+    title: str | None = None
+    mentions: int = 0
+    modified_at: float | None = None
+    content_hash: str | None = None
+
+
+class MapLink(_Model):
+    from_: str = Field(alias="from")
+    to: str
+    count: int
+    matched_by: list[str]
+
+
+class SimilarLink(_Model):
+    from_: str = Field(alias="from")
+    to: str
+    score: float
+
+
+class CorpusMap(_Model):
+    documents: list[MapDocument]
+    total: int
+    """Documents in the space; the map draws at most MAP_LIMIT of them."""
+    links: list[MapLink]
+    similar: list[SimilarLink]
+
+
+class GraphNode(_Model):
+    id: str
+    labels: list[str]
+    properties: dict[str, Any]
+
+
+class GraphRelationship(_Model):
+    id: str
+    type: str
+    start: str
+    end: str
+    properties: dict[str, Any]
+
+
+class ChunkSpan(_Model):
+    id: str
+    members: list[str]
+    importance: float | None = None
+
+
+class DocumentGraph(_Model):
+    nodes: list[GraphNode]
+    relationships: list[GraphRelationship]
+    chunks: list[ChunkSpan] = Field(default_factory=list)
+    pages: dict[str, int] = Field(default_factory=dict)
+    """The page each node is drawn on (a file the server read, only)."""
+    crops: list[str] = Field(default_factory=list)
+    """The nodes with a stored crop (a file the server read, only)."""
+
+
+class Placed(_Model):
+    page: int
+    box: tuple[int, int, int, int]
+    """left, top, right, bottom, in the rendered page's pixels."""
+
+
+class Boxes(_Model):
+    boxes: dict[str, Placed]
+    """Where each node is drawn, by node id."""
+
+
+class Confirm(_Model):
+    confirm: bool = False
+
+
+class Reset(_Model):
+    deleted: int
+
+
+class Deleted(_Model):
+    deleted: str
+
+
+# Questions ----------------------------------------------------------------------------------
+
+
+class Question(_Model):
+    question: str = ""
+    top_k: int | None = None
+
+
+class LinkedPassage(_Model):
+    id: str
+    score: float
+    members: list[str]
+    text: str
+
+
+class LinkedDocument(_Model):
+    document_id: str
+    file: str
+    hop: int
+    via: str
+    direction: str
+    """How `via` is linked to it: cites | cited_by | similar."""
+    passages: list[LinkedPassage]
+    modified: float | None = None
+
+
+class Source(_Model):
+    id: str
+    score: float
+    document_id: str
+    file: str
+    members: list[str]
+    context: str
+    linked: list[LinkedDocument] = Field(default_factory=list)
+    modified: float | None = None
+
+
+class Found(_Model):
+    sources: list[Source]
+
+
+class Answer(_Model):
+    answer: str
+    sources: list[Source]
+
+
+# Export -------------------------------------------------------------------------------------
+
+
+class ExportRequest(_Model):
+    docs: list[str] | None = None
+    """None is every document; an empty list is refused."""
+
+
+class AuraUpload(ExportRequest):
+    uri: str = ""
+    user: str = ""
+    password: str = ""
+    confirm: bool = False
+
+
+class ExportJob(_Model):
+    id: str
+    kind: Literal["dump", "aura-upload"]
+    state: str
+    """idle | dumping | uploading | done | error"""
+    message: str
+    documents: int | None = None
+    finished_at: float | None = None
+    dump_ready: bool = False
+    """Its `.dump` can be fetched (`GET /v1/jobs/{id}/file`): a dump, done, and the latest."""
+
+
+Job = Annotated[BuildState | ExportJob, Field(discriminator="kind")]
+
+
+class SettingField(_Model):
+    env: str
+    """The variable it is kept under in `.env`."""
+    secret: bool
+    set: bool
+    value: str | None = None
+    """The value, for a setting that is not a secret."""
+    hint: str | None = None
+    """A secret's last four characters, when it is set -- the secret itself is never sent."""
+
+
+class ServerSettings(_Model):
+    endpoint: str
+    """Who answers the chat model: the GRAPHME_PROVIDER the server runs with."""
+    fields: list[SettingField]
+    problems: list[str]
+    """What keeps the server from building or answering, as the startup check says it."""
+    samples: bool
+    """The server writes sample documents to try it on (`POST /v1/samples`, the demo's)."""
+
+
+class Health(_Model):
+    status: str
+    version: str
+
+
+class SettingsChange(_Model):
+    values: dict[str, str]
+    """Only what changes; an empty value leaves that setting as it is."""

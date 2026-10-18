@@ -1,0 +1,521 @@
+diff --git a/packages/xlsx/parser/src/drawing.rs b/packages/xlsx/parser/src/drawing.rs
+index e519a67..7c7d641 100644
+--- a/packages/xlsx/parser/src/drawing.rs
++++ b/packages/xlsx/parser/src/drawing.rs
+@@ -129,6 +129,9 @@ pub(crate) fn parse_drawing_anchors(
+         let mut svg_rid: Option<String> = None;
+         let mut native_ext_cx: i64 = 0;
+         let mut native_ext_cy: i64 = 0;
++        let mut rot: f64 = 0.0;
++        let mut flip_h = false;
++        let mut flip_v = false;
+         // ECMA-376 §20.1.8.55 `<a:srcRect>` source-image crop (None ⇒ uncropped).
+         let mut src_rect: Option<SrcRect> = None;
+         // ECMA-376 §20.1.8.6 `<a:alphaModFix>` opacity (None ⇒ opaque) and
+@@ -220,6 +223,9 @@ pub(crate) fn parse_drawing_anchors(
+                             if let Some(xfrm) = parse_xfrm(&xfrm_n) {
+                                 native_ext_cx = xfrm.ext_x as i64;
+                                 native_ext_cy = xfrm.ext_y as i64;
++                                rot = xfrm.rot;
++                                flip_h = xfrm.flip_h;
++                                flip_v = xfrm.flip_v;
+                             }
+                         }
+                     }
+@@ -276,6 +282,9 @@ pub(crate) fn parse_drawing_anchors(
+             edit_as,
+             native_ext_cx,
+             native_ext_cy,
++            rot,
++            flip_h,
++            flip_v,
+             image_path,
+             mime_type,
+             svg_image_path,
+@@ -909,6 +918,8 @@ pub(crate) fn parse_tx_body(
+                 let mut mar_r: Option<i64> = None;
+                 let mut indent: Option<i64> = None;
+                 let mut space_line: Option<SpaceLine> = None;
++                let mut space_before: Option<i64> = None;
++                let mut space_after: Option<i64> = None;
+                 let mut runs: Vec<ShapeTextRun> = Vec::new();
+                 for pc in c.children().filter(|n| n.is_element()) {
+                     match pc.tag_name().name() {
+@@ -939,6 +950,39 @@ pub(crate) fn parse_tx_body(
+                             {
+                                 space_line = ooxml_common::text::parse_lnspc(ln_spc);
+                             }
++                            let parse_space = |name: &str| -> Option<i64> {
++                                pc.children()
++                                    .find(|n| n.is_element() && n.tag_name().name() == name)
++                                    .and_then(|spacing| {
++                                        spacing.children().find(|n| {
++                                            n.is_element() && n.tag_name().name() == "spcPts"
++                                        })
++                                    })
++                                    .and_then(|points| points.attribute("val"))
++                                    .and_then(|value| value.parse().ok())
++                            };
++                            space_before = parse_space("spcBef");
++                            space_after = parse_space("spcAft");
++                        }
++                        "fld" => {
++                            let text = pc
++                                .descendants()
++                                .find(|n| n.is_element() && n.tag_name().name() == "t")
++                                .and_then(|n| n.text())
++                                .unwrap_or_default()
++                                .to_string();
++                            if !text.is_empty() {
++                                runs.push(ShapeTextRun::Text {
++                                    text,
++                                    bold: false,
++                                    italic: false,
++                                    size: 0.0,
++                                    color: None,
++                                    font_face: None,
++                                    font_face_ea: None,
++                                    font_face_cs: None,
++                                });
++                            }
+                         }
+                         "r" => {
+                             // Run text + run-level formatting.
+@@ -957,9 +1001,11 @@ pub(crate) fn parse_tx_body(
+                             for rc in pc.children().filter(|n| n.is_element()) {
+                                 match rc.tag_name().name() {
+                                     "rPr" => {
+-                                        bold = rc.attribute("b").map(|v| v == "1").unwrap_or(false);
+-                                        italic =
+-                                            rc.attribute("i").map(|v| v == "1").unwrap_or(false);
++                                        let xml_bool = |name: &str| {
++                                            matches!(rc.attribute(name), Some("1" | "true" | "on"))
++                                        };
++                                        bold = xml_bool("b");
++                                        italic = xml_bool("i");
+                                         size = rc
+                                             .attribute("sz")
+                                             .and_then(|s| s.parse::<f64>().ok())
+@@ -1020,17 +1066,19 @@ pub(crate) fn parse_tx_body(
+                         _ => {}
+                     }
+                 }
+-                if !runs.is_empty() {
+-                    paragraphs.push(ShapeParagraph {
+-                        align,
+-                        rtl,
+-                        mar_l,
+-                        mar_r,
+-                        indent,
+-                        space_line,
+-                        runs,
+-                    });
+-                }
++                // Preserve empty paragraphs: their authored line box and paragraph
++                // spacing affect vertical anchoring and clipping even without runs.
++                paragraphs.push(ShapeParagraph {
++                    align,
++                    rtl,
++                    mar_l,
++                    mar_r,
++                    indent,
++                    space_line,
++                    space_before,
++                    space_after,
++                    runs,
++                });
+             }
+             _ => {}
+         }
+@@ -2242,6 +2290,9 @@ pub(crate) fn parse_ole_object_anchors(
+             edit_as: Some("twoCell".to_string()),
+             native_ext_cx: 0,
+             native_ext_cy: 0,
++            rot: 0.0,
++            flip_h: false,
++            flip_v: false,
+             image_path,
+             mime_type,
+             svg_image_path: None,
+@@ -3769,6 +3820,9 @@ mod blip_svg_tests {
+             edit_as: Some("oneCell".to_string()),
+             native_ext_cx: 300000,
+             native_ext_cy: 200000,
++            rot: 90.0,
++            flip_h: true,
++            flip_v: false,
+             image_path: "xl/media/image1.png".to_string(),
+             mime_type: "image/png".to_string(),
+             svg_image_path: Some("xl/media/image2.svg".to_string()),
+@@ -3782,6 +3836,9 @@ mod blip_svg_tests {
+         assert!(json.contains("\"svgImagePath\":\"xl/media/image2.svg\""));
+         assert!(json.contains("\"nativeExtCx\":300000"));
+         assert!(json.contains("\"nativeExtCy\":200000"));
++        assert!(json.contains("\"rot\":90.0"));
++        assert!(json.contains("\"flipH\":true"));
++        assert!(json.contains("\"flipV\":false"));
+         assert!(!json.contains("dataUrl"), "must not emit dataUrl: {json}");
+         assert!(!json.contains(";base64,"), "must not inline base64: {json}");
+     }
+diff --git a/packages/xlsx/parser/src/types.rs b/packages/xlsx/parser/src/types.rs
+index 3905b48..4f17e21 100644
+--- a/packages/xlsx/parser/src/types.rs
++++ b/packages/xlsx/parser/src/types.rs
+@@ -956,6 +956,12 @@ pub struct ShapeParagraph {
+     /// byte-identical (additive).
+     #[serde(skip_serializing_if = "Option::is_none")]
+     pub space_line: Option<SpaceLine>,
++    /// `<a:spcBef>/<a:spcPts@val>` in hundredths of a point.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub space_before: Option<i64>,
++    /// `<a:spcAft>/<a:spcPts@val>` in hundredths of a point.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub space_after: Option<i64>,
+     pub runs: Vec<ShapeTextRun>,
+ }
+ 
+@@ -1219,6 +1225,11 @@ pub struct ImageAnchor {
+     /// `editAs == "oneCell"`. 0 = absent / use from/to rect.
+     pub native_ext_cx: i64,
+     pub native_ext_cy: i64,
++    /// Picture-local DrawingML transform. Rotation is normalized from OOXML
++    /// 1/60000-degree units; reflections are applied around the anchor center.
++    pub rot: f64,
++    pub flip_h: bool,
++    pub flip_v: bool,
+     /// Zip path of the blip inside the package (e.g. `xl/media/image1.png`).
+     /// The blip's own `r:embed` raster fallback when an svgBlip extension is
+     /// present; otherwise the only source. Falls back to the SVG part itself
+diff --git a/packages/xlsx/src/index.ts b/packages/xlsx/src/index.ts
+index 575c43b..f647db2 100644
+--- a/packages/xlsx/src/index.ts
++++ b/packages/xlsx/src/index.ts
+@@ -254,3 +254,7 @@ export type {
+   ChartManualLayout,
+   LegendManualLayout,
+ } from './types.js';
++
++// Grid geometry, exported so a host can map a cell range onto the rendered raster
++// without re-deriving column widths. The crop step needs exactly this.
++export { getGridGeometryForWorksheet, HEADER_W, HEADER_H } from './renderer.js';
+diff --git a/packages/xlsx/src/internal/grid-axis-geometry.ts b/packages/xlsx/src/internal/grid-axis-geometry.ts
+index 62f8feb..fc4700a 100644
+--- a/packages/xlsx/src/internal/grid-axis-geometry.ts
++++ b/packages/xlsx/src/internal/grid-axis-geometry.ts
+@@ -11,6 +11,8 @@ export class GridAxisGeometry {
+     toPx: (raw: number) => number,
+     private readonly maxIndex: number,
+     sortedPixels?: readonly { index: number; px: number }[],
++    private readonly scaleSource?: GridAxisGeometry,
++    private readonly scaleFactor = 1,
+   ) {
+     this.defaultPx = Number.isFinite(defaultPx) && defaultPx >= 0 ? defaultPx : 0;
+     this.indices = sortedPixels
+@@ -43,6 +45,9 @@ export class GridAxisGeometry {
+   }
+ 
+   offsetOf(index: number): number {
++    if (this.scaleSource) {
++      return Math.round(this.scaleSource.offsetOf(index) * this.scaleFactor);
++    }
+     return (index - 1) * this.defaultPx + this.deltaBefore(index);
+   }
+ 
+@@ -71,13 +76,12 @@ export class GridAxisGeometry {
+   scaled(scale: number): GridAxisGeometry {
+     return new GridAxisGeometry(
+       {},
+-      Math.round(this.defaultPx * scale),
++      0,
+       (value) => value,
+       this.maxIndex,
+-      this.indices.map((index, position) => ({
+-        index,
+-        px: Math.round(this.customPx[position] * scale),
+-      })),
++      [],
++      this,
++      scale,
+     );
+   }
+ 
+diff --git a/packages/xlsx/src/internal/grid-geometry.test.ts b/packages/xlsx/src/internal/grid-geometry.test.ts
+index 07ef458..e9e7d37 100644
+--- a/packages/xlsx/src/internal/grid-geometry.test.ts
++++ b/packages/xlsx/src/internal/grid-geometry.test.ts
+@@ -68,6 +68,36 @@ describe('GridGeometry', () => {
+     expect(geometry.axesAtScale(1)).not.toBe(first);
+   });
+ 
++  it('scales cumulative boundaries without accumulating per-band rounding', () => {
++    const axis = new GridAxisGeometry({}, 29, (value) => value, 100);
++
++    for (const scale of [0.1, 1 / 3, 0.5, 0.75, 1.25, 2]) {
++      const scaled = axis.scaled(scale);
++      expect(scaled.offsetOf(91)).toBe(Math.round(axis.offsetOf(91) * scale));
++      for (const index of [1, 2, 37, 90]) {
++        expect(scaled.sizeOf(index)).toBe(
++          scaled.offsetOf(index + 1) - scaled.offsetOf(index),
++        );
++      }
++    }
++  });
++
++  it('scales mixed custom and hidden bands from shared cumulative boundaries', () => {
++    const axis = new GridAxisGeometry(
++      { 2: 0, 4: 41, 9: 13 },
++      29,
++      (value) => value,
++      12,
++    );
++    const scaled = axis.scaled(0.46);
++
++    for (let index = 1; index <= 13; index++) {
++      expect(scaled.offsetOf(index)).toBe(Math.round(axis.offsetOf(index) * 0.46));
++    }
++    expect(scaled.sizeOf(2)).toBe(0);
++    expect(scaled.indexAt(scaled.offsetOf(4))).toEqual({ index: 4, partial: 0 });
++  });
++
+   it('measures MDW once per worksheet geometry lifetime', () => {
+     let canvases = 0;
+     vi.stubGlobal('OffscreenCanvas', class {
+@@ -152,36 +182,20 @@ describe('GridGeometry', () => {
+     });
+ 
+     const sp = (value: number) => Math.round(value * scale);
+-    const defaultCol = sp(colWidthToPx(ws.defaultColWidth, getMdwForWorksheet(ws)));
+-    const defaultRow = sp(rowHeightToPx(ws.defaultRowHeight));
+-    const scaledCol = (index: number) => sp(colWidthToPx(ws.colWidths[index] ?? ws.defaultColWidth, getMdwForWorksheet(ws)));
+-    const scaledRow = (index: number) => sp(rowHeightToPx(ws.rowHeights[index] ?? ws.defaultRowHeight));
+-    const sparseColDelta = [1, 2, 4]
+-      .reduce((sum, index) => sum + scaledCol(index) - defaultCol, 0);
+-    const sparseRowDelta = [1, 2, 5]
+-      .reduce((sum, index) => sum + scaledRow(index) - defaultRow, 0);
+-    const frozenW = scaledCol(1) + scaledCol(2);
+-    const frozenH = scaledRow(1) + scaledRow(2);
+     const scaledColAxis = geometry.col.scaled(scale);
+     const scaledRowAxis = geometry.row.scaled(scale);
+     const scaledColStart = scaledColAxis.indexAt(scrollX + scaledColAxis.offsetOf(3));
+     const scaledRowStart = scaledRowAxis.indexAt(scrollY + scaledRowAxis.offsetOf(3));
+-    const expectedX = sp(48) + frozenW - scaledColStart.partial
+-      + (16_384 - 1) * defaultCol + sparseColDelta
+-      - ((scaledColStart.index - 1) * defaultCol
+-        + [1, 2, 4].filter((index) => index < scaledColStart.index)
+-          .reduce((sum, index) => sum + scaledCol(index) - defaultCol, 0));
+-    const expectedY = sp(24) + frozenH - scaledRowStart.partial
+-      + (1_048_576 - 1) * defaultRow + sparseRowDelta
+-      - ((scaledRowStart.index - 1) * defaultRow
+-        + [1, 2, 5].filter((index) => index < scaledRowStart.index)
+-          .reduce((sum, index) => sum + scaledRow(index) - defaultRow, 0));
++    const expectedX = sp(48) + scaledColAxis.offsetOf(3) - scaledColStart.partial
++      + scaledColAxis.offsetOf(16_384) - scaledColAxis.offsetOf(scaledColStart.index);
++    const expectedY = sp(24) + scaledRowAxis.offsetOf(3) - scaledRowStart.partial
++      + scaledRowAxis.offsetOf(1_048_576) - scaledRowAxis.offsetOf(scaledRowStart.index);
+ 
+     expect(rect).toEqual({
+       x: expectedX,
+       y: expectedY,
+-      w: scaledCol(16_384),
+-      h: scaledRow(1_048_576),
++      w: scaledColAxis.sizeOf(16_384),
++      h: scaledRowAxis.sizeOf(1_048_576),
+     });
+   });
+ 
+diff --git a/packages/xlsx/src/renderer.ts b/packages/xlsx/src/renderer.ts
+index 5b7ac15..51e03cf 100644
+--- a/packages/xlsx/src/renderer.ts
++++ b/packages/xlsx/src/renderer.ts
+@@ -4308,12 +4308,6 @@ function renderImages(
+     // anchor was saved with editAs="oneCell" Excel preserves the picture's
+     // saved EMU size (<xdr:spPr><a:xfrm><a:ext>) regardless of cell
+     // resizing, and the to anchor is only updated to track that fixed size.
+-    // Use the native ext directly so the rendered image matches Excel even
+-    // when our column-width / row-height computation diverges slightly from
+-    // Excel's (e.g. row ht is stored as px in this viewer but Excel applies
+-    // pt→px for some files). Falls back to the from/to-derived rect for
+-    // editAs="twoCell" (default, image resizes with cells) and absolute
+-    // anchors, or when the parser couldn't capture the native ext.
+     let imgW: number, imgH: number;
+     if (usesNativeOneCellExtent(anchor)) {
+       imgW = (anchor.nativeExtCx * cs) / EMU_PER_PX;
+@@ -4341,13 +4335,24 @@ function renderImages(
+     // composites over the cells beneath it. Saved/restored so it never leaks
+     // into a later anchor's draw.
+     const paint = () => {
++      const rot = anchor.rot ?? 0;
++      const transformed = rot !== 0 || anchor.flipH === true || anchor.flipV === true;
++      if (transformed) {
++        ctx.save();
++        ctx.translate(canvasX + imgW / 2, canvasY + imgH / 2);
++        ctx.rotate((rot * Math.PI) / 180);
++        ctx.scale(anchor.flipH ? -1 : 1, anchor.flipV ? -1 : 1);
++      }
++      const x = transformed ? -imgW / 2 : canvasX;
++      const y = transformed ? -imgH / 2 : canvasY;
+       if (img) {
+-        drawImageCropped(ctx, img, anchor.srcRect, canvasX, canvasY, imgW, imgH);
++        drawImageCropped(ctx, img, anchor.srcRect, x, y, imgW, imgH);
+       } else {
+         paintOptionalImagePlaceholder(ctx, 'tiff', {
+-          x: canvasX, y: canvasY, width: imgW, height: imgH,
++          x, y, width: imgW, height: imgH,
+         });
+       }
++      if (transformed) ctx.restore();
+     };
+     if (anchor.alpha != null && anchor.alpha < 1) {
+       ctx.save();
+@@ -4517,7 +4522,7 @@ function drawShape(
+             break;
+         }
+       }
+-      fillAndStroke(ctx, shape, sw, sh);
++      fillAndStroke(ctx, shape, sw, sh, cs);
+     }
+   } else if (shape.geom.type === 'preset') {
+     // Drive the shape off the ECMA-376 §20.1.9 spec-driven preset engine
+@@ -4538,7 +4543,7 @@ function drawShape(
+       shape.rot,
+     );
+     const applyAndStroke = shape.strokeColor && shape.strokeWidth > 0
+-      ? () => strokeShapePath(ctx, shape, sw, sh)
++      ? () => strokeShapePath(ctx, shape, sw, sh, cs)
+       : null;
+     const drawn = renderPresetShape(
+       ctx,
+@@ -4557,7 +4562,7 @@ function drawShape(
+     if (!drawn) {
+       ctx.beginPath();
+       ctx.rect(0, 0, sw, sh);
+-      fillAndStroke(ctx, shape, sw, sh);
++      fillAndStroke(ctx, shape, sw, sh, cs);
+     }
+   } else if (shape.geom.type === 'image') {
+     // Image leaf inside a group (e.g. a sun-emoji clip-art nested in the
+@@ -4734,7 +4739,7 @@ export function drawShapeText(
+   // margin, plus the first-line indent on a paragraph's first line). `availW` = the
+   // width of the alignment region for this line (paraW, minus the first-line
+   // indent on the first line). ECMA-376 §21.1.2.2.7 (marL/marR/indent).
+-  type Line = { segs: Seg[]; align: string; height: number; ascent: number; hasMath: boolean; leftInset: number; availW: number };
++  type Line = { segs: Seg[]; align: string; height: number; ascent: number; hasMath: boolean; leftInset: number; availW: number; before: number; after: number };
+ 
+   // Font string + px size for a text run (math runs have no run-level font).
+   const textFont = (run: Extract<import('./types.js').ShapeTextRun, { type: 'text' }>): { font: string; px: number } => {
+@@ -4788,6 +4793,15 @@ export function drawShapeText(
+     let lineHeight = 0;
+     let lineAscent = 0;
+     let hasMath = false;
++    const spaceBeforePx = p.spaceBefore != null
++      ? (p.spaceBefore / 100) * PT_TO_PX * cs
++      : 0;
++    const spaceAfterPx = p.spaceAfter != null
++      ? (p.spaceAfter / 100) * PT_TO_PX * cs
++      : 0;
++    // Paragraph spacing is attached to the first/last line below after wrapping.
++    const paragraphSpacingBefore = spaceBeforePx;
++    const paragraphSpacingAfter = spaceAfterPx;
+     // ECMA-376 §21.1.2.2.5 <a:lnSpc> + §21.1.2.1.3 normAutofit lnSpcReduction.
+     // An explicitly authored spcPct uses the natural 1.2×em line base; the
+     // document-font design floor is reserved for omitted line spacing. spcPts
+@@ -4842,7 +4856,7 @@ export function drawShapeText(
+         lineAscent = measuredAscent(`${fallbackPx}px ${fontStackFor(lastTextFace)}`, fallbackPx);
+       }
+       lineHeight = applyLineSpacing(lineHeight);
+-      lines.push({ segs, align, height: lineHeight, ascent: lineAscent, hasMath, leftInset: lineLeftInset(), availW: lineAvailW() });
++      lines.push({ segs, align, height: lineHeight, ascent: lineAscent, hasMath, leftInset: lineLeftInset(), availW: lineAvailW(), before: lines.length === 0 ? paragraphSpacingBefore : 0, after: paragraphSpacingAfter });
+       firstLineDone = true;
+       segs = []; lineW = 0; lineHeight = 0; lineAscent = 0; hasMath = false;
+     };
+@@ -4876,7 +4890,7 @@ export function drawShapeText(
+           // Apply the paragraph's line spacing to a display equation's own line
+           // too (a block equation in a pct-spaced paragraph). ascent is kept
+           // unchanged; the alphabetic-baseline draw distributes the extra leading.
+-          lines.push({ segs: [{ kind: 'math', render, color, w, ascent, descent }], align, height: applyLineSpacing(ascent + descent), ascent, hasMath: true, leftInset: marLpx, availW: paraW });
++          lines.push({ segs: [{ kind: 'math', render, color, w, ascent, descent }], align, height: applyLineSpacing(ascent + descent), ascent, hasMath: true, leftInset: marLpx, availW: paraW, before: lines.length === 0 ? paragraphSpacingBefore : 0, after: paragraphSpacingAfter });
+           firstLineDone = true;
+           continue;
+         }
+@@ -4977,7 +4991,7 @@ export function drawShapeText(
+   }
+ 
+   // Total text block height
+-  const blockH = lines.reduce((s, l) => s + l.height, 0);
++  const blockH = lines.reduce((s, l) => s + l.height + l.before + l.after, 0);
+ 
+   // Vertical anchor — ECMA-376 §20.1.7.2 <a:bodyPr anchor>.
+   // For 'ctr' we intentionally skip Math.max(0,...) so the block stays
+@@ -4988,6 +5002,7 @@ export function drawShapeText(
+ 
+   let lineTop = y0;
+   for (const line of lines) {
++    lineTop += line.before;
+     const totalW = line.segs.reduce((s, seg) => s + seg.w, 0);
+     // Per-line region: the left edge is padLeft + the paragraph's left inset
+     // (marL, plus first-line indent on the first line), and alignment happens
+@@ -5042,7 +5057,7 @@ export function drawShapeText(
+         x += seg.w;
+       }
+     }
+-    lineTop += line.height;
++    lineTop += line.height + line.after;
+   }
+ }
+ 
+@@ -5051,6 +5066,7 @@ function fillAndStroke(
+   shape: ShapeInfo,
+   width: number,
+   height: number,
++  cs: number,
+ ): void {
+   const fill = shape.fill ?? (shape.fillColor
+     ? { fillType: 'solid' as const, color: shape.fillColor }
+@@ -5060,7 +5076,7 @@ function fillAndStroke(
+     ctx.fillStyle = paint;
+     ctx.fill();
+   }
+-  strokeShapePath(ctx, shape, width, height);
++  strokeShapePath(ctx, shape, width, height, cs);
+ }
+ 
+ function shapeStroke(shape: ShapeInfo): Stroke | null {
+@@ -5086,10 +5102,11 @@ function strokeShapePath(
+   shape: ShapeInfo,
+   width: number,
+   height: number,
++  cs: number,
+ ): void {
+   const stroke = shapeStroke(shape);
+   if (!stroke) return;
+-  applyStroke(ctx, stroke, 1 / EMU_PER_PX);
++  applyStroke(ctx, stroke, cs / EMU_PER_PX);
+   if (stroke.fill) {
+     const paint = resolveFill(stroke.fill, ctx, 0, 0, width, height, shape.rot);
+     if (paint) ctx.strokeStyle = paint;
+diff --git a/packages/xlsx/src/types.ts b/packages/xlsx/src/types.ts
+index 0e96d85..cad4723 100644
+--- a/packages/xlsx/src/types.ts
++++ b/packages/xlsx/src/types.ts
+@@ -590,6 +590,10 @@ export interface ShapeParagraph {
+   /** `<a:pPr>/<a:lnSpc>` line spacing (ECMA-376 §21.1.2.2.5). Direct-only;
+    *  omitted when unset. */
+   spaceLine?: SpaceLine | null;
++  /** `<a:spcBef>/<a:spcPts@val>` in hundredths of a point. */
++  spaceBefore?: number | null;
++  /** `<a:spcAft>/<a:spcPts@val>` in hundredths of a point. */
++  spaceAfter?: number | null;
+   runs: ShapeTextRun[];
+ }
+ 
+@@ -723,6 +727,10 @@ export interface ImageAnchor {
+    *  size. Authoritative when `editAs === "oneCell"`. 0 = unavailable. */
+   nativeExtCx: number;
+   nativeExtCy: number;
++  /** Picture-local DrawingML transform applied around the anchor center. */
++  rot?: number;
++  flipH?: boolean;
++  flipV?: boolean;
+   /** Zip path of the blip inside the package (e.g. `xl/media/image1.png`). The
+    *  blip's own `r:embed` raster fallback when an svgBlip extension is present;
+    *  otherwise the only source. Falls back to the SVG part itself when the

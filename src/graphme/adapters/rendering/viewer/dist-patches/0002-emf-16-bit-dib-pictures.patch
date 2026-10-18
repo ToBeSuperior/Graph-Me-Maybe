@@ -1,0 +1,15 @@
+--- a/dist/plot-area-frame-D5hEOgkJ.js	2026-09-21 00:56:13
++++ b/dist/plot-area-frame-D5hEOgkJ.js	2026-09-21 00:56:31
+@@ -70,6 +70,12 @@
+ 			for (let t = 0; t < f; t++) {
+ 				let n = a + t * 3;
+ 				_(i, t, e.getUint8(n + 2), e.getUint8(n + 1), e.getUint8(n), 255);
++			}
++			v = !0;
++		} else if (c === 16) {
++			for (let t = 0; t < f; t++) {
++				let n = a + t * 2, $p = e.getUint8(n) | e.getUint8(n + 1) << 8, $r = $p >> 10 & 31, $g = $p >> 5 & 31, $b = $p & 31;
++				_(i, t, $r << 3 | $r >> 2, $g << 3 | $g >> 2, $b << 3 | $b >> 2, 255);
+ 			}
+ 			v = !0;
+ 		} else if (c === 8 && g) {

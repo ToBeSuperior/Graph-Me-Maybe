@@ -1,0 +1,22 @@
+--- a/packages/core/src/image/dib.ts	2026-09-21 01:00:13
++++ b/packages/core/src/image/dib.ts	2026-09-21 01:00:13
+@@ -118,6 +118,19 @@
+         putPx(dstRow, x, dv.getUint8(o + 2), dv.getUint8(o + 1), dv.getUint8(o), 255);
+       }
+       anyAlpha = true;
++    } else if (biBitCount === 16) {
++      // 16bpp BI_RGB is RGB555 -- one 5-bit channel each, high bit unused. A photograph
++      // pasted from a 16-bit display arrives this way inside a metafile, and without this
++      // the whole picture is dropped while the metafile's lines and text still draw.
++      for (let x = 0; x < width; x++) {
++        const o = rowOff + x * 2;
++        const px = dv.getUint8(o) | (dv.getUint8(o + 1) << 8);
++        const r5 = (px >> 10) & 0x1f;
++        const g5 = (px >> 5) & 0x1f;
++        const b5 = px & 0x1f;
++        putPx(dstRow, x, (r5 << 3) | (r5 >> 2), (g5 << 3) | (g5 >> 2), (b5 << 3) | (b5 >> 2), 255);
++      }
++      anyAlpha = true;
+     } else if (biBitCount === 8 && palette) {
+       for (let x = 0; x < width; x++) {
+         const idx = dv.getUint8(rowOff + x);

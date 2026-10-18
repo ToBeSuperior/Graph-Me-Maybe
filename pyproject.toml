@@ -1,0 +1,81 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "graph-me-maybe"
+version = "0.1.0"
+description = "Graph-Me-Maybe: local-first multimodal graph RAG over documents"
+readme = "README.md"
+license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE.md", "THIRD_PARTY_NOTICES.md"]
+requires-python = ">=3.11"
+authors = [{ name = "Graph-Me-Maybe contributors" }]
+dependencies = [
+  "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
+  "matplotlib>=3.10,<4",
+  "numpy>=2.2,<3",
+  "Pillow>=11,<13",
+  "openpyxl>=3.1,<4",
+  "pydantic>=2.11,<3",
+  "python-docx>=1.2,<2",
+  "python-multipart>=0.0.20,<1",
+  "python-pptx>=1.0,<2",
+  "PyMuPDF>=1.26,<2",
+  "PyYAML>=6.0,<7",
+  "typer>=0.16,<1",
+  "uvicorn>=0.35,<1",
+  "neo4j>=6.4.0",
+  "neo4j-graphrag[openai]>=1.22.0",
+  "olefile>=0.47",
+  "playwright>=1.55,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.17,<2",
+  "pytest>=8.4,<9",
+  "pytest-asyncio>=1.1,<2",
+  "ruff>=0.12,<1",
+  "types-PyYAML>=6.0.12,<7",
+]
+
+[project.scripts]
+graphme = "graphme.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/graphme"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["openpyxl.*", "olefile"]
+ignore_missing_imports = true
+
+# pymupdf ships without types.
+[[tool.mypy.overrides]]
+module = ["graphme.samples"]
+disallow_untyped_calls = false
+warn_return_any = false
+
+# tests/public/ (with tests/fakes/) is the suite that ships: invented data only, no key, no
+# Neo4j, no network. The rest of tests/ is the local experiment space, gitignored, since what
+# it asserts is measured from source documents.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+  "offline: runs without network or external providers",
+  "e2e: exercises a process-level product workflow",
+]

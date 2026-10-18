@@ -1,0 +1,134 @@
+diff --git a/packages/core/src/chart/plot-groups.test.ts b/packages/core/src/chart/plot-groups.test.ts
+new file mode 100644
+index 00000000..8669d461
+--- /dev/null
++++ b/packages/core/src/chart/plot-groups.test.ts
+@@ -0,0 +1,28 @@
++import { expect, test } from 'vitest';
++import type { ChartModel } from '../types/chart.js';
++import { classicPlotDispatch } from './plot-groups.js';
++
++function combo(secondaryCatHidden: boolean): ChartModel {
++  return {
++    chartType: 'clusteredBar',
++    series: [{}, {}, {}, {}],
++    secondaryCatAxis: { hidden: secondaryCatHidden },
++    secondaryValAxis: { hidden: false },
++    plotGroups: [
++      { kind: 'bar', seriesStart: 0, seriesCount: 2, barDirection: 'col',
++        categoryAxis: 'secondary', valueAxis: 'secondary', seriesAxis: 'none' },
++      { kind: 'line', seriesStart: 2, seriesCount: 2,
++        categoryAxis: 'primary', valueAxis: 'primary', seriesAxis: 'none' },
++    ],
++  } as unknown as ChartModel;
++}
++
++test('columns on a hidden secondary category axis combine with a primary line', () => {
++  // Office draws the columns against the same categories as the line: the secondary
++  // category axis is deleted, so it has no layout of its own to measure.
++  expect(classicPlotDispatch(combo(true))).toBe('bar-combo');
++});
++
++test('a visible secondary category axis stays outside the combined painter', () => {
++  expect(classicPlotDispatch(combo(false))).toBe('unsupported');
++});
+diff --git a/packages/core/src/chart/plot-groups.ts b/packages/core/src/chart/plot-groups.ts
+index e3a87a44..3b126694 100644
+--- a/packages/core/src/chart/plot-groups.ts
++++ b/packages/core/src/chart/plot-groups.ts
+@@ -151,9 +151,14 @@ export function classicPlotDispatch(chart: ChartModel): ClassicPlotDispatch {
+     // The retained Office boundary covers the ordinary bar+line pair and the
+     // common two-column-group + one-line-group form. Keep larger/unrelated
+     // scenes explicit until their z-order and axis ownership are observed.
++    // A secondary category axis that is deleted has no layout of its own: Office
++    // draws its group against the primary categories (the common "columns on the
++    // secondary axis, line on the primary" combo).
++    const onPrimaryCategories = (group: ChartPlotGroup) => group.categoryAxis === 'primary'
++      || (group.categoryAxis === 'secondary' && chart.secondaryCatAxis?.hidden === true);
+     if (barGroups.length <= 2 && lineGroups.length === 1 && groups.length <= 3
+       && directions.size === 1
+-      && groups.every(group => group.categoryAxis === 'primary')) {
++      && groups.every(onPrimaryCategories)) {
+       return 'bar-combo';
+     }
+     return 'unsupported';
+diff --git a/packages/ooxml-common/src/chart.rs b/packages/ooxml-common/src/chart.rs
+index 9d0dc9b4..19601b0a 100644
+--- a/packages/ooxml-common/src/chart.rs
++++ b/packages/ooxml-common/src/chart.rs
+@@ -11206,6 +11206,37 @@ pub fn parse_chart_part_with_references_style_parts_and_images(
+         .as_ref()
+         .and_then(ax_id_of)
+         .filter(|id| Some(id) != primary_category_axis_id.as_ref());
++    // Two category axes on one side are still told apart by the value axis each
++    // crosses. Office's "columns on the secondary axis" combo lists its deleted
++    // secondary category axis at the bottom beside the primary one; `crossAx` pairs
++    // each with exactly one of the already-distinct primary/secondary value axes.
++    // Only that exact pairing, agreeing with the public slots, lifts the ambiguity.
++    if let (Some(primary_cat), Some(secondary_cat), Some(primary_val), Some(secondary_val)) = (
++        primary_category_axis_id.clone(),
++        secondary_category_axis_id.clone(),
++        val_ax.as_ref().and_then(ax_id_of),
++        secondary_val_ax.as_ref().and_then(ax_id_of),
++    ) {
++        let crossed = |axis_id: &str| {
++            plot_axis_nodes
++                .iter()
++                .find(|axis| ax_id_of(axis).as_deref() == Some(axis_id))
++                .and_then(|axis| child(*axis, "crossAx"))
++                .and_then(|node| attr(&node, "val"))
++                .and_then(|value| parse_chart_axis_id_value(&value))
++        };
++        if primary_val != secondary_val
++            && !ambiguous_axis_ids.contains(&primary_val)
++            && !ambiguous_axis_ids.contains(&secondary_val)
++            && ambiguous_axis_ids.contains(&primary_cat)
++            && ambiguous_axis_ids.contains(&secondary_cat)
++            && crossed(&primary_cat).as_deref() == Some(primary_val.as_str())
++            && crossed(&secondary_cat).as_deref() == Some(secondary_val.as_str())
++        {
++            ambiguous_axis_ids.remove(&primary_cat);
++            ambiguous_axis_ids.remove(&secondary_cat);
++        }
++    }
+     let mut primary_value_axis_id = val_ax.as_ref().and_then(ax_id_of);
+     let mut secondary_value_axis_id = secondary_val_ax
+         .as_ref()
+@@ -16430,6 +16461,37 @@ Subtitle</a:t></a:r></a:p>
+         assert_eq!(right.max, Some(1.0));
+     }
+ 
++    #[test]
++    fn parse_chart_part_two_bottom_category_axes_resolve_by_crossed_value_axis() {
++        // Office's "columns on the secondary axis, line on the primary" combo lists
++        // both category axes at the bottom and deletes the secondary one. Their side
++        // is shared, but each one crosses exactly one value axis, and that pairing
++        // is what makes one primary and the other secondary.
++        let xml = format!(
++            r#"<c:chartSpace xmlns:c="{C_NS}" xmlns:a="{A_NS}"><c:chart><c:plotArea>
++              <c:barChart><c:barDir val="col"/><c:grouping val="clustered"/>
++                <c:ser><c:idx val="0"/><c:val><c:numLit><c:ptCount val="1"/><c:pt idx="0"><c:v>5</c:v></c:pt></c:numLit></c:val></c:ser>
++                <c:axId val="30"/><c:axId val="40"/></c:barChart>
++              <c:lineChart><c:grouping val="standard"/>
++                <c:ser><c:idx val="1"/><c:val><c:numLit><c:ptCount val="1"/><c:pt idx="0"><c:v>1</c:v></c:pt></c:numLit></c:val></c:ser>
++                <c:axId val="10"/><c:axId val="20"/></c:lineChart>
++              <c:catAx><c:axId val="10"/><c:axPos val="b"/><c:crossAx val="20"/></c:catAx>
++              <c:valAx><c:axId val="20"/><c:axPos val="l"/><c:crossAx val="10"/></c:valAx>
++              <c:valAx><c:axId val="40"/><c:axPos val="r"/><c:crossAx val="30"/><c:crosses val="max"/></c:valAx>
++              <c:catAx><c:axId val="30"/><c:delete val="1"/><c:axPos val="b"/><c:crossAx val="40"/></c:catAx>
++            </c:plotArea></c:chart></c:chartSpace>"#,
++        );
++        let doc = chart_space_of(&xml);
++        let model = parse_chart_part(doc.root_element(), &FixtureResolver).expect("combo parses");
++        let groups = model.plot_groups.expect("plot groups");
++
++        assert_eq!(groups[0].category_axis, "secondary");
++        assert_eq!(groups[0].value_axis, "secondary");
++        assert_eq!(groups[1].category_axis, "primary");
++        assert_eq!(groups[1].value_axis, "primary");
++        assert!(model.secondary_cat_axis.expect("secondary category axis").hidden);
++    }
++
+     #[test]
+     fn parse_category_axis_label_alignment_and_offset_contracts() {
+         let parse_axis = |axis_name: &str, authored: &str| {

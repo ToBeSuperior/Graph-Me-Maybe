@@ -1,0 +1,10 @@
+# Fast checks at commit time; mypy and the tests run in CI (.github/workflows/ci.yml).
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff check
+        entry: uv run --extra dev ruff check
+        language: system
+        types: [python]
+        files: ^(src|tests/public)/

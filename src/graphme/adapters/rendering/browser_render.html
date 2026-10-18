@@ -1,0 +1,193 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>ooxml render</title>
+<style>body{margin:0}#stage{position:fixed;left:-100000px;top:0}</style></head>
+<body><div id="s">loading</div><div id="stage"></div>
+<script type="module">
+const qs = new URLSearchParams(location.search);
+const kind = qs.get('kind'), width = Number(qs.get('width') || 1400), dpr = Number(qs.get('dpr') || 2);
+const stage = document.querySelector('#stage');
+// Browsers blank a canvas past these caps, so shrink the raster, never the layout.
+const MAX_DIM = 32767, MAX_AREA = 1 << 24;
+const fitScale = (want, w, h) =>
+  Math.min(want, MAX_DIM / w, MAX_DIM / h, Math.sqrt(MAX_AREA / (w * h)));
+
+try {
+  const pages = [];
+  const canvas = document.createElement('canvas');
+  stage.appendChild(canvas);
+
+  if (kind === 'xlsx') {
+    const m = await import('./xlsx/index.mjs');
+    const plan = await fetch('./plan.json').then(r => r.json());
+    const margin = Math.max(0, Math.round(plan.margin_pixels || 0));
+    const white = Math.max(0, Math.round(plan.white_margin_pixels || 0));
+    const open = () => m.XlsxWorkbook.load('./sample.xlsx', {mode: 'main', cjkFallback: 'kr'});
+    let wb = await open();
+
+    for (const sheet of plan.sheets) {
+      let ws;
+      try {
+        ws = await wb.getWorksheet(sheet.index);
+      } catch (e) {
+        // A sheet past the viewer's hard limits (a long data log) cannot be drawn, and a
+        // picture of it would be too tall to read anyway. It goes without a page; the
+        // workbook's other sheets, and its cells, are still read.
+        if (!/OoxmlResourceLimitError/.test(String(e && e.name || '') + String(e))) throw e;
+        console.warn(`sheet ${sheet.name} not drawn: ${e.message || e}`);
+        // The workbook keeps counting what the refused sheet loaded, and every sheet after
+        // it is refused too; a fresh one starts the count again.
+        wb = await open();
+        continue;
+      }
+      if (ws.name !== sheet.name) throw new Error(`sheet identity mismatch ${sheet.index}`);
+      const ax = m.getGridGeometryForWorksheet(ws).axesAtScale(1);
+
+      // Draw a margin of REAL neighbouring cells, sized in pixels off the true column
+      // widths, so a measured range that under-reached shows what it missed.
+      const back = (axis, index) =>
+        Math.max(1, axis.indexAt(Math.max(0, axis.offsetOf(index) - margin)).index);
+      const drawn = margin === 0 ? sheet : {
+        min_row: back(ax.row, sheet.min_row), min_col: back(ax.col, sheet.min_col),
+        max_row: sheet.max_row + ax.row.countToCover(sheet.max_row + 1, margin),
+        max_col: sheet.max_col + ax.col.countToCover(sheet.max_col + 1, margin),
+      };
+
+      const nw = ax.col.offsetOf(drawn.max_col + 1) - ax.col.offsetOf(drawn.min_col) + m.HEADER_W;
+      const nh = ax.row.offsetOf(drawn.max_row + 1) - ax.row.offsetOf(drawn.min_row) + m.HEADER_H;
+      const scale = Math.min(1, 2200 / Math.max(1, nw), 1600 / Math.max(1, nh));
+      const cw = Math.max(1, Math.ceil(nw * scale)), ch = Math.max(1, Math.ceil(nh * scale));
+      const sheetDpr = fitScale(Number(plan.render_scale) || dpr, cw + white * 2, ch + white * 2);
+
+      const inner = document.createElement('canvas');
+      inner.width = cw; inner.height = ch;
+      await wb.renderViewport(inner, sheet.index,
+        {row: drawn.min_row, col: drawn.min_col,
+         rows: drawn.max_row - drawn.min_row + 1, cols: drawn.max_col - drawn.min_col + 1},
+        {width: cw, height: ch, dpr: sheetDpr, cellScale: scale, freezeRows: 0, freezeCols: 0});
+
+      // A blank border outside the cells, so nothing sits flush against the frame even
+      // where the sheet itself ends.
+      let out = inner;
+      if (white > 0) {
+        out = document.createElement('canvas');
+        out.width = inner.width + white * 2; out.height = inner.height + white * 2;
+        const ctx = out.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, out.width, out.height);
+        ctx.drawImage(inner, white, white);
+      }
+
+      // Record where each boundary landed, so a cell range crops by lookup.
+      const edges = (axis, first, last, header) => {
+        const origin = axis.offsetOf(first);
+        const map = {};
+        for (let i = first; i <= last + 1; i++) {
+          map[i] = Math.round((axis.offsetOf(i) - origin + header) * scale * sheetDpr) + white;
+        }
+        return map;
+      };
+      pages.push({
+        index: sheet.index, width: out.width, height: out.height, label: ws.name,
+        scale, dpr: sheetDpr,
+        columnEdges: edges(ax.col, drawn.min_col, drawn.max_col, m.HEADER_W),
+        rowEdges: edges(ax.row, drawn.min_row, drawn.max_row, m.HEADER_H),
+        dataUrl: out.toDataURL('image/png'),
+      });
+    }
+  } else {
+    const m = await import(`./dist/${kind}.mjs`);
+    const Viewer = kind === 'docx' ? m.DocxViewer : m.PptxViewer;
+    const buf = await fetch(`./sample.${kind}`).then(r => r.arrayBuffer());
+    const v = new Viewer(canvas, {width, devicePixelRatio: dpr});
+    await v.load(buf);
+    // The viewer draws; a second document of its own is what can say where things
+    // landed. Both formats need it and both viewers take ownership of their buffer.
+    let presentation = null, flow = null, flowSize = null;
+    if (kind === 'pptx' && m.PptxPresentation) {
+      try {
+        const own = await fetch(`./sample.${kind}`).then(r => r.arrayBuffer());
+        presentation = await m.PptxPresentation.load(own);
+        if (presentation.waitUntilLayoutComplete) await presentation.waitUntilLayoutComplete();
+      } catch (e) { presentation = null; }
+    }
+    if (kind === 'docx' && m.DocxDocument) {
+      try {
+        const own = await fetch(`./sample.${kind}`).then(r => r.arrayBuffer());
+        flow = await m.DocxDocument.load(own);
+        if (flow.waitUntilLayoutComplete) await flow.waitUntilLayoutComplete();
+        flowSize = await flow.pageSize(0, {width});
+      } catch (e) { flow = null; }
+    }
+    if (v.waitUntilLayoutComplete) await v.waitUntilLayoutComplete();
+    const count = kind === 'docx' ? v.pageCount : v.slideCount;
+    for (let i = 0; i < count; i++) {
+      if (kind === 'docx') await v.goToPage(i); else await v.goToSlide(i);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      // Where the glyphs actually landed. A text box is sized for the words it could
+      // hold, not the words it holds, so its own rectangle reaches past them.
+      let runs = [], elements = [];
+      if (kind === 'docx' && flow) {
+        // A flow document states no coordinates: the layout decides them. Runs carry the
+        // body index they came from, so a paragraph, and a table through its cells, is
+        // found by grouping on it. A drawing has no runs and is found by asking the page
+        // what sits at a point -- only where no text does, since that is where one can be.
+        try {
+          const collected = await flow.collectPageRuns(i, {width});
+          runs = collected.map(run => ({
+            story: run.source ? run.source.story : null,
+            instance: run.source ? run.source.storyInstance : null,
+            path: run.source ? run.source.path : [],
+            text: run.text,
+            x: run.x, y: run.y, w: run.w, h: run.h,
+          }));
+          const scale = canvas.width / flowSize.widthPt;   // pt to the pixels drawn
+          const covered = (xPt, yPt) => runs.some(r =>
+            xPt * scale >= r.x && xPt * scale <= r.x + r.w &&
+            yPt * scale >= r.y && yPt * scale <= r.y + r.h);
+          const found = new Map();
+          const inside = (b, xPt, yPt) => b &&
+            xPt >= b.xPt && xPt <= b.xPt + b.widthPt &&
+            yPt >= b.yPt && yPt <= b.yPt + b.heightPt;
+          for (let yPt = 4; yPt < flowSize.heightPt; yPt += 8) {
+            for (let xPt = 4; xPt < flowSize.widthPt; xPt += 8) {
+              if (covered(xPt, yPt)) continue;
+              let hit = false;
+              for (const e of found.values()) if (inside(e.bounds, xPt, yPt)) { hit = true; break; }
+              if (hit) continue;
+              let ctx = null;
+              try { ctx = await flow.getElementContextAt(i, {xPt, yPt}, {width}); } catch (e) { continue; }
+              if (!ctx || !ctx.bounds) continue;
+              found.set(`${ctx.elementType}:${ctx.elementIndex}`, ctx);
+            }
+          }
+          elements = [...found.values()].map(ctx => ({
+            kind: ctx.elementType,
+            story: ctx.source ? ctx.source.story : null,
+            instance: ctx.source ? ctx.source.storyInstance : null,
+            path: ctx.source ? ctx.source.path : [],
+            text: (ctx.text || '').slice(0, 200),
+            x: ctx.bounds.xPt * scale, y: ctx.bounds.yPt * scale,
+            w: ctx.bounds.widthPt * scale, h: ctx.bounds.heightPt * scale,
+          }));
+        } catch (e) { runs = []; elements = []; }
+      }
+      if (kind === 'pptx' && presentation) {
+        try {
+          runs = (await presentation.collectSlideRuns(i, canvas.width / dpr)).map(run => ({
+            shapeId: run.shapeId == null ? null : String(run.shapeId),
+            text: run.text,
+            x: (run.shapeX + run.inShapeX) * dpr,
+            y: (run.shapeY + run.inShapeY) * dpr,
+            w: run.w * dpr,
+            h: run.h * dpr,
+          }));
+        } catch (e) { runs = []; }  // no run information is not a render failure
+      }
+      pages.push({index: i, width: canvas.width, height: canvas.height, dpr,
+                  textRuns: runs, elements, dataUrl: canvas.toDataURL('image/png')});
+    }
+  }
+  window.__pages = pages;
+  document.querySelector('#s').textContent = `ready ${pages.length}`;
+} catch (e) { window.__error = String(e && e.stack || e); document.querySelector('#s').textContent = 'ERR'; }
+window.__ready = true;
+</script></body></html>

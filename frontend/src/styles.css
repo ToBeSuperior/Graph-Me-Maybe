@@ -1,0 +1,137 @@
+@import "tailwindcss";
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
+@import "@fontsource-variable/geist-mono";
+
+/* Light or dark: the system's unless the reader picked one (data-theme on <html>). Every
+   colour the app uses is one of these tokens, so a theme is the tokens swapped and nothing
+   else. Grays are one cool scale, steps by role -- 1-2 backgrounds, 3-5 surfaces, 6-8 lines,
+   11-12 text -- and the accent is one indigo. The three relations (cites, cited by, similar)
+   and the three hops are each one hue at the same lightness, so none reads as louder. */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+:root {
+  color-scheme: light;
+  --gray-1: #fcfcfd; --gray-2: #f9f9fb; --gray-3: #f0f0f3; --gray-4: #e8e8ec;
+  --gray-5: #e0e1e6; --gray-6: #d9d9e0; --gray-7: #cdced6; --gray-8: #b9bbc6;
+  --gray-9: #8b8d98; --gray-10: #80838d; --gray-11: #60646c; --gray-12: #1c2024;
+  --accent-3: #eef0ff; --accent-4: #e0e4ff; --accent-6: #c3c9ff; --accent-9: #4f46e5;
+  --accent-10: #4338ca; --accent-11: #4338ca; --accent-contrast: #ffffff;
+  --danger-3: #fff0f0; --danger-6: #fbc8c8; --danger-9: #dc2626; --danger-11: #b91c1c;
+  --ok-9: #16a34a; --warn-9: #d97706;
+  --hop-1: #10a37f; --hop-2: #3b82f6; --hop-3: #a855f7;
+  --rel-cites: #3b82f6; --rel-cited: #f59e0b; --rel-similar: #a855f7;
+  --mark: #fde68a;
+  --panel: #ffffff;
+  --shadow-pop: 0 10px 38px -10px rgb(22 23 24 / 0.25), 0 10px 20px -15px rgb(22 23 24 / 0.2);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --gray-1: #111113; --gray-2: #18191b; --gray-3: #212225; --gray-4: #272a2d;
+  --gray-5: #2e3135; --gray-6: #363a3f; --gray-7: #43484e; --gray-8: #5a6169;
+  --gray-9: #696e77; --gray-10: #777b84; --gray-11: #b0b4ba; --gray-12: #edeef0;
+  --accent-3: #1f1d3d; --accent-4: #272457; --accent-6: #3b3a8a; --accent-9: #6366f1;
+  --accent-10: #818cf8; --accent-11: #a5b4fc; --accent-contrast: #ffffff;
+  --danger-3: #3b1219; --danger-6: #72232d; --danger-9: #e5484d; --danger-11: #ff9592;
+  --ok-9: #30a46c; --warn-9: #f5a524;
+  --hop-1: #34d399; --hop-2: #60a5fa; --hop-3: #c084fc;
+  --rel-cites: #60a5fa; --rel-cited: #fbbf24; --rel-similar: #c084fc;
+  --mark: #6b5414;
+  --panel: #18191b;
+  --shadow-pop: 0 10px 38px -10px rgb(0 0 0 / 0.6), 0 10px 20px -15px rgb(0 0 0 / 0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --gray-1: #111113; --gray-2: #18191b; --gray-3: #212225; --gray-4: #272a2d;
+    --gray-5: #2e3135; --gray-6: #363a3f; --gray-7: #43484e; --gray-8: #5a6169;
+    --gray-9: #696e77; --gray-10: #777b84; --gray-11: #b0b4ba; --gray-12: #edeef0;
+    --accent-3: #1f1d3d; --accent-4: #272457; --accent-6: #3b3a8a; --accent-9: #6366f1;
+    --accent-10: #818cf8; --accent-11: #a5b4fc; --accent-contrast: #ffffff;
+    --danger-3: #3b1219; --danger-6: #72232d; --danger-9: #e5484d; --danger-11: #ff9592;
+    --ok-9: #30a46c; --warn-9: #f5a524;
+    --hop-1: #34d399; --hop-2: #60a5fa; --hop-3: #c084fc;
+    --rel-cites: #60a5fa; --rel-cited: #fbbf24; --rel-similar: #c084fc;
+    --mark: #6b5414;
+    --panel: #18191b;
+    --shadow-pop: 0 10px 38px -10px rgb(0 0 0 / 0.6), 0 10px 20px -15px rgb(0 0 0 / 0.5);
+  }
+}
+
+@theme inline {
+  --font-sans: "Pretendard Variable", Pretendard, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, monospace;
+  --color-bg: var(--gray-1);
+  --color-subtle: var(--gray-2);
+  --color-panel: var(--panel);
+  --color-surface: var(--gray-3);
+  --color-hover: var(--gray-4);
+  --color-active: var(--gray-5);
+  --color-line: var(--gray-6);
+  --color-line-strong: var(--gray-7);
+  --color-faint: var(--gray-9);
+  --color-muted: var(--gray-11);
+  --color-fg: var(--gray-12);
+  --color-accent: var(--accent-9);
+  --color-accent-hover: var(--accent-10);
+  --color-accent-fg: var(--accent-11);
+  --color-accent-soft: var(--accent-3);
+  --color-accent-line: var(--accent-6);
+  --color-on-accent: var(--accent-contrast);
+  --color-danger: var(--danger-9);
+  --color-danger-fg: var(--danger-11);
+  --color-danger-soft: var(--danger-3);
+  --color-danger-line: var(--danger-6);
+  --color-ok: var(--ok-9);
+  --color-warn: var(--warn-9);
+  --color-hop-1: var(--hop-1);
+  --color-hop-2: var(--hop-2);
+  --color-hop-3: var(--hop-3);
+  --color-cites: var(--rel-cites);
+  --color-cited: var(--rel-cited);
+  --color-similar: var(--rel-similar);
+  --color-mark: var(--mark);
+  --shadow-pop: var(--shadow-pop);
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 28px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "ss06";
+  }
+  :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: 4px; }
+  ::selection { background: var(--color-accent-soft); }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+}
+
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.skeleton { position: relative; overflow: hidden; background: var(--color-surface); border-radius: var(--radius-md); }
+.skeleton::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-panel) 60%, transparent), transparent);
+  animation: shimmer 1.4s infinite;
+}
+@media (prefers-reduced-motion: reduce) { .skeleton::after { animation: none; } }
+
+/* An answer's own words: paragraphs and lists the model wrote, at reading size. */
+.prose-answer p { margin: 0 0 0.6em; }
+.prose-answer p:last-child { margin-bottom: 0; }

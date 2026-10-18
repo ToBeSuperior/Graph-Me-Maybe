@@ -1,0 +1,95 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+dist/
+build/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local application data
+.graphme/
+.graphme-*/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Local agent and session state
+.claude/
+.omc/
+
+# npm lockfile stub at the repository root (the frontend keeps its own)
+/package-lock.json
+
+# Frontend dependencies and generated output
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/*.tsbuildinfo
+
+# Local experiment space. The repository carries finalized code and the method behind
+# it. Anything measured from a source document -- ranges, counts, labels, timings -- is
+# information about that document and stays on the machine that measured it.
+# tests/public/ and tests/fakes/ hold invented data only and are tracked.
+/tests/*
+!/tests/__init__.py
+!/tests/public/
+!/tests/fakes/
+/docs/progress-local.md
+
+# Data sources, fixtures, and generated results
+/test_dataset/
+/data/
+/datasets/
+/input/
+/inputs/
+/output/
+/outputs/
+/results/
+/artifacts/
+/reports/
+/docs/evidence/
+
+# Keep empty directory placeholders when intentionally added
+!**/.gitkeep
+
+# Office temporary lock files
+~$*.xlsx
+~$*.xls
+~$*.docx
+~$*.pptx
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+.cache/
+
+# Point-in-time copies taken before a revert; local only.
+/.local-backup-*/
