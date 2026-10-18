@@ -2,8 +2,8 @@
 // inside them bold, italics, code and the [file] it cites. Parsed into plain parts the page draws
 // as elements of its own -- nothing in the text is ever taken as HTML.
 
-export type Inline = { kind: 'text' | 'strong' | 'em' | 'code' | 'cite'; text: string };
-export type Block =
+type Inline = { kind: 'text' | 'strong' | 'em' | 'code' | 'cite'; text: string };
+type Block =
   | { kind: 'p'; text: string }
   | { kind: 'h'; level: number; text: string }
   | { kind: 'ul' | 'ol'; items: string[] }

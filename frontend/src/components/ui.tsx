@@ -25,7 +25,7 @@ const SIZE: Record<Size, string> = {
   'icon-sm': 'h-7 w-7 rounded-md',
 };
 
-export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
   size?: Size;
   busy?: boolean;

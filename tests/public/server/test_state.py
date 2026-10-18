@@ -304,7 +304,7 @@ def test_what_the_state_refuses_it_refuses_without_http(demo: Demo, tmp_path: Pa
 
 def test_the_graph_space_is_the_one_connection_the_api_holds(demo: Demo, space: FakeSpace) -> None:
     """One Neo4j connection for the server: the state's space is its GraphMe's."""
-    assert demo.space() is space is demo.graph._graph_space()
+    assert demo.space() is space is demo.graph.graph_space()
 
 
 

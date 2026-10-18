@@ -93,9 +93,9 @@ def test_explicit_environment_does_not_load_dotenv(
     assert load_settings(environ={}).profile == "local"
 
 
-def test_non_integer_budget_is_rejected() -> None:
+def test_non_integer_setting_is_rejected() -> None:
     with pytest.raises(ValueError, match="must be an integer"):
-        load_settings(environ={"GRAPHME_NODE_BUDGET": "many"})
+        load_settings(environ={"GRAPHME_RRF_K": "many"})
 
 
 def test_viewer_settings_are_typed_and_overridable(tmp_path: Path) -> None:
@@ -115,21 +115,6 @@ def test_viewer_settings_are_typed_and_overridable(tmp_path: Path) -> None:
 
 def test_viewer_directory_defaults_to_the_cache_location() -> None:
     assert load_settings(environ={}).viewer_directory.name == "ooxml-viewer"
-
-
-def test_hierarchy_mode_defaults_to_off_and_is_switchable() -> None:
-    # The derived outline costs a model call per sheet, so it is opt-in; left off, the
-    # index holds no outline rather than a guessed one.
-    assert load_settings(environ={}).hierarchy_mode == "off"
-    assert (
-        load_settings(environ={"GRAPHME_HIERARCHY_MODE": "derived"}).hierarchy_mode
-        == "derived"
-    )
-
-
-def test_an_unknown_hierarchy_mode_is_refused() -> None:
-    with pytest.raises(ValueError):
-        load_settings(environ={"GRAPHME_HIERARCHY_MODE": "whatever"})
 
 
 def test_a_calibrated_model_gets_its_floor(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -179,3 +164,19 @@ def test_a_plain_http_address_on_another_machine_is_refused() -> None:
 
 def test_a_server_on_this_machine_is_accepted() -> None:
     assert Settings(base_url="http://127.0.0.1:8000/v1").base_url == "http://127.0.0.1:8000/v1"
+
+
+def test_every_command_draws_with_the_viewer_the_installer_put_in_the_app_home(
+    tmp_path: Path,
+) -> None:
+    # `graphme build-graph` after an install looked in the cache, found no viewer there, and
+    # every DOCX, PPTX and XLSX failed to draw; only `graphme app` knew the home's viewer.
+    home = tmp_path / "home"
+    (home / "viewer" / "dist").mkdir(parents=True)
+
+    assert load_settings({"GRAPHME_HOME": str(home)}).viewer_directory == home / "viewer"
+    named = load_settings({"GRAPHME_HOME": str(home), "GRAPHME_VIEWER_DIR": str(tmp_path)})
+    assert named.viewer_directory == tmp_path
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert load_settings({"GRAPHME_HOME": str(empty)}).viewer_directory != empty / "viewer"

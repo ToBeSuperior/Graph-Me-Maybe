@@ -30,7 +30,7 @@ Neo4j가 있으면 `GRAPHME_NEO4J_TEST=1 uv run pytest tests/public`으로 그�
 
 ## 테스트가 있는 곳
 
-`tests/public/`이 이 저장소의 테스트이고, `tests/fakes/`는 그 테스트가 쓰는 가짜 임베더·생성기·문서입니다.
+`tests/public/`이 이 저장소의 테스트이고, `tests/fakes/`는 그 테스트가 쓰는 가짜 문서와 코퍼스 도우미입니다.
 모델은 `httpx.MockTransport`가 대신 답하고, 문서는 테스트 안에서 PyMuPDF·python-docx·openpyxl·python-pptx로
 만듭니다(`tests/public/test_read.py`). `tests/` 아래 나머지는 저장소에 올라가지 않습니다.
 

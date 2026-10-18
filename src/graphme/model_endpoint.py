@@ -26,13 +26,9 @@ PROVIDERS = {
 }
 EMBEDDERS = {
     "openai": Embedder(base_url="https://api.openai.com/v1", key_env="OPENAI_API_KEY",
-                       model="text-embedding-3-large", dimensions=3072,
-                       tokens_per_input=8_191, tokens_per_request=300_000,
-                       inputs_per_request=2_048),
+                       model="text-embedding-3-large", dimensions=3072),
     "gemini": Embedder(base_url=_GEMINI, key_env="GEMINI_API_KEY",
-                       model="gemini-embedding-001", dimensions=3072,
-                       tokens_per_input=2_048, tokens_per_request=204_800,
-                       inputs_per_request=100),
+                       model="gemini-embedding-001", dimensions=3072),
 }
 KEY_REQUIRED = True
 """A hosted API refuses every call without one, so a missing key is said at startup."""

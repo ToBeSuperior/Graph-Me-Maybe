@@ -22,7 +22,7 @@ def test_documents_go_in_leave_and_export(tmp_path: Path) -> None:
     doc = _document(f"a{tag}", f"invented-{tag}.docx",
                     [(f"a{tag}-1", NodeType.TEXT_CHUNK, f"invented text {tag}")], [])
     with graphme.GraphMe() as g:
-        g._graph_space().put_document(doc)
+        g.graph_space().put_document(doc)
         try:
             assert g.documents()[f"a{tag}"] == f"invented-{tag}.docx"
             assert g.export(tmp_path / "bundle", documents=[f"a{tag}"]) == 1

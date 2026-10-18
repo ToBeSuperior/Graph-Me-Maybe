@@ -8,9 +8,8 @@
 
 ## 지금 상태 한 줄
 
-추출 → 브라우저 렌더 → 유닛 크롭 → (선택)VLM 계층 → 인덱스 → 질의가 end-to-end로
-돌고, VLM 계층은 워크시트·슬라이드·DOCX·PDF를 모두 처리한다. 기본값은
-`GRAPHME_HIERARCHY_MODE=off`.
+추출 → 브라우저 렌더 → 유닛 크롭 → VLM 계층 → 그래프 공간 → 질문이 end-to-end로
+돌고, VLM 계층은 워크시트·슬라이드·DOCX·PDF를 모두 처리한다.
 
 ## 0 · 다음 계획 (2026-10-15)
 
@@ -84,9 +83,9 @@
 - [ ] provider 기반 실행 전에 명시적 운영 승인을 받는다.
 - [ ] 모델 endpoint가 의도한 곳(`model_endpoint.py`)을 가리키는지 확인하고, 새로 만든 합성·
       비기밀 문서만 쓴다.
-- [ ] `ingest → inspect → query`를 돌리고 결과를 정제해 기록한다 — 준비 상태, 구조 카운트,
+- [ ] `build-graph → embed-graph → ask`를 돌리고 결과를 정제해 기록한다 — 준비 상태, 구조 카운트,
       인용 해소, provider·모델 식별자. secret과 raw provider 내용은 기록하지 않는다.
-- [ ] 임베딩만 성공한 관측을 VLM ingest·query 품질 주장으로 섞지 않는다.
+- [ ] 임베딩만 성공한 관측을 VLM 읽기·질문 품질 주장으로 섞지 않는다.
 
 ## 5 · 브라우저 자동화 확장
 

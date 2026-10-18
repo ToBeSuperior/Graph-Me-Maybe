@@ -88,7 +88,7 @@ class GraphMe:
         documents_at(path)  # refused before a connection or a model call
         return build_corpus_graph(
             path, client=self._http(), settings=self.settings, on_step=on_step, again=again,
-            space=self._graph_space(),
+            space=self.graph_space(),
         )
 
     def embed(self, *, on_progress: Callable[[int, int], None] | None = None) -> int:
@@ -105,7 +105,7 @@ class GraphMe:
 
     def documents(self) -> dict[str, str]:
         """Every document in the space: id -> file name."""
-        space = self._graph_space()
+        space = self.graph_space()
         return space.files(space.document_ids())
 
     def delete(self, document_ids: Sequence[str]) -> None:
@@ -114,15 +114,15 @@ class GraphMe:
             raise TypeError(f"delete takes a list of ids, not one string: {document_ids!r}")
         if not document_ids:
             return
-        held = self._graph_space().files(document_ids)
+        held = self.graph_space().files(document_ids)
         missing = [i for i in document_ids if i not in held]
         if missing:
             raise KeyError(f"not in the graph space: {', '.join(missing)}")
-        forget_documents(self._graph_space(), list(document_ids))
+        forget_documents(self.graph_space(), list(document_ids))
 
     def reset(self) -> int:
         """Every document deleted, the indexes kept; how many were deleted."""
-        return self._graph_space().reset()
+        return self.graph_space().reset()
 
     def export(
         self, target: str | Path, *, dump: bool = False, documents: Sequence[str] | None = None
@@ -131,7 +131,7 @@ class GraphMe:
         `dump` one `.dump` file (needs Docker). `documents` limits it to those, linked only
         among themselves. How many documents were written."""
         target = Path(target)
-        rows = self._graph_space().corpus_rows(list(documents) if documents is not None else None)
+        rows = self.graph_space().corpus_rows(list(documents) if documents is not None else None)
         if not dump:
             write_import_bundle(rows, target)
             return rows.documents
@@ -140,14 +140,14 @@ class GraphMe:
             create_neo4j_admin(self.settings).dump(Path(folder), target)
         return rows.documents
 
-    def _graph_space(self) -> Neo4jGraphSpace:
+    def graph_space(self) -> Neo4jGraphSpace:
         if self._space is None:
             self._space = create_graph_space(self.settings)
         return self._space
 
     def _graph_rag(self) -> GraphRag:
         if self._rag is None:
-            self._rag = create_graph_rag(self.settings, self._graph_space(), client=self._http())
+            self._rag = create_graph_rag(self.settings, self.graph_space(), client=self._http())
         return self._rag
 
     def _http(self) -> httpx.Client:

@@ -280,7 +280,6 @@ class BrowserOfficeRenderer:
             raise ValueError("device pixel ratio must be positive")
         if timeout_seconds <= 0:
             raise ValueError("render timeout must be positive")
-        self._viewer_directory = viewer_directory
         self._device_pixel_ratio = device_pixel_ratio
         self._margin_pixels = margin_pixels
         self._white_margin_pixels = white_margin_pixels

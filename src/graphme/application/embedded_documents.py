@@ -425,3 +425,12 @@ def _owners(extracted: ExtractedDocument, source: Path) -> dict[str, str]:
     sheets = {node.locator.sheet: node.id for node in extracted.nodes
               if node.type is NodeType.WORKSHEET}
     return {part: sheets[name] for part, name in parts if name in sheets}
+
+
+_DIGEST = re.compile(r"\.emb[0-9a-f]{8}(?=\.[A-Za-z0-9]{1,8}\b)")
+
+
+def shown_name(text: str) -> str:
+    """File names as a reader knows them: an attachment's digest (`embedded_name`) tells two
+    files apart for the program and stays in the API, but means nothing printed."""
+    return _DIGEST.sub("", text)

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph-me-maybe"
-version = "0.1.4"
+version = "0.1.5"
 description = "Graph-Me-Maybe: local-first multimodal graph RAG over documents"
 readme = "README.md"
 license = "LicenseRef-PolyForm-Noncommercial-1.0.0"

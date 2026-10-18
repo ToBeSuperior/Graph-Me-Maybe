@@ -22,8 +22,6 @@ class NodeType(StrEnum):
     HEADING = "heading"
     TEXT_CHUNK = "text_chunk"
     IMAGE = "image"
-    AUDIO = "audio"
-    VIDEO = "video"
     CAPTION = "caption"
     VLM_ENRICHED_CAPTION = "vlm_enriched_caption"
     EXTERNAL_DOCUMENT = "external_document"
@@ -49,29 +47,6 @@ class EdgeType(StrEnum):
     SAME_AS = "SAME_AS"
 
 
-class HierarchyProjection(StrEnum):
-    OWNERSHIP = "ownership"
-    OUTLINE = "outline"
-    LAYOUT = "layout"
-    ORDER = "order"
-    CONTINUATION = "continuation"
-    ASSOCIATION = "association"
-
-
-class AssertionStatus(StrEnum):
-    ACCEPTED = "accepted"
-    ALTERNATIVE = "alternative"
-    AMBIGUOUS = "ambiguous"
-    REJECTED = "rejected"
-
-
-class AuthorityClass(StrEnum):
-    NATIVE_EXPLICIT = "native_explicit"
-    NATIVE_INFERRED = "native_inferred"
-    RENDERED_GEOMETRY = "rendered_geometry"
-    GENERATED = "generated"
-
-
 class EvidenceKind(StrEnum):
     SOURCE_TEXT = "source_text"
     SOURCE_VALUES = "source_values"
@@ -93,45 +68,7 @@ class SemanticUnitKind(StrEnum):
     HEADING = "heading"
 
 
-class RelationBasis(StrEnum):
-    HIERARCHY = "hierarchy"
-    DOCUMENT_SEQUENCE = "document_sequence"
-    TEMPORAL = "temporal"
-    EXPLICIT_REFERENCE = "explicit_reference"
-    UNRESOLVED = "unresolved"
-
-
-class CaptionStatus(StrEnum):
-    PENDING = "pending"
-    VALID = "valid"
-    INVALID = "invalid"
-
-
-class IngestionStatus(StrEnum):
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-
-
 class Severity(StrEnum):
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
-
-
-class EmbeddingInputType(StrEnum):
-    DOCUMENT = "document"
-    QUERY = "query"
-
-
-class SubgraphTemplate(StrEnum):
-    HIERARCHY = "hierarchy_context"
-    FORMULA_DEPENDENCY = "formula_dependency_context"
-    VISUAL_REFERENCE = "visual_reference_context"
-    OUTLINE = "outline_context"
-    REGION = "region_context"
-    READING_ORDER = "reading_order_context"
-    CONTINUATION = "continuation_context"
-    ASSOCIATION = "association_context"
-    RETRIEVAL_VIEW = "retrieval_view_context"

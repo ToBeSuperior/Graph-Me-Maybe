@@ -15,12 +15,10 @@ import uvicorn
 from fastapi import APIRouter, FastAPI, HTTPException
 from pydantic import BaseModel
 
-from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.config import Settings, load_settings
-from graphme.runtime import create_browser_renderer
 from graphme.samples import write_samples
 from graphme.server import create_app
-from graphme.server.app import WEB
+from graphme.server.app import WEB, make_demo
 from graphme.server.models import BuildState
 from graphme.server.settings import preflight
 from graphme.server.state import BUILDING, Demo
@@ -50,8 +48,8 @@ def samples(demo: Demo) -> APIRouter:
 
 
 def demo_settings(environ: dict[str, str] | None = None) -> Settings:
-    """The settings ingest reads, but two readings of every page and ten minutes to draw one
-    unless they say otherwise -- where this demo differs from ingest on purpose."""
+    """The settings build-graph reads, but two readings of every page and ten minutes to draw
+    one unless they say otherwise -- where this demo differs from build-graph on purpose."""
     settings = load_settings(environ)
     update: dict[str, Any] = {}
     if "hierarchy_readings" not in settings.model_fields_set:
@@ -75,10 +73,7 @@ def run(port: int, web: Path | None, *, on_ready: Callable[[], None] | None = No
     settings = demo_settings()
     for problem in preflight(settings):
         logging.warning("준비 안 됨: %s", problem)
-    # ponytail: one work folder for every process on this data_dir, no lock -- two running at
-    # once share (and can overwrite) its uploads; a folder per process if that is wanted.
-    demo = Demo(settings, PageRenderer(browser=create_browser_renderer(settings)),
-                root=settings.data_dir.resolve() / "server")
+    demo = make_demo(settings)
 
     def warm() -> None:
         # The graph space -- its Neo4j started on first use -- opened while the page loads.

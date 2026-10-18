@@ -27,7 +27,7 @@ def main() -> None:
         raise SystemExit(str(error)) from None
     print(answer.text)
     for source in answer.sources:
-        print(f"- {source.file} ({source.score:.2f})")
+        print(f"- {graphme.shown_name(source.file)} ({source.score:.2f})")
 
 
 if __name__ == "__main__":

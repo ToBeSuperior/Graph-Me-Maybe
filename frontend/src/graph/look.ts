@@ -15,7 +15,7 @@ const KIND: Record<string, string> = {
   VlmEnrichedCaption: '#D9C8AE', ExternalDocument: '#ECB5C9',
 };
 export const colorOf = (kind: string) => KIND[kind] ?? '#A5ABB6';
-export const INK = '#1F2125';
+const INK = '#1F2125';
 
 /** How deep a node sits is how pale it is: its kind's colour at the root, mixed toward white one
  * step per level, so the outline reads from the strong centre out to the pale edge. */
@@ -26,7 +26,7 @@ export function shade(hex: string, depth: number, deepest: number) {
   return `#${rgb.map((c) => Math.round(c + (255 - c) * k).toString(16).padStart(2, '0')).join('')}`;
 }
 
-export interface EdgeStyle { color: string; width: number; dashes: boolean | number[]; on: boolean; name: string }
+interface EdgeStyle { color: string; width: number; dashes: boolean | number[]; on: boolean; name: string }
 
 /** The outline's lines and the ties drawn over it. `color` is a token or a colour. */
 export const EDGE: Record<string, EdgeStyle> = {

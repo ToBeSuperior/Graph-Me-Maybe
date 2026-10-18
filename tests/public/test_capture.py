@@ -73,6 +73,7 @@ def test_module_scripts_and_wasm_are_typed_whatever_the_system_says(
 def test_no_browser_to_start_is_said_with_what_to_install(tmp_path: Path) -> None:
     source = tmp_path / "invented.docx"
     source.write_bytes(b"not read")
+    (tmp_path / "dist").mkdir()  # a viewer, so what is missing is only the browser
     with pytest.raises(RuntimeError, match="playwright install chromium"):
         browser_capture.capture("docx", source, tmp_path / "work", width=800, dpr=1,
                                 bundle=tmp_path, browser_path=str(tmp_path / "no-chrome"))
@@ -123,3 +124,13 @@ def test_chrome_elsewhere_keeps_its_own_fonts(tmp_path: Path) -> None:
 
     assert browser_capture.font_environment(tmp_path, platform="darwin") is None
     assert browser_capture.font_environment(tmp_path, platform="win32") is None
+
+
+def test_a_missing_viewer_is_named_before_any_browser_starts(tmp_path: Path) -> None:
+    # Without it the page failed with "Failed to fetch dynamically imported module".
+    source = tmp_path / "memo.docx"
+    source.write_bytes(b"invented")
+
+    with pytest.raises(RuntimeError, match="setup.sh"):
+        browser_capture.capture("docx", source, tmp_path / "work", width=800, dpr=1,
+                                bundle=tmp_path / "no-viewer", browser_path=None)

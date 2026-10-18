@@ -29,8 +29,9 @@ while :; do
   sleep 2
 done
 api -H 'content-type: application/json' -d "$(json question "$2")" "$url/v1/ask" | python3 -c '
-import json, sys
+import json, re, sys
 said = json.load(sys.stdin)
 print(said["answer"])
-for source in said["sources"]:
-    print("-", source["file"], "(%.2f)" % source["score"])'
+for source in said["sources"]:  # an attachment without the digest that tells it apart
+    print("-", re.sub(r"\.emb[0-9a-f]{8}(?=\.[A-Za-z0-9]{1,8}\b)", "", source["file"]),
+          "(%.2f)" % source["score"])'

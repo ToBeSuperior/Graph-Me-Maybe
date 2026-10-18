@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import time
@@ -12,9 +11,8 @@ import httpx
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from graphme.adapters.chat import MALFORMED, Endpoint, complete
+from graphme.adapters.chat import MALFORMED, Endpoint, complete, image_part, is_transient
 from graphme.adapters.strict_schema import strict_response_schema
-from graphme.domain.enums import SemanticUnitKind
 from graphme.domain.ids import canonical_json, sha256_bytes
 from graphme.domain.models import (
     CAPTION_CHARS,
@@ -28,14 +26,7 @@ from graphme.domain.models import (
     HierarchyScopeRequest,
     HierarchyScopeResult,
     HierarchyUnit,
-    NormalizedBBox,
-    PageSegmentationRequest,
-    PageSegmentationResult,
     ReferenceKind,
-    RelationProposal,
-    RelationRequest,
-    RelationResult,
-    SegmentedUnit,
     UnitGroupingRequest,
     UnitGroupingResult,
     UnitLabel,
@@ -48,7 +39,6 @@ from graphme.providers import Wire
 _log = logging.getLogger(__name__)
 
 HIERARCHY_PROMPT_VERSION = "derived-scope-hierarchy-v2"
-SEGMENTATION_PROMPT_VERSION = "visual-only-segmentation-v1"
 HIERARCHY_ATTEMPTS = 3
 """An answer that misses a subject is a slip in the answer, not a refusal, and losing a
 whole scope to one is too costly; ask again before giving up."""
@@ -59,47 +49,6 @@ overload comes in bursts of minutes: attempts back to back all fell inside one, 
 a malformed answer gets -- a busy endpoint says nothing about how the model reads the page."""
 _Answer = TypeVar("_Answer")
 
-# Native extraction already places text at an exact cell address, so asking the VLM
-# for it buys nothing and costs accuracy. Only geometry native cannot derive -- the
-# placement of tables, pictures and charts -- is delegated to the model.
-VISUAL_UNIT_KINDS: tuple[SemanticUnitKind, ...] = (
-    SemanticUnitKind.FIGURE,
-    SemanticUnitKind.TABLE,
-)
-# A picture or sub-table drawn inside a table is part of that table, not a unit of its
-# own. Model boxes are approximate, so near-containment counts as inside.
-NESTED_COVERAGE_THRESHOLD = 0.9
-
-
-def _area(box: NormalizedBBox) -> float:
-    return (box.x1 - box.x0) * (box.y1 - box.y0)
-
-
-def _covered_fraction(inner: NormalizedBBox, outer: NormalizedBBox) -> float:
-    width = min(inner.x1, outer.x1) - max(inner.x0, outer.x0)
-    height = min(inner.y1, outer.y1) - max(inner.y0, outer.y0)
-    if width <= 0 or height <= 0:
-        return 0.0
-    inner_area = _area(inner)
-    return 0.0 if inner_area <= 0 else (width * height) / inner_area
-
-
-def _absorb_nested_units(units: tuple[SegmentedUnit, ...]) -> tuple[SegmentedUnit, ...]:
-    """Drop every unit a larger table encloses, so a table stays one unit."""
-    tables = [unit for unit in units if unit.kind is SemanticUnitKind.TABLE]
-    if not tables:
-        return units
-    kept = []
-    for unit in units:
-        enclosed = any(
-            table is not unit
-            and _area(table.bbox) > _area(unit.bbox)
-            and _covered_fraction(unit.bbox, table.bbox) >= NESTED_COVERAGE_THRESHOLD
-            for table in tables
-        )
-        if not enclosed:
-            kept.append(unit)
-    return tuple(kept)
 HIERARCHY_CONTEXT_VERSION = "carried-outline-v2-drop"
 HIERARCHY_SCHEMA_NAME = "hierarchy_scope_result"
 CAPTION_SCHEMA_NAME = "visual_caption_result"
@@ -196,20 +145,6 @@ indentation is a sibling.
 
 Native ownership is immutable and is not the semantic outline being decided. Return only JSON
 matching the supplied schema."""
-
-
-TRANSIENT_STATUS = frozenset({408, 429, 502, 503, 504, 529})
-"""Endpoint answers that say nothing about the page (529 is Anthropic's "overloaded").
-Readings run together, so one can be turned away while the other succeeds; losing the
-whole page to that wastes the one that came back. Retried on their own schedule
-(`TRANSIENT_RETRY_DELAYS`), counted apart from the attempts a malformed answer gets."""
-
-
-def _is_transient(error: httpx.HTTPError) -> bool:
-    """A timeout or a dropped connection always; a status only when it says "not now"."""
-    if not isinstance(error, httpx.HTTPStatusError):
-        return True
-    return error.response.status_code in TRANSIENT_STATUS
 
 
 HIERARCHY_CHOICE_SCHEMA_NAME = "hierarchy_reading_choice"
@@ -392,11 +327,6 @@ transcription was not, and every retry went on the same clerical task. Eight cha
 of a UUID separate the handful of units on one sheet and are short enough to copy."""
 
 
-def short_unit_ids(units: Sequence[HierarchyUnit]) -> dict[str, str]:
-    """A short handle per unit ID, lengthened only as far as collisions require."""
-    return short_ids([unit.id for unit in units])
-
-
 def short_ids(ids: Sequence[str]) -> dict[str, str]:
     """A short handle per ID, lengthened only as far as collisions require."""
     ids = list(ids)
@@ -405,6 +335,11 @@ def short_ids(ids: Sequence[str]) -> dict[str, str]:
         if len(set(short.values())) == len(ids):
             return short
     return {node_id: node_id for node_id in ids}
+
+
+def _by_handle(short: Mapping[str, str]) -> dict[str, str]:
+    """The node ID each handle of `short_ids` stands for."""
+    return {handle: node_id for node_id, handle in short.items()}
 
 
 class _ShortIdGroup(BaseModel):
@@ -579,8 +514,7 @@ class _ShortIdReferenceResult(BaseModel):
 
     references: list[_ShortIdReference] = Field(max_length=200)
 
-    def to_reference_result(self, short: Mapping[str, str]) -> DocumentReferenceResult:
-        full = {handle: node_id for node_id, handle in short.items()}
+    def to_reference_result(self, full: Mapping[str, str]) -> DocumentReferenceResult:
         named: list[DocumentReference] = []
         for written in self.references:
             subject_id = _resolve(written.subject, full)
@@ -614,8 +548,7 @@ class _ShortIdCaptionResult(BaseModel):
 
     captions: list[_ShortIdCaption] = Field(max_length=100)
 
-    def to_caption_result(self, short: Mapping[str, str]) -> VisualCaptionResult:
-        full = {handle: node_id for node_id, handle in short.items()}
+    def to_caption_result(self, full: Mapping[str, str]) -> VisualCaptionResult:
         described: list[VisualCaption] = []
         for written in self.captions:
             subject_id = _resolve(written.subject, full)
@@ -672,10 +605,8 @@ class _ShortIdFigures(BaseModel):
 
     figures: list[_ShortIdFigure] = Field(default_factory=list, max_length=100)
 
-    def to_figure_result(self, short: Mapping[str, str]) -> FigureGroupingResult:
-        return FigureGroupingResult(
-            figures=_figure_groups(self.figures, {v: k for k, v in short.items()})
-        )
+    def to_figure_result(self, full: Mapping[str, str]) -> FigureGroupingResult:
+        return FigureGroupingResult(figures=_figure_groups(self.figures, full))
 
 
 class _ShortIdResult(BaseModel):
@@ -683,9 +614,8 @@ class _ShortIdResult(BaseModel):
 
     decisions: tuple[_ShortIdDecision, ...] = Field(min_length=1, max_length=500)
 
-    def to_scope_result(self, short: Mapping[str, str]) -> HierarchyScopeResult:
+    def to_scope_result(self, full: Mapping[str, str]) -> HierarchyScopeResult:
         """Resolve the shortened IDs back to the node IDs they were shortened from."""
-        full = {value: key for key, value in short.items()}
         decisions = []
         for decision in self.decisions:
             subject = _resolve(decision.subject, full)
@@ -713,48 +643,6 @@ class _ShortIdResult(BaseModel):
         return HierarchyScopeResult(decisions=tuple(decisions))
 
 
-class _SegmentedUnitAnswer(SegmentedUnit):
-    """A segmented unit as the model writes it: `structured_data` is JSON text. A free-form
-    JSON value is a recursive, open schema, which strict structured outputs refuse."""
-
-    structured_data: str | None = None
-
-
-class _PageSegmentationAnswer(PageSegmentationResult):
-    units: tuple[_SegmentedUnitAnswer, ...]
-
-    def to_result(self) -> PageSegmentationResult:
-        return PageSegmentationResult(
-            page_index=self.page_index,
-            units=tuple(
-                SegmentedUnit.model_validate({
-                    **unit.model_dump(exclude={"structured_data"}),
-                    "structured_data": _json_or_text(unit.structured_data),
-                })
-                for unit in self.units
-            ),
-        )
-
-
-def _json_or_text(written: str | None) -> Any:
-    """The value JSON text encodes; text that is not JSON stays text, as it was stored
-    before the wire carried it as a string."""
-    if not written:
-        return None
-    try:
-        return json.loads(written)
-    except ValueError:
-        return written
-
-
-def image_part(png: bytes) -> dict[str, Any]:
-    """A PNG as one part of a chat message."""
-    return {
-        "type": "image_url",
-        "image_url": {"url": "data:image/png;base64," + base64.b64encode(png).decode("ascii")},
-    }
-
-
 class ChatCompletionsVLMAdapter:
     def __init__(
         self,
@@ -775,104 +663,6 @@ class ChatCompletionsVLMAdapter:
     def model(self) -> str:
         return self._model
 
-    def segment_page(
-        self,
-        *,
-        request: PageSegmentationRequest,
-        image: bytes,
-    ) -> PageSegmentationResult:
-        if request.mime_type != "image/png":
-            raise ValueError("page segmentation requires a PNG image")
-        if not image:
-            raise ValueError("page segmentation image must not be empty")
-        encoded = base64.b64encode(image).decode("ascii")
-        prompt = {
-            "page_index": request.page_index,
-            "width": request.width,
-            "height": request.height,
-            "allowed_unit_kinds": [kind.value for kind in VISUAL_UNIT_KINDS],
-            "prompt_version": SEGMENTATION_PROMPT_VERSION,
-            "bbox_coordinate_system": "normalized [0,1] x0,y0,x1,y1",
-            "requirements": [
-                "Return every table, picture and chart exactly once.",
-                "Ignore text. Headings, body text, captions and memos are extracted "
-                "from the source file and must not be returned.",
-                "A chart counts as a figure.",
-                "Use unique one-based reading_order values.",
-                "Bboxes must have positive area and remain inside the page.",
-                "Do not infer source file, sheet, slide, or page identity.",
-                "interpreted_text and structured_data are generated interpretations.",
-            ],
-        }
-        generated = self._structured_completion(
-            schema_name="page_segmentation",
-            schema=strict_response_schema(_PageSegmentationAnswer),
-            system=(
-                "Locate the tables, pictures and charts on this single rendered document "
-                "page. Text is already extracted from the source file, so do not return "
-                "text units. Return only the requested JSON and never invent source identity."
-            ),
-            user_content=[
-                {"type": "text", "text": canonical_json(prompt)},
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/png;base64,{encoded}",
-                        "detail": "high",
-                    },
-                },
-            ],
-        )
-        try:
-            result = (
-                _PageSegmentationAnswer.model_validate(generated).to_result().validate_for(request)
-            )
-        except (ValidationError, ValueError, TypeError) as error:
-            raise RuntimeError("the model endpoint returned a malformed response") from error
-        # The prompt forbids text units; drop any the model returns regardless, so a
-        # single stray heading cannot poison a page the rest of which is usable.
-        visual = _absorb_nested_units(
-            tuple(unit for unit in result.units if unit.kind in VISUAL_UNIT_KINDS)
-        )
-        if len(visual) == len(result.units):
-            return result
-        return result.model_copy(update={"units": visual})
-
-    def propose_relations(
-        self,
-        *,
-        request: RelationRequest,
-    ) -> tuple[RelationProposal, ...]:
-        def read(generated: Mapping[str, Any]) -> tuple[RelationProposal, ...]:
-            answered = RelationResult.model_validate(generated)
-            if answered.request_id != request.request_id:
-                raise ValueError("relation result request ID must match request")
-            # An invented id is dropped rather than taking the answer down with it; what
-            # is kept still passes the guard that keeps invented ids out of the graph.
-            bindable = request.bindable(answered.proposals)
-            if len(bindable) != len(answered.proposals):
-                _log.warning(
-                    "%s: dropped %d relation proposal(s) naming something not supplied",
-                    request.request_id,
-                    len(answered.proposals) - len(bindable),
-                )
-            return request.validate_proposals(bindable)
-
-        # One malformed answer used to end the whole ingest here, at the last model call of
-        # it. A shape the model got wrong says nothing about the document; ask again.
-        return self._asked_until_answered(
-            schema_name="document_relations",
-            schema=strict_response_schema(RelationResult),
-            system=(
-                "Propose typed relations using only the supplied node, evidence, and page "
-                "identifiers. Every proposal needs evidence and provenance. Return only "
-                "the requested JSON. Do not create identifiers or source metadata."
-            ),
-            user_content=canonical_json(request.model_dump(mode="json")),
-            read=read,
-            failure="the model endpoint returned a malformed response",
-        )
-
     def group_page_figures(
         self,
         *,
@@ -887,7 +677,7 @@ class ChatCompletionsVLMAdapter:
         This runs first, because a figure's words stop being text once it swallows them.
         """
         self._verify_hierarchy_image(request, image)
-        short = short_unit_ids(request.units)
+        short = short_ids([unit.id for unit in request.units])
         prompt = {
             "prompt_version": HIERARCHY_PROMPT_VERSION,
             "task": "Name every group of units this page draws as one figure.",
@@ -897,7 +687,7 @@ class ChatCompletionsVLMAdapter:
         user_content = self._with_crops(request.units, image, unit_images, short, prompt)
 
         def read(generated: Mapping[str, Any]) -> FigureGroupingResult:
-            return _ShortIdFigures.model_validate(generated).to_figure_result(short)
+            return _ShortIdFigures.model_validate(generated).to_figure_result(_by_handle(short))
 
         return self._asked_until_answered(
             schema_name=FIGURES_SCHEMA_NAME,
@@ -924,7 +714,7 @@ class ChatCompletionsVLMAdapter:
         answer has to use.
         """
         self._verify_hierarchy_image(request, image)
-        short = short_unit_ids((*request.units, *request.outline))
+        short = short_ids([unit.id for unit in (*request.units, *request.outline)])
         prompt = {
             "prompt_version": HIERARCHY_PROMPT_VERSION,
             "context_version": HIERARCHY_CONTEXT_VERSION,
@@ -972,7 +762,7 @@ class ChatCompletionsVLMAdapter:
 
         def read(generated: Mapping[str, Any]) -> HierarchyScopeResult:
             answered = _ShortIdResult.model_validate(generated)
-            return answered.to_scope_result(short).validate_for(request)
+            return answered.to_scope_result(_by_handle(short)).validate_for(request)
 
         return self._asked_until_answered(
             schema_name=HIERARCHY_SCHEMA_NAME,
@@ -993,7 +783,7 @@ class ChatCompletionsVLMAdapter:
         """Describe each of a page's visuals, shown the page and a crop of each one."""
         if not image:
             raise ValueError("caption image must not be empty")
-        short = short_unit_ids(request.units)
+        short = short_ids([unit.id for unit in request.units])
         prompt = {
             "prompt_version": HIERARCHY_PROMPT_VERSION,
             "task": (
@@ -1017,7 +807,7 @@ class ChatCompletionsVLMAdapter:
 
         def read(generated: Mapping[str, Any]) -> VisualCaptionResult:
             answered = _ShortIdCaptionResult.model_validate(generated)
-            return answered.to_caption_result(short).validate_for(request)
+            return answered.to_caption_result(_by_handle(short)).validate_for(request)
 
         return self._asked_until_answered(
             schema_name=CAPTION_SCHEMA_NAME,
@@ -1056,7 +846,7 @@ class ChatCompletionsVLMAdapter:
             {"type": "text", "text": canonical_json(prompt)},
             *(image_part(image) for image in images),
         ]
-        full = {value: key for key, value in short.items()}
+        full = _by_handle(short)
 
         def read(generated: Mapping[str, Any]) -> UnitGroupingResult:
             answered = _ShortIdGroupingResult.model_validate(generated)
@@ -1086,7 +876,7 @@ class ChatCompletionsVLMAdapter:
         """
         if not image:
             raise ValueError("reference image must not be empty")
-        short = short_unit_ids(request.units)
+        short = short_ids([unit.id for unit in request.units])
         prompt = {
             "prompt_version": HIERARCHY_PROMPT_VERSION,
             "task": (
@@ -1097,7 +887,7 @@ class ChatCompletionsVLMAdapter:
 
         def read(generated: Mapping[str, Any]) -> DocumentReferenceResult:
             answered = _ShortIdReferenceResult.model_validate(generated)
-            return answered.to_reference_result(short).validate_for(request)
+            return answered.to_reference_result(_by_handle(short)).validate_for(request)
 
         return self._asked_until_answered(
             schema_name=REFERENCE_SCHEMA_NAME,
@@ -1125,7 +915,7 @@ class ChatCompletionsVLMAdapter:
         if len(candidates) < 2:
             raise ValueError("choosing a reading needs at least two of them")
         self._verify_hierarchy_image(request, image)
-        short = short_unit_ids((*request.units, *request.outline))
+        short = short_ids([unit.id for unit in (*request.units, *request.outline)])
         prompt = {
             "prompt_version": HIERARCHY_PROMPT_VERSION,
             "context_version": HIERARCHY_CONTEXT_VERSION,
@@ -1208,7 +998,7 @@ class ChatCompletionsVLMAdapter:
                     user_content=user_content,
                 )
             except httpx.HTTPError as error:
-                if not _is_transient(error):
+                if not is_transient(error):
                     raise
                 if turned_away == len(TRANSIENT_RETRY_DELAYS):
                     # Out of retries is the page going unanswered, the same as a malformed

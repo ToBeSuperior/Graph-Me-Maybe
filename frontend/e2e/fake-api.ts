@@ -2,10 +2,10 @@
 // invented documents, so the checks need no server, graph DB or model.
 import type { Page, Route } from '@playwright/test';
 
-export interface Fake { reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number }
+interface Fake { reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number }
 
 /** A job as `GET /v1/jobs` lists it, newest first. */
-export type FakeJob = Record<string, unknown> & { id: string; kind: string; state: string };
+type FakeJob = Record<string, unknown> & { id: string; kind: string; state: string };
 
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');

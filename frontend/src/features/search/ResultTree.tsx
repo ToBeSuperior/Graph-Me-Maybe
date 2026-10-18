@@ -14,7 +14,7 @@ import type { Trail, TrailEntry } from '../../lib/hops';
 export interface Row { key: string; entry: TrailEntry; level: 1 | 2 | 3; parent?: Row; index: number }
 
 /** A row's key: the ids down to it -- one document can stand in several folders. */
-export const rowKey = (parent: Row | undefined, id: string) => (parent ? `${parent.key}/${id}` : id);
+const rowKey = (parent: Row | undefined, id: string) => (parent ? `${parent.key}/${id}` : id);
 
 /** The row where a document first stands in the folders -- the shallowest, then the first --
  * with its folders above it. */

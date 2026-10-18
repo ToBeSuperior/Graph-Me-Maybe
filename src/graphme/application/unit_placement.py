@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
+from graphme.application.reading_order import stated_box
 from graphme.application.xlsx_crop_regions import PixelBox, SheetPixelGrid
 from graphme.domain.enums import NodeType
 from graphme.domain.models import GraphNode
@@ -132,15 +133,8 @@ class NormalizedBoxPlacer:
     def _frame(self, node: GraphNode) -> PixelBox | None:
         # A slide states a shape's rectangle as a fraction of the slide; a PDF states a
         # block's rectangle in points and the extraction records the fraction beside it.
-        stated = node.metadata.get("normalized_bbox")
-        bbox = (
-            tuple(float(value) for value in stated if isinstance(value, int | float))
-            if isinstance(stated, list) and len(stated) == 4
-            else node.locator.bbox
-        )
-        if bbox is not None and len(bbox) != 4:
-            return None
-        if bbox is None:
+        bbox = stated_box(node.metadata) or node.locator.bbox
+        if bbox is None or len(bbox) != 4:
             return None
         x0, y0, x1, y1 = bbox
         left, top = x0 * self._width, y0 * self._height

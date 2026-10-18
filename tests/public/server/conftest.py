@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from graphme import api
 from graphme.config import Settings
 from graphme.server import create_app
 from graphme.server.state import Demo
@@ -130,8 +131,11 @@ def admin() -> FakeAdmin:
 
 
 @pytest.fixture
-def demo(tmp_path: Path, space: FakeSpace, admin: FakeAdmin) -> Demo:
+def demo(
+    tmp_path: Path, space: FakeSpace, admin: FakeAdmin, monkeypatch: pytest.MonkeyPatch
+) -> Demo:
     """A server state over the fake space and admin, its folder under the test's own."""
+    monkeypatch.setattr(api, "create_neo4j_admin", lambda settings: admin)
     made = Demo(SETTINGS, renderer=None, root=tmp_path / "server")  # type: ignore[arg-type]
     made.graph._space = space  # type: ignore[assignment]
     made.admin = lambda: admin  # type: ignore[assignment,method-assign,return-value]

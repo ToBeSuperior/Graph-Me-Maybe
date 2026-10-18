@@ -2,7 +2,7 @@
 // each one stands on the rings or in the tree, and which outline edges a passage's span runs
 // along. Nothing here touches the page or vis, so it is checked on its own (graphLayout.test.ts).
 
-export type ParentOf = (id: string) => string | undefined;
+type ParentOf = (id: string) => string | undefined;
 
 // Every node is one size -- the rings say the level -- and only the far rings are smaller.
 // Small beside the gap between rings, so the rings and the levels they name stay in view.
@@ -14,7 +14,7 @@ export const FAN_LIMIT = 20;
 const GAP = 12;
 
 /** Each shown node's items among the shown, in the order given, and the nodes no shown node holds. */
-export function childrenOf(ids: string[], parentOf: ParentOf) {
+function childrenOf(ids: string[], parentOf: ParentOf) {
   const shown = new Set(ids);
   const kids = new Map<string, string[]>();
   const roots: string[] = [];
@@ -49,7 +49,7 @@ export function foldTree(ids: string[], parentOf: ParentOf, folding: Map<string,
   return { shown: ids.filter((id) => !gone.has(id)), folded, holds: (id: string) => kids.has(id) };
 }
 
-export interface RingPosition { x: number; y: number; depth: number; angle: number }
+interface RingPosition { x: number; y: number; depth: number; angle: number }
 
 /** A radial tree: the centre node in the middle, each level on a ring of its own. Every node
  * owns a wedge and its items are laid side by side inside it -- never crossing into a

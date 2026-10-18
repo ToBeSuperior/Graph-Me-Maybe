@@ -3,8 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 import statistics
-from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -183,10 +182,6 @@ class PDFExtractor:
     """Build an authoritative semantic graph directly from PDF native objects."""
 
     format = DocumentFormat.PDF
-    version = "5"
-    """Bumped when what is read off a page changes -- 2: a word gap with no space is a space;
-    3: the gaps of a spaced-out line are not; 4: a turned page is read as it is shown;
-    5: a lone surrogate is U+FFFD (`encodable`)."""
 
     def __init__(self, *, asset_store: AssetStore | None = None) -> None:
         self._asset_store = asset_store
@@ -229,13 +224,19 @@ class PDFExtractor:
                 raise ValueError("PDF must contain at least one page")
             # A break at the margin leaves no mark saying whether a word was cut or a
             # space was eaten. The rest of the document is the only evidence there is.
-            words_the_document_writes = _document_words(document)
-            for page_index, page in enumerate(document, start=1):
+            # Each page is read once; its text blocks are kept for the second walk, the
+            # rest of what the page holds (glyphs, images) is not.
+            page_blocks = [_text_blocks(page) for page in document]
+            words_the_document_writes = frozenset(
+                word for blocks in page_blocks for word in _written_words(blocks)
+            )
+            for page_index, (page, text_blocks) in enumerate(
+                zip(document, page_blocks, strict=True), start=1
+            ):
                 page_units, has_text = self._extract_page(
                     page=page,
                     page_index=page_index,
-                    source=source,
-                    content_hash=content_hash,
+                    text_blocks=text_blocks,
                     words_the_document_writes=words_the_document_writes,
                 )
                 units.extend(page_units)
@@ -291,15 +292,11 @@ class PDFExtractor:
         *,
         page: pymupdf.Page,
         page_index: int,
-        source: Path,
-        content_hash: str,
-        words_the_document_writes: frozenset[str] = frozenset(),
+        text_blocks: list[dict[str, Any]],
+        words_the_document_writes: frozenset[str],
     ) -> tuple[list[_NativeUnit], bool]:
-        raw = page_text(page, sort=True)
         page_width = float(page.rect.width)
         page_height = float(page.rect.height)
-        blocks = list(raw.get("blocks", ()))
-        text_blocks = [block for block in blocks if block.get("type") == 0]
         tables = self._tables_of(page, page_width, page_height)
         table_bboxes = [self._bbox(table.bbox) for table in tables]
         units: list[_NativeUnit] = []
@@ -384,12 +381,7 @@ class PDFExtractor:
             )
 
         units.extend(
-            self._extract_images(
-                page=page,
-                page_index=page_index,
-                source=source,
-                content_hash=content_hash,
-            )
+            self._extract_images(page=page, page_index=page_index)
         )
         units.sort(
             key=lambda item: (
@@ -406,10 +398,7 @@ class PDFExtractor:
         *,
         page: pymupdf.Page,
         page_index: int,
-        source: Path,
-        content_hash: str,
     ) -> list[_NativeUnit]:
-        del content_hash  # occurrence identity is assembled when graph nodes are emitted
         result: list[_NativeUnit] = []
         image_infos = page.get_image_info(xrefs=True)
         for occurrence, info in enumerate(image_infos):
@@ -499,7 +488,7 @@ class PDFExtractor:
             return "image/jpeg", ".jpg"
         if normalized in {"png", "gif", "bmp", "tiff", "webp"}:
             return (
-                f"image/{'tiff' if normalized == 'tiff' else normalized}",
+                f"image/{normalized}",
                 f".{normalized}",
             )
         # Unknown PDF image encodings must be rasterized rather than assigning an
@@ -518,10 +507,8 @@ class PDFExtractor:
         nodes = [document_node]
         edges: list[GraphEdge] = []
         evidence: list[EvidenceRecord] = []
-        children: dict[str, list[str]] = defaultdict(list)
 
         for reading_order, unit in enumerate(units, start=1):
-            parent_id = document_id
             kind = {
                 NodeType.TEXT_CHUNK: "pdf_text_block",
                 NodeType.TABLE: "pdf_table",
@@ -544,8 +531,11 @@ class PDFExtractor:
                     metadata=metadata,
                 )
             )
-            self._append_contains(
-                edges, children, content_hash, document_id, parent_id, node_id, locator
+            edges.append(
+                native_edge(
+                    content_hash, document_id, document_id, node_id, EdgeType.CONTAINS,
+                    locator=locator,
+                )
             )
             evidence.append(
                 EvidenceRecord(
@@ -565,24 +555,6 @@ class PDFExtractor:
             )
 
         return nodes, edges, evidence
-
-    @staticmethod
-    def _append_contains(
-        edges: list[GraphEdge],
-        children: dict[str, list[str]],
-        content_hash: str,
-        document_id: str,
-        parent_id: str,
-        child_id: str,
-        locator: SourceLocator,
-    ) -> None:
-        edges.append(
-            native_edge(
-                content_hash, document_id, parent_id, child_id, EdgeType.CONTAINS,
-                locator=locator,
-            )
-        )
-        children[parent_id].append(child_id)
 
     @staticmethod
     def _locator(source: Path, unit: _NativeUnit, label: str) -> SourceLocator:
@@ -643,8 +615,9 @@ class PDFExtractor:
         changes has the page actually wrapped, and there a word the printer split at the
         margin is made whole again.
         """
-        printed = [text for text, _ in printed_block_lines(block)]
-        return _ligatures(_unwrapped(printed, words_the_document_writes))
+        return join_printed_lines(
+            [text for text, _ in printed_block_lines(block)], words_the_document_writes
+        )
 
     def _tables_of(
         self, page: Any, page_width: float, page_height: float, clip: Any = None, depth: int = 0
@@ -827,7 +800,12 @@ _HANGUL_RUN_END = re.compile(r"[\uac00-\ud7a3]+$")
 _HANGUL_RUN_START = re.compile(r"^[\uac00-\ud7a3]+")
 
 
-def _document_words(document: Any) -> frozenset[str]:
+def _text_blocks(page: pymupdf.Page) -> list[dict[str, Any]]:
+    """The page's text blocks, in reading order (`page_text`, sorted)."""
+    return [b for b in page_text(page, sort=True).get("blocks", ()) if b.get("type") == 0]
+
+
+def _written_words(text_blocks: Iterable[dict[str, Any]]) -> Iterator[str]:
     """Every word the document writes where no margin could have changed it.
 
     A line that ends at the margin says nothing about what it did to the word there:
@@ -836,19 +814,11 @@ def _document_words(document: Any) -> frozenset[str]:
     -- a paper that writes "real-world" mid-line means it at a line end too, and one that
     writes a Korean word whole somewhere means it whole where the margin split it.
     """
-    written: set[str] = set()
-    for page in document:
-        raw = page_text(page, sort=True)
-        for block in raw.get("blocks", ()):
-            if block.get("type") != 0:
-                continue
-            for line in block.get("lines", ()):
-                text = "".join(
-                    str(span.get("text", "")) for span in line.get("spans", ())
-                ).strip()
-                for match in _A_WORD.finditer(text):
-                    written.add(match.group().casefold())
-    return frozenset(written)
+    for block in text_blocks:
+        for line in block.get("lines", ()):
+            text = "".join(str(span.get("text", "")) for span in line.get("spans", ())).strip()
+            for match in _A_WORD.finditer(text):
+                yield match.group().casefold()
 
 
 def join_printed_lines(
@@ -910,40 +880,28 @@ def printed_pieces(
     paragraph. Whoever decides which pieces are one unit needs both halves of this: the
     pieces to decide about, and the document's own vocabulary to join them without
     inventing a word the margin broke.
-    """
-    lines = printed_lines(source, nodes)
-    with pymupdf.open(source) as document:  # type: ignore[no-untyped-call]
-        words = _document_words(document)
-    pieces = {
-        node_id: tuple(text for text, _ in printed) for node_id, printed in lines.items()
-    }
-    return pieces, lambda texts: join_printed_lines(texts, words)
-
-
-def printed_lines(source: Path, nodes: Iterable[Any]) -> dict[str, list[tuple[str, _Box]]]:
-    """The printed lines behind every text block node, by node id.
 
     The block a node came from is named by its page and the number the parser gave it, so
     the lines can be read again without the extractor having to carry them on the node.
+    Both halves come from one reading of each page.
     """
     wanted = {
         (node.locator.page, node.metadata.get("native_occurrence")): node.id
         for node in nodes
         if node.metadata.get("native_kind") == "text_block"
     }
-    found: dict[str, list[tuple[str, _Box]]] = {}
+    pieces: dict[str, tuple[str, ...]] = {}
+    written: set[str] = set()
     with pymupdf.open(source) as document:  # type: ignore[no-untyped-call]
         for page_index, page in enumerate(document, start=1):
-            raw = page_text(page, sort=True)
-            for occurrence, block in enumerate(
-                b for b in raw.get("blocks", ()) if b.get("type") == 0
-            ):
-                node_id = wanted.get(
-                    (page_index, int(block.get("number", occurrence)))
-                )
+            text_blocks = _text_blocks(page)
+            written.update(_written_words(text_blocks))
+            for occurrence, block in enumerate(text_blocks):
+                node_id = wanted.get((page_index, int(block.get("number", occurrence))))
                 if node_id is None:
                     continue
                 lines = printed_block_lines(block)
                 if lines:
-                    found[node_id] = lines
-    return found
+                    pieces[node_id] = tuple(text for text, _ in lines)
+    words = frozenset(written)
+    return pieces, lambda texts: join_printed_lines(texts, words)

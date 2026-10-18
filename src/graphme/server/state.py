@@ -29,7 +29,7 @@ from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import GraphRag
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
 from graphme.api import GraphMe
-from graphme.application.corpus_build import BuildReport, BuildStep, build_graph
+from graphme.application.corpus_build import BuildReport, BuildStep, build_graph, content_hash
 from graphme.application.document_graph import DocumentGraphBuilder
 from graphme.application.embedded_documents import embedded_in, safe_name
 from graphme.application.hierarchy_decisions import apply_hierarchy_decisions
@@ -37,6 +37,7 @@ from graphme.application.ingest import SUFFIX_FORMATS, format_of
 from graphme.application.page_units import flow_pages
 from graphme.config import Settings
 from graphme.domain.enums import DocumentFormat, EdgeType
+from graphme.domain.ids import sha256_bytes
 from graphme.domain.models import ExtractedDocument, HierarchyDecision, HierarchyDerivation
 from graphme.runtime import create_graph_builder, create_neo4j_admin, create_vision
 
@@ -232,7 +233,7 @@ class Demo:
     def __init__(
         self, settings: Settings, renderer: PageRenderer, root: Path | None = None
     ) -> None:
-        # The same settings ingest reads: model, endpoint, readings. A demo that picked its
+        # The same settings build-graph reads: model, endpoint, readings. A demo that picked its
         # own defaults showed an outline the pipeline would not have produced.
         self.settings = settings
         self.renderer = renderer
@@ -291,7 +292,7 @@ class Demo:
         """The graph space every built document is put in, opened on first use."""
         # The first use may start the local Neo4j; the page asks for the list and the map at once.
         with self.opening_space:
-            return self.graph._graph_space()
+            return self.graph.graph_space()
 
     def admin(self) -> DockerNeo4jAdmin:
         """`neo4j-admin`, in a throwaway container of the configured Neo4j image."""
@@ -324,15 +325,11 @@ class Demo:
         self, job: ExportJob, docs: list[str] | None, aura: dict[str, str] | None
     ) -> None:
         try:
-            admin = self.admin()
-            with tempfile.TemporaryDirectory() as folder:
-                rows = self.space().corpus_rows(docs)
-                write_import_bundle(rows, Path(folder))
-                admin.dump(Path(folder), self.dump_path)
-            job.documents = rows.documents
+            self.space()  # opened under `opening_space`, like every other first use
+            job.documents = self.graph.export(self.dump_path, dump=True, documents=docs)
             if aura is not None:
                 job.state, job.message = "uploading", "Aura에 올리는 중"
-                said = admin.upload(self.dump_path, **aura)
+                said = self.admin().upload(self.dump_path, **aura)
                 job.message = said.strip().splitlines()[-1] if said.strip() else ""
             else:
                 job.message = f"{self.dump_path.stat().st_size // 1024} KB"
@@ -347,7 +344,7 @@ class Demo:
         """Questions over the graph space, opened on first use."""
         # Made under the space's lock too: two first questions at once make one engine.
         with self.opening_space:
-            self.graph._graph_space()
+            self.graph.graph_space()
             return self.graph._graph_rag()
 
     def pages_of_document(self, document_id: str) -> str:
@@ -571,10 +568,10 @@ class Demo:
     def content_hash(self, doc: str) -> str | None:
         """The SHA-256 of a document's file -- what the graph space knows it by -- read once."""
         if doc not in self.hashes:
-            try:
-                self.hashes[doc] = hashlib.sha256(Path(self.catalog[doc]).read_bytes()).hexdigest()
-            except OSError:
+            digest = content_hash(Path(self.catalog[doc]))
+            if digest is None:
                 return None
+            self.hashes[doc] = digest
         return self.hashes[doc]
 
     @staticmethod
@@ -594,7 +591,7 @@ class Demo:
             raise ValueError(f"지원하지 않는 형식입니다 ({', '.join(SUFFIX_FORMATS)})")
         if not content:
             raise ValueError("빈 파일입니다")
-        digest = hashlib.sha256(content).hexdigest()
+        digest = sha256_bytes(content)
         doc = digest[:10]
         self.hashes[doc] = digest
         with self.opening:
@@ -673,15 +670,13 @@ class Demo:
             session.state, session.error = "error", UNREAD
 
     def _builder(self, session: Session) -> DocumentGraphBuilder:
-        """The same graph builder the index and the corpus build use, over this document's
+        """The same graph builder the corpus build uses, over this document's
         pages as they were drawn once, under the slots every document shares."""
         return create_graph_builder(
             self.settings,
             renderer=_Replay(session.pages),
             vision=create_vision(self.settings, self.client),
             assets=session.store,
-            derived=True,
-            unit_grouping=True,
             limiter=self.vlm_slots,
             workers=VLM_CALLS_AT_ONCE,
         )

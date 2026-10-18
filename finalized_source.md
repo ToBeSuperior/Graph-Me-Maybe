@@ -4,7 +4,7 @@
 
 ## 현재 파이프라인
 
-문서 파일 하나가 들어와서 인덱스가 되고 질의에 답하기까지를 8단계로 묶은 것이다.
+문서 폴더가 들어와서 그래프 공간(Neo4j)에 올라가고 질문에 답하기까지를 8단계로 묶은 것이다.
 초록색은 확정되어 production 경로에 있는 단계, 회색은 아직 정하지 않은 TODO다.
 
 ```mermaid
@@ -12,13 +12,13 @@ flowchart TD
     IN["📄 문서 파일<br/>xlsx · pptx · docx · pdf"]
 
     subgraph S1["1 · 입력 접수"]
-        A1["파일 받기 → 확장자로 포맷 판별<br/><i>cli.py · ingest.py</i>"]
+        A1["폴더(또는 파일) 받기 → 확장자로 포맷 판별<br/><i>api.py · ingest.py</i>"]
     end
 
     subgraph S2["2 · 중복 확인"]
         B1["내용 해시 계산 (sha256)"]
-        B2{"같은 내용 + 같은 버전<br/>인덱스가 이미 있나?"}
-        B3["있음 → 재빌드 없이 종료<br/>reused=true"]
+        B2{"같은 내용이<br/>그래프 공간에 이미 있나?"}
+        B3["있음 → 다시 읽지 않음<br/>--again이면 다시 읽음"]
         B1 --> B2
         B2 -- 있음 --> B3
     end
@@ -50,38 +50,37 @@ flowchart TD
     end
 
     subgraph S5["5 · 구조 정리 — 원본 사실은 못 건드림"]
-        E1["의미 조정<br/>렌더 관측과 native 대조, 어긋나면 포기"]
-        subgraph HIER["계층 정리 — 기본은 계층 없음, 켜면 VLM이 페이지에서 읽음"]
-            E2d["기본 · off<br/>개요를 만들지 않는다<br/>마커 기반 계층은 제거됨 — 마커는 표시용 글자"]
+        subgraph HIER["계층 정리 — VLM이 페이지에서 읽음"]
+            E2d["마커 기반 계층은 제거됨<br/>마커는 표시용 글자"]
             E2a["보낼 것<br/>unit = 짧은 id + label + node_type<br/>시트 전체 렌더 PNG<br/>그림·차트는 3단계 저장 크롭 동봉"]
             E2b["안 보낼 것<br/>bbox · order · evidence · document/request id<br/>이미지 해시 · heading·caption 분류 · 부모 링크"]
-            E2c["VLM 유도 (선택)<br/>GRAPHME_HIERARCHY_MODE=derived 일 때만<br/>페이지에서 계층 판단 · 형식 위반 시 3회 재시도<br/>결정을 부모 엣지로 반영, 나머지 엣지는 그대로"]
+            E2c["VLM 유도<br/>페이지에서 계층 판단 · 형식 위반 시 3회 재시도<br/>결정을 부모 엣지로 반영, 나머지 엣지는 그대로"]
             E2d --> E2c
             E2a --> E2c
             E2b -.->|"withheld"| E2c
         end
-        E3["관계 정리<br/>캡션 · 참조 · 수식 의존"]
+        E3["페이지 후처리<br/>캡션 · 참조"]
         E4["불변식 검증<br/>통과 못 하면 진행 불가"]
-        E1 --> HIER --> E3 --> E4
+        HIER --> E3 --> E4
     end
 
-    subgraph S6["6 · 검색 준비"]
-        F1["고정 서브그래프 구성<br/>계층 · 수식의존 · 시각참조"]
-        F2["멀티모달 임베딩 생성"]
+    subgraph S6["6 · 그래프 공간에 올리기"]
+        F1["문서마다 읽는 대로 Neo4j에 쓴다<br/>다시 쓰면 그 문서를 교체"]
+        F2["공간 전체의 언급을 문서와 맞춰<br/>SAME_AS로 잇기"]
         F1 --> F2
     end
 
-    subgraph S7["7 · 저장 — 전부 아니면 전무"]
-        G1["문서 + 서브그래프 + 임베딩 + 실행기록<br/>한 번에 원자적 저장"]
-        G2["여기까지 성공해야 '질의 가능' 표시"]
+    subgraph S7["7 · 검색 준비 (embed-graph)"]
+        G1["계층을 따라 구절로 자르기<br/>Chunk -COVERS-> unit"]
+        G2["구절 임베딩 · 벡터·전문 인덱스"]
         G1 --> G2
     end
 
-    subgraph S8["8 · 질의·응답"]
-        H1["질문 임베딩 → 서브그래프 순위"]
-        H2["관계 따라 확장<br/>우선순위 · hop/토큰 예산"]
-        H3["원본 근거만 모아 맥락 구성"]
-        H4["답변 + 인용 검증"]
+    subgraph S8["8 · 질문·답변 (ask)"]
+        H1["벡터 + 전문(BM25) 검색"]
+        H2["가중 RRF로 합치기<br/>근거 없는 구절은 버림"]
+        H3["REFERENCES → SAME_AS로<br/>인용된 문서의 구절을 함께"]
+        H4["답변 + 근거 파일"]
         H1 --> H2 --> H3 --> H4
     end
 
@@ -96,7 +95,7 @@ flowchart TD
 
     classDef done fill:#d9ead3,stroke:#38761d,color:#0b2e13;
     classDef todo fill:#efefef,stroke:#999999,color:#333333;
-    class IN,A1,B1,B2,B3,C1,C2,C3,C4,R1,D2,E1,E3,E4,F1,F2,G1,G2,H1,H2,H3,H4 done;
+    class IN,A1,B1,B2,B3,C1,C2,C3,C4,R1,D2,E3,E4,F1,F2,G1,G2,H1,H2,H3,H4 done;
     class R3,R4,P1,P2,P3,E2a,E2b,E2c,E2d done;
     class R1,R2 done;
     class T1,T2 todo;
@@ -106,10 +105,10 @@ flowchart TD
 
 | 단계 | 하는 일 | 소스 | 상태 |
 |---|---|---|---|
-| 1 · 입력 접수 | 파일 받기, 확장자로 포맷 판별 | `cli.py`, `application/ingest.py` | 연결됨 |
-| 2 · 중복 확인 | 내용 해시, extractor/pipeline 버전 인지 재사용 | `application/ingest.py`, `domain/ids.py` | 연결됨 |
+| 1 · 입력 접수 | 폴더나 파일 받기, 확장자로 포맷 판별 | `api.py`, `application/ingest.py` (`documents_at`, `format_of`) | 연결됨 |
+| 2 · 중복 확인 | 내용 해시로 그래프 공간에 이미 있는 파일은 다시 읽지 않는다(`--again`이면 읽는다) | `application/corpus_build.py`, `domain/ids.py` | 연결됨 |
 | 3 · 내용 추출 | 표·이미지·도형·텍스트·차트를 원본 구조 그대로 | `adapters/extractors/{excel,pdf,powerpoint,docx,xlsx_drawings,xlsx_visual_tables}.py` | 연결됨 |
-| 4 · 눈으로 확인 | 페이지 래스터(PDF는 직접, OOXML은 브라우저 렌더), 이어서 VLM 시각 관측. Office/PDF 변환 없음 | `application/grounding.py`, `adapters/rendering/page_image.py` | 연결됨 |
+| 4 · 눈으로 확인 | 페이지 래스터(PDF는 직접, OOXML은 브라우저 렌더). Office/PDF 변환 없음 | `adapters/rendering/page_renderer.py`, `adapters/rendering/pdf_pages.py` | 연결됨 |
 | 4 · 범위 측정 CLI | 시트 실제 내용 범위를 측정해 JSON으로 내놓는다(렌더·변환 없음) | `application/xlsx_measurement.py`, `tools/xlsx_render/measure_ranges.py` | 확정 |
 | 4 · 유닛 크롭 (모델 없음) | 셀→픽셀 조회로 표 배치·그림은 DrawingML extent, 겹치면 한 영역으로 병합해 크롭을 asset에 저장. **크롭 생산자는 이 한 곳** | `application/xlsx_visual_binding.py`, `application/xlsx_unit_regions.py`, `application/xlsx_crop_regions.py`, `adapters/rendering/visual_binding.py` | 연결됨 |
 | 4 · 저장된 크롭 읽기 | `read_node_crop()` — 노드 id로 저장된 크롭을 돌려준다. 소비자가 박스를 다시 계산하지 않는다 | `application/xlsx_visual_binding.py` | 연결됨 |
@@ -117,21 +116,19 @@ flowchart TD
 | 4 · 뷰어 번들 | npm 배포본(docx·pptx) + 패치 빌드(xlsx) + 설치 스크립트 | `adapters/rendering/viewer/` | 확정 |
 | 4 · 그림 묶기 (VLM) | 한 그림으로 보이는 유닛을 묶는다 — 그림·표·차트 모두. 페이지마다 한 번, 계층 호출과 분리된 독립 패스다. 묶인 글자는 그림의 것(`part_of_figure`)이 되어 이후 텍스트·계층에서 빠진다. 표가 여러 조각으로 묶이면 합친 틀 안에 든 같은 페이지의 텍스트(구분 행 라벨)도 표의 것이다 — 그림은 사진 사이에 본문이 끼일 수 있어 이 규칙을 쓰지 않는다 | `adapters/vision/hierarchy_scope.py` (`group_figures`), `adapters/vision/chat_completions.py` (`group_page_figures`, `FIGURES_SYSTEM_PROMPT`) | 확정 |
 | 4 · 텍스트 묶기 (VLM) | 페이지가 한 단위라고 말하는 조각들을 합친다. 조각은 PDF는 인쇄된 줄, 슬라이드는 도형의 문단. 한 번에 40조각(`PIECES_PER_ASK`)씩 묻고, 앞 호출의 끝 3조각(`CARRY_PIECES`, 작은 글씨 제외)을 결정된 채로 함께 보내 페이지·호출 경계에서 끊기지 않게 한다. 읽기 순서는 띠·단 단위(`reading_order.py`)이고, 작은 글씨 중 위나 아래에 본문이 없는 것은 페이지 끝으로 보낸다. 판단은 페이지가, 합치기는 산수로 — 텍스트·박스·자리는 조각에서 따라 나온다 | `application/unit_grouping.py`, `adapters/vision/text_grouping.py`, `adapters/vision/chat_completions.py` (`group_page_units`) | 확정 |
-| 4 · 묶기 모드 전환 | 기본 `off`(파일이 인쇄한 대로) · `GRAPHME_UNIT_GROUPING=page`로 켠다. `GRAPHME_HIERARCHY_MODE=derived`와 함께여야 동작 — 양방향 fail-closed | `config.py`, `runtime.py`, `application/indexing.py` | 확정 |
 | 4 · 페이지를 그리는 브라우저 | 설치된 Chrome, 없으면 Playwright의 Chromium(`playwright install chromium --only-shell`) · `GRAPHME_CHROME_EXECUTABLE` | `config.py`, `adapters/rendering/browser_capture.py` | 확정 |
 | 4 · 렌더 한 번 | 결속·그림 묶기·텍스트 묶기·계층이 같은 파일을 네 번 그리지 않는다. 마지막으로 그린 문서를 경로·수정시각·크기로 기억한다 | `adapters/rendering/page_renderer.py` | 확정 |
 | 5 · 계층 스코프 조립 | unit = 짧은 id + label + node_type. 3단계가 정한 병합·대표를 그대로 읽는다(재병합 없음). 시트는 셀 조회, 슬라이드는 도형 사각형, DOCX는 렌더된 줄 위치, PDF는 파일이 말하는 블록 사각형으로 배치. 흐름 문서는 띠·단 순서(`in_columns`)로 정렬하고 `indent`는 자기 단의 왼쪽 끝에서 잰다. 그림 부품은 스코프에서 뺀다 | `application/page_hierarchy_scope.py`, `application/unit_placement.py` | 확정 |
 | 5 · 연속 문서 | 페이지는 종이가 끝난 자리다. 페이지 순서대로 읽고, 각 페이지는 앞 페이지들이 만든 계층(예산 1,200 토큰: 열린 사슬 → 제목 골격 → 최근 절 통째로)과 그 페이지의 끝부분 이미지를 함께 받는다 | `adapters/vision/hierarchy_scope.py` (`FLOW_FORMATS`, `_Placements.carried`, `_open_chain`, `_page_tail`) | 확정 |
 | 5 · 페이지 이미지 정리 | 모델에게 보내는 페이지는 잉크 경계로 잘라 여백 5%만 남긴다. 크롭은 원본 페이지에서 잘리므로 좌표는 움직이지 않는다 | `adapters/vision/hierarchy_scope.py` (`_trimmed`, `TRIM_MARGIN`) | 확정 |
-| 5 · 계층 모드 전환 | 기본 `off`(개요 없음) · `GRAPHME_HIERARCHY_MODE=derived`로 VLM 유도. 양방향 fail-closed | `application/indexing.py`, `application/hierarchy_decisions.py`, `adapters/vision/hierarchy_scope.py` | 확정 |
 | 5 · 계층 VLM 호출 | 짧은 id 스키마 · 그림·차트 크롭 동봉 · 결정은 parent·root·unresolved · 형식 위반과 일시적 모델 endpoint 응답은 3회 재시도. 그림 묶음은 묻지 않는다(그림 묶기 패스가 먼저 답했다) | `adapters/vision/chat_completions.py` | 확정 |
 | 5 · 두 번째 판독 | 한 페이지를 N회 병렬 판독하고, 갈릴 때만 페이지 이미지와 두 계층안을 함께 보여 하나를 고른다 | `adapters/vision/hierarchy_scope.py`, `adapters/vision/chat_completions.py` (`choose_hierarchy_scope`) | 확정 |
-| 5 · 그림 부품 배치 | 그림 묶기가 정한 부품을 VLM에 다시 묻지 않고 그 그림 밑에 둔다. 빌드가 계층 결정과 함께 한 번 반영한다 | `application/hierarchy_decisions.py` (`figure_part_decisions`), `application/indexing.py` | 확정 |
-| 5 · 구조 정리 | 의미 조정 → 계층 결정 반영 → 관계 → 불변식 검증 | `application/{semantic_reconciliation,hierarchy_decisions,relations}.py` | 연결됨 |
-| 6 · 검색 준비 | 고정 서브그래프 + 멀티모달 임베딩 | `application/{index_representation,subgraphs,embedding}.py` | 연결됨 |
-| 7 · 저장 | 원자적 인덱스 저장, ready 표시 | `adapters/storage/graph.py` | 연결됨 |
-| 8 · 질의·응답 | 순위 → 확장 → 근거 조립 → 답변·인용 | `application/{query,retrieve,answer_generation}.py` | 연결됨 |
-| 9 · Neo4j 내보내기 | 저장된 그래프를 Neo4j 레코드·Cypher 스크립트로 (`export-neo4j`) | `adapters/export/neo4j.py`, `cli.py` | 연결됨 · 실DB 적재 미검증 |
+| 5 · 그림 부품 배치 | 그림 묶기가 정한 부품을 VLM에 다시 묻지 않고 그 그림 밑에 둔다. 빌드가 계층 결정과 함께 한 번 반영한다 | `application/hierarchy_decisions.py` (`figure_part_decisions`), `application/document_graph.py` | 확정 |
+| 5 · 구조 정리 | 계층 결정 반영 → 캡션·참조 → 불변식 검증 | `application/{document_graph,hierarchy_decisions,page_enrichment}.py` | 연결됨 |
+| 6 · 그래프 공간 | 문서마다 Neo4j에 쓰고, 공간 전체의 언급을 `SAME_AS`로 잇는다 | `application/{corpus_build,corpus_links}.py`, `adapters/storage/neo4j_space.py` | 연결됨 |
+| 7 · 검색 준비 | 계층을 따라 구절로 자르고 임베딩, 벡터·전문 인덱스 (`embed-graph`) | `application/graph_chunks.py`, `adapters/storage/graph_rag.py` | 연결됨 |
+| 8 · 질문·답변 | 벡터+전문 → 가중 RRF → 인용된 문서 따라가기 → 답변·근거 파일 (`ask`) | `adapters/storage/graph_rag.py` | 연결됨 |
+| 9 · Neo4j 내보내기 | 그래프 공간을 `neo4j-admin` import 묶음·`.dump`·JSON·Cypher로 (`export-corpus`) | `adapters/export/{neo4j,neo4j_import,neo4j_admin}.py`, `cli.py` | 연결됨 |
 
 ## 최종 코드 목록
 
@@ -143,7 +140,7 @@ flowchart TD
 | 브라우저 OOXML 렌더러 | `src/graphme/adapters/rendering/browser_office.py` | DOCX·PPTX·XLSX를 Office나 LibreOffice 없이 렌더한다. WASM 파서 + Canvas이고, 열·행 경계를 함께 기록해 셀→픽셀을 추정 없이 조회한다. XLSX는 시트↔페이지 1:1. | 문서 경로 + 포맷 | `RenderedPage` 목록 (PNG + `SheetPixelGrid`) | Finalized |
 | 유닛 크롭 바인딩 | `src/graphme/application/xlsx_visual_binding.py` | 표는 감지된 셀 범위, 그림은 DrawingML extent로 배치하고 겹치거나 닿는 것을 한 영역으로 병합해 대표 노드에 크롭 asset을 저장한다. **XLSX 시각 노드 크롭의 유일한 생산자**이며 읽기는 같은 모듈의 `read_node_crop()`이 맡는다. | `ExtractedDocument` + 렌더 페이지 + asset store | 크롭 asset·`crop_bbox`·`picture_count`·`CONTAINS` 소유 엣지가 붙은 `ExtractedDocument` | Finalized |
 | 계층 스코프 조립 | `src/graphme/application/page_hierarchy_scope.py` (`build_sheet_scope`, `build_placed_scope`, `_indent_levels`) | 한 페이지의 unit 목록을 만든다. 병합과 대표 선정은 바인딩 단계가 적어 둔 `CONTAINS`·`crop_bbox`·`picture_count`를 **그대로 읽는다** — 재병합하면 대표가 갈린다. 영역을 대표하는 표·피벗·그림·차트가 삼킨 것은 네 포맷 모두 그 대표의 일부로 보고 따로 보내지 않는다. 배경으로 표시된 그림은 unit이 아니다. | `ExtractedDocument` + 시트명·`SheetPixelGrid`, 또는 이미 배치된 노드 목록·`UnitPlacer`·루트 노드 | `HierarchyScopeUnits` (unit = id·label·scope·order·node_type·indent) | Finalized |
-| 계층 VLM 호출 | `src/graphme/adapters/vision/chat_completions.py` (`resolve_hierarchy_scope`, `choose_hierarchy_scope`, `short_unit_ids`, `_resolve`, `_ShortIdResult`) | unit을 UUID 앞 8자로 부르고, 페이지 렌더 PNG와 그림·차트 크롭을 함께 보낸다. 결정은 parent·root·unresolved 셋이다. 응답의 짧은 id를 완전한 node id로 되돌린다 — 한 글자가 빠지거나 틀려도, 또는 끝 두 글자만 틀려도 유일하게 대응되는 unit이 있으면 그 unit으로 읽고, 둘 이상에 걸리면 거절한다. 형식 위반과 일시적 모델 endpoint 응답은 3회까지 재시도한다. | `HierarchyScopeRequest` + 페이지 PNG + 그림 크롭 | `HierarchyScopeResult` (unit마다 결정 1개) | Finalized |
+| 계층 VLM 호출 | `src/graphme/adapters/vision/chat_completions.py` (`resolve_hierarchy_scope`, `choose_hierarchy_scope`, `short_ids`, `_resolve`, `_ShortIdResult`) | unit을 UUID 앞 8자로 부르고, 페이지 렌더 PNG와 그림·차트 크롭을 함께 보낸다. 결정은 parent·root·unresolved 셋이다. 응답의 짧은 id를 완전한 node id로 되돌린다 — 한 글자가 빠지거나 틀려도, 또는 끝 두 글자만 틀려도 유일하게 대응되는 unit이 있으면 그 unit으로 읽고, 둘 이상에 걸리면 거절한다. 형식 위반과 일시적 모델 endpoint 응답은 3회까지 재시도한다. | `HierarchyScopeRequest` + 페이지 PNG + 그림 크롭 | `HierarchyScopeResult` (unit마다 결정 1개) | Finalized |
 | 두 번째 판독 | `src/graphme/adapters/vision/hierarchy_scope.py` (`RenderedHierarchyScopeProvider(readings=…)`) | 한 페이지를 N회 병렬로 판독한다. 판독이 전부 같으면 그대로 쓰고(정할 것이 없으면 비용도 없다), 갈리면 페이지 이미지와 두 계층안을 같은 짧은 id로 다시 보내 하나를 통째로 고른다. 부분 병합은 하지 않는다 — 어느 판독이 맞는지가 질문이다. | `HierarchyScopeRequest` + 페이지 PNG + 크롭 + `readings` | 채택된 판독 하나 | Finalized |
 | 흐름 배치 | `src/graphme/application/unit_placement.py` (`FlowPlacer`) | DOCX 노드를 렌더러가 돌려준 run의 `source.path[0]`(본문 인덱스)로 묶어 배치한다. 문단은 자기 run들의 합집합, 표는 셀 문단들의 합집합. 그림은 **문단 run과 섞지 않고** 요소 히트테스트가 준 bounds에서 앵커 문단 안의 순서로 집는다. 텍스트박스는 앵커 문단과 그 문단에서 몇 번째 상자인지로 잇는다. | 페이지의 flow box와 flow drawing | `PixelBox` 또는 None | Finalized |
 | PDF 페이지 래스터·벡터 | `src/graphme/adapters/rendering/pdf_pages.py` (`PdfPageRenderer`, `page_ink`) | PDF는 이미 그려져 있으므로 브라우저가 필요 없다. pymupdf로 144dpi(1pt=2px) 래스터해 브라우저 렌더 결과와 같은 모양의 페이지를 돌려주고, 페이지가 그린 벡터 path도 함께 준다(그림이 품을 테두리·화살표). | PDF 경로 | `RenderedPage` 목록, 페이지별 벡터 박스 | Finalized |
@@ -156,12 +153,12 @@ flowchart TD
 | 참조 잇기 | `src/graphme/application/document_references.py` (`link_references`) | 페이지가 **명시적으로** 다른 문서를 참조할 때만 `external_document` 노드를 만들고 `REFERENCES`로 잇는다. 답마다 근거 문구(`cue`)와 종류(`kind`: pointer·named·quotation·address)를 받아 엣지에 싣는다. 같은 이름의 문서가 저장소에 있으면 그 id를 싣는다. | `ExtractedDocument` + 페이지 + VLM | 참조 노드·엣지가 붙은 `ExtractedDocument` | Finalized |
 | 폴더 → 그래프 DB | `src/graphme/application/corpus_build.py` (`build_graph`), `src/graphme/adapters/storage/neo4j_space.py` (`Neo4jGraphSpace`), CLI `graphme build-graph <폴더>`, 데모 "그래프 만들기" | 폴더 안의 문서를 세 단계로 하나의 그래프 DB(Neo4j)에 올린다 — ① 문서마다 처리(실패한 문서는 건너뛰고 기록) ② 처리된 문서를 모두 같은 공간에 쓴다(다시 쓰면 그 문서를 교체) ③ 공간 **전체**의 `external_document`를 공간 안 문서와 맞춰 `SAME_AS`를 다시 그린다. 3단계가 폴더가 아니라 공간을 읽으므로 앞서 올린 문서도 연결 대상이다 | 폴더 | Neo4j 안의 문서들 + `SAME_AS` | Finalized |
 | 문서 간 연결 | `src/graphme/application/corpus_links.py` (`corpus_links`), `src/graphme/adapters/export/neo4j.py` (`corpus_records`, `corpus_cypher`), CLI `graphme export-corpus` | 저장된 문서 전체를 한 그래프로 낸다. 각 문서의 `external_document`가 코퍼스 안의 다른 문서를 가리키면 `SAME_AS`로 그 문서의 루트에 잇는다(`matched_by`: file_name·number·title). 문서의 정체는 파일 이름, 확장자 뺀 이름, 파일 이름 속 문서 번호, 계층이 문서를 담은 제목이다. 정확히 한 문서만 맞을 때만 잇는다. 코퍼스 전체에서 계산하므로 어느 문서가 먼저 들어왔는지와 무관하다 | 저장된 `ExtractedDocument` 전체 | 문서별 그래프 + `SAME_AS` | Finalized |
-| 페이지 후처리 | `src/graphme/application/page_enrichment.py` (`RenderedPageEnricher`) | 캡션과 참조는 같은 페이지에 대한 두 질문이므로 한 번만 렌더하고 둘을 잇달아 돌린다. 인덱싱은 이 하나만 안다. | 문서 경로 + `ExtractedDocument` | 두 패스를 거친 `ExtractedDocument` | Finalized |
+| 페이지 후처리 | `src/graphme/application/page_enrichment.py` (`RenderedPageEnricher`) | 캡션과 참조는 같은 페이지에 대한 두 질문이므로 한 번만 렌더하고 둘을 잇달아 돌린다. 그래프 빌드는 이 하나만 안다. | 문서 경로 + `ExtractedDocument` | 두 패스를 거친 `ExtractedDocument` | Finalized |
 | 내보내는 엣지 | `src/graphme/application/final_edges.py` | 내부의 `CONTAINS`·`OUTLINE_PARENT`를 `PARENT_OF` 하나로 투영한다(무엇이 정했는지는 `decided_by`, 파일이 품은 쪽은 `file_parent_id`). 캡션은 계층에 넣지 않고 `CAPTION_OF`로만 나간다. | `ExtractedDocument` | 네 종류만 남은 엣지 | Finalized |
 | Neo4j 내보내기 | `src/graphme/adapters/export/neo4j.py` (`graph_records`, `to_cypher`) | 노드마다 공통 라벨 `DocNode`와 타입 라벨, 엣지 타입은 관계 타입 그대로. 속성은 스칼라·같은 타입 배열만(섞인 수는 실수로, 그 밖에 섞인 것과 중첩은 JSON 문자열), null은 뺀다. 스크립트는 전부 MERGE. | `ExtractedDocument` | Neo4j 레코드 dict, Cypher 문자열 | Finalized |
 | 읽기 순서 | `src/graphme/application/reading_order.py` (`reading_order`, `in_columns`) | 페이지를 가로지르는 것(폭 60% 이상)에서 띠로 자르고, 띠 안에서는 x로 겹치는 것끼리 한 단으로 묶어 단마다 끝까지 읽는다. 텍스트 묶기와 계층 스코프가 같은 순서를 쓴다. `in_columns`는 각 unit이 읽히는 단의 왼쪽 끝도 돌려준다 | 한 페이지의 항목과 박스 | 읽기 순서 목록 | Finalized |
 | 텍스트 묶기 | `src/graphme/application/unit_grouping.py` (`group_document_units`, `explode_text`, `apply_groups`), `src/graphme/adapters/vision/text_grouping.py` (`RenderedUnitGrouper`) | 텍스트를 인쇄된 조각으로 풀고, 페이지에 한 단위를 물어 합친다. 한 번에 `PIECES_PER_ASK`개, 앞 호출 끝 `CARRY_PIECES`개를 결정된 채로 이월한다. 작은 글씨(페이지 본문 크기보다 작고, 위나 아래에 x로 겹치는 본문이 없는 것)는 페이지 끝으로 보낸다. 합친 단위의 박스는 첫 조각의 페이지·단 안의 조각만으로 잰다. 응답은 조각 id 목록이고, 겹치거나 해석할 수 없는 그룹만 버린다 | `ExtractedDocument` + 페이지 PNG | 조각이 합쳐진 `ExtractedDocument` | Finalized |
-| 계층 데모 | `tools/hierarchy_demo/app.py`, `index.html` | 서버 하나에 `test_dataset/demo_samples.txt`의 샘플과 올린 문서를 추출·렌더·바인딩·그림 묶기·텍스트 묶기·VLM 계층·캡션·참조까지 돌리고, 문서 전체를 vis-network 그래프로 보여준다. 언급된 외부 문서 노드는 기본으로 숨긴다. 설정은 ingest와 같은 `load_settings`. | `test_dataset/` 문서 | 로컬 웹 화면, 문서별 Neo4j 레코드·Cypher | 확정 |
+| 계층 데모 | `tools/hierarchy_demo/app.py`, `index.html` | 서버 하나에 `test_dataset/demo_samples.txt`의 샘플과 올린 문서를 추출·렌더·바인딩·그림 묶기·텍스트 묶기·VLM 계층·캡션·참조까지 돌리고, 문서 전체를 vis-network 그래프로 보여준다. 언급된 외부 문서 노드는 기본으로 숨긴다. 설정은 `build-graph`와 같은 `load_settings`. | `test_dataset/` 문서 | 로컬 웹 화면, 문서별 Neo4j 레코드·Cypher | 확정 |
 
 ## 설계 원칙
 
@@ -254,8 +251,9 @@ hierarchy**, **렌더러가 추정한 page/bookmark를 source ownership으로 �
 
 ### 오프라인 프로필
 
-`GRAPHME_PROFILE=test`는 결정적 로컬 fake를 고르고 `hash` 임베딩을 쓸 수 있다.
-모델 endpoint·임베딩 제공자 등 외부 provider를 호출하지 않는다. 오프라인 결과는 오케스트레이션,
+`GRAPHME_PROFILE=test`에서만 `hash`·`fake` 임베더를 설정으로 받는다(키 없이 API 계약을 내는
+`graphme serve --openapi`와 테스트가 쓴다). 테스트는 모델 endpoint·임베딩 제공자를 부르지 않고
+`httpx.MockTransport`가 대신 답한다. 오프라인 결과는 오케스트레이션,
 영속화, 준비 상태, 신뢰 경계 동작만 증명하며 **provider 품질은 증명하지 않는다.**
 
 ### CLI와 web은 부트스트랩을 공유한다
@@ -320,7 +318,7 @@ FastAPI(`graphme serve`)가 `frontend/dist`를 `/`에, JSON·근거 API를 `/v1/
 | 그림 부품 | 그림 묶기가 정한 부품은 계층 스코프에서 빠지고, VLM에 묻지 않고 그 그림 밑에 둔다 |
 | 쪼개진 표 | 한 표가 구분 행 때문에 여러 표로 파싱되고 그림 묶기가 이를 한 표로 묶으면, 합친 틀 안에 든 텍스트도 그 표의 부품이다 |
 | 문서 제목 | 페이지가 문서 제목을 보여주면 작성자·요약·이후 모든 절은 제목 아래다. 제목 옆 최상위에는 어느 부분에도 속하지 않는 것(머리글·쪽번호·워터마크)만 선다 |
-| 계층 기본값 | `off`. 개요를 만들지 않는다. 마커 기반 계층은 제거됨 — 마커는 표시용 글자일 뿐 |
+| 계층 | `build-graph`와 데모는 언제나 페이지에서 계층을 읽는다. 마커 기반 계층은 제거됨 — 마커는 표시용 글자일 뿐 |
 | VLM에 보내는 unit | `{id, label, node_type}`과, 렌더가 글자 위치를 재는 포맷에서는 `indent`. `id`는 UUID 앞 8자(시트 내 충돌 시에만 늘림). 읽기 순서는 배열 순서에만 남긴다 |
 | VLM에 보내는 이미지 | 페이지 1장(여백 잘라냄) + 그림·차트 크롭 + 이어지는 페이지면 앞 페이지 하단 30% 1장. 표는 크롭 없이 라벨이 헤더 행과 셀 범위를 싣는다 |
 | 판독 횟수 | `GRAPHME_HIERARCHY_READINGS`(기본 1, 최대 4). 2 이상이면 판독을 동시에 돌리고, **전부 일치하면 추가 호출 없음**. 갈릴 때만 판정 호출 1회가 더 든다 |
@@ -348,10 +346,10 @@ PYTHONPATH=src python tools/xlsx_render/measure_ranges.py \
   test_dataset/test_xlsx/test1.xlsx
 ```
 
-VLM 계층까지 포함한 인덱싱 — 기본값은 `off`이므로 명시적으로 켠다:
+VLM 계층까지 포함해 폴더를 그래프 공간에 올리기:
 
 ```bash
-GRAPHME_HIERARCHY_MODE=derived graphme ingest test_dataset/test_xlsx/test1.xlsx
+graphme build-graph test_dataset/test_xlsx
 ```
 
 계층을 눈으로 확인하는 데모. 서버 하나에 문서가 여럿 올라가고, 인자는 포트뿐이다:
@@ -365,7 +363,7 @@ GRAPHME_HIERARCHY_MODE=derived graphme ingest test_dataset/test_xlsx/test1.xlsx
 샘플 옆 버튼으로 남는다. 파일은 데모 서버의 임시 폴더에만 저장되고 내용 해시로 구분해 같은 파일을 두 번 올려도
 한 번만 돈다. 지원하지 않는 형식과 빈 파일은 거절한다. 한 번 돈 문서는 서버가 떠 있는 동안 결과를 들고 있다(`?doc=<id>`로 다시 연다).
 
-데모는 ingest와 같은 설정(`load_settings`)으로 모델·모델 endpoint를 고르고, 판독만 2회로 둔다. 뷰어 번들은
+데모는 `build-graph`와 같은 설정(`load_settings`)으로 모델·모델 endpoint를 고르고, 판독만 2회로 둔다. 뷰어 번들은
 설정 기본값인 `~/.cache/graphme/ooxml-viewer`에서, 브라우저는 설치된 Chrome에서 읽는다 —
 `/tmp`에 둔 사본은 시스템 정기 정리로 파일이 지워진 적이 있다. VLM이 답하지 못한 페이지는 ⚠로 보인다.
 
@@ -385,8 +383,9 @@ GRAPHME_HIERARCHY_MODE=derived graphme ingest test_dataset/test_xlsx/test1.xlsx
 ## Neo4j 내보내기
 
 ```bash
-graphme export-neo4j DOCUMENT_ID out.cypher        # cypher-shell · Neo4j Browser에서 실행
-graphme export-neo4j DOCUMENT_ID out.json --json   # 드라이버가 돌려주는 모양의 레코드
+graphme export-corpus OUT_DIR                 # neo4j-admin import 묶음 (기본)
+graphme export-corpus out.cypher --cypher     # cypher-shell · Neo4j Browser에서 실행 (구절 없이)
+graphme export-corpus out.json --json         # 드라이버가 돌려주는 모양의 레코드
 ```
 
 | 그래프 | Neo4j |
@@ -410,7 +409,7 @@ graphme export-neo4j DOCUMENT_ID out.json --json   # 드라이버가 돌려주�
 
 ### 계층 패스
 
-`GRAPHME_HIERARCHY_MODE=derived`로 워크시트 문서와 슬라이드 문서 양쪽을 돌려 다음을 본다.
+`build-graph`나 데모로 워크시트 문서와 슬라이드 문서 양쪽을 돌려 다음을 본다.
 
 - 모든 페이지가 **1회 호출로 통과하고 재시도가 0회**여야 한다. 재시도가 생기면 응답 형식이나
   id 길이를 건드린 것이다.

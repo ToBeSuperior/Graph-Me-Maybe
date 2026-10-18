@@ -14,9 +14,8 @@ from pathlib import Path
 import httpx
 
 from graphme import model_endpoint
-from graphme.config import _read_dotenv
+from graphme.config import app_home as home
 
-NAME = "Graph-Me-Maybe"
 FIRST_PORT = 8765
 # This tree's own providers: the default's key first, then the others' and the embedders'.
 _KEYS = dict.fromkeys(
@@ -29,18 +28,6 @@ ENV_TEMPLATE = (
     + "".join(f"{name}=\n" for name in _KEYS))
 
 
-def home(environ: Mapping[str, str] = os.environ, platform: str = sys.platform) -> Path:
-    """Where the app keeps its settings, its graph data and the installed assets."""
-    if named := environ.get("GRAPHME_HOME"):
-        return Path(named)
-    if platform == "win32":
-        return Path(environ["LOCALAPPDATA"]) / NAME
-    if platform == "darwin":
-        return Path(environ["HOME"]) / "Library" / "Application Support" / NAME
-    data = environ.get("XDG_DATA_HOME") or str(Path(environ["HOME"]) / ".local" / "share")
-    return Path(data) / "graph-me-maybe"
-
-
 def prepare(home: Path) -> None:
     """The folder, and a settings file in it unless there is one: an update keeps the keys."""
     home.mkdir(parents=True, exist_ok=True)
@@ -48,13 +35,6 @@ def prepare(home: Path) -> None:
     if not env.exists():
         env.write_text(ENV_TEMPLATE, encoding="utf-8")
         env.chmod(0o600)
-
-
-def asset_defaults(home: Path, environ: Mapping[str, str]) -> dict[str, str]:
-    """The viewer the installer put in `home`, unless the environment or `.env` names one."""
-    viewer = home / "viewer"
-    named = "GRAPHME_VIEWER_DIR" in environ or "GRAPHME_VIEWER_DIR" in _read_dotenv(home / ".env")
-    return {} if named or not viewer.is_dir() else {"GRAPHME_VIEWER_DIR": str(viewer)}
 
 
 def web_directory(home: Path) -> Path | None:
@@ -117,8 +97,6 @@ def launch(
     where = home(environ)
     prepare(where)
     os.chdir(where)  # settings and data are read relative to the working directory
-    for name, value in asset_defaults(where, environ).items():
-        os.environ.setdefault(name, value)
     chosen = port or free_port()
     serve_demo: Callable[..., None]
     if serve is None:

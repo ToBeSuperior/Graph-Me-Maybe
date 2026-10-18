@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import ntpath
 import os
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
@@ -18,8 +19,11 @@ RELEVANCE_FLOORS = {"text-embedding-3-large": 0.2}
 """The relevance floor measured for each embedding model, on the invented sample documents
 (src/graphme/samples.py). GRAPHME_RELEVANCE_FLOOR wins over it."""
 
+LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+"""This machine's names. `[::1]` is how a Host header writes the IPv6 one."""
+
 _SECRET_CONFIG_KEYS = {"api_key", "embedding_key", "neo4j_password", "server_key"}
-_ENV_FIELDS = {
+ENV_FIELDS = {
     "GRAPHME_PROFILE": "profile",
     "GRAPHME_DATA_DIR": "data_dir",
     "GRAPHME_PROVIDER": "provider",
@@ -32,15 +36,10 @@ _ENV_FIELDS = {
     "GRAPHME_RELEVANCE_FLOOR": "relevance_floor",
     "GRAPHME_HYBRID_DENSE_WEIGHT": "hybrid_dense_weight",
     "GRAPHME_RRF_K": "rrf_k",
-    "GRAPHME_NODE_BUDGET": "node_budget",
-    "GRAPHME_TOKEN_BUDGET": "token_budget",
-    "GRAPHME_MAX_HOPS": "max_hops",
     "GRAPHME_VIEWER_DIR": "viewer_directory",
     "GRAPHME_RENDER_TIMEOUT_SECONDS": "render_timeout_seconds",
     "GRAPHME_CHROME_EXECUTABLE": "chrome_executable",
-    "GRAPHME_HIERARCHY_MODE": "hierarchy_mode",
     "GRAPHME_HIERARCHY_READINGS": "hierarchy_readings",
-    "GRAPHME_UNIT_GROUPING": "unit_grouping",
     "GRAPHME_NEO4J_URI": "neo4j_uri",
     "GRAPHME_NEO4J_USER": "neo4j_user",
     "GRAPHME_NEO4J_PASSWORD": "neo4j_password",
@@ -55,9 +54,6 @@ _INT_FIELDS = {
     "hierarchy_readings",
     "embedding_dimensions",
     "retrieval_top_k",
-    "node_budget",
-    "token_budget",
-    "max_hops",
 }
 _TEST_EMBEDDERS = {"fake", "hash"}
 
@@ -90,7 +86,7 @@ def _installed_chrome() -> str | None:
     return next((path for path in chrome_paths() if Path(path).is_file()), None)
 
 
-def _read_dotenv(path: Path) -> dict[str, str]:
+def read_dotenv(path: Path) -> dict[str, str]:
     if not path.is_file():
         return {}
     values: dict[str, str] = {}
@@ -158,9 +154,6 @@ class Settings(BaseModel):
     rrf_k: int = Field(default=60, gt=0)
     """Reciprocal rank fusion's constant: a passage ranked r counts weight / (rrf_k + r). 60 is
     the value Cormack et al. fixed and the common default since."""
-    node_budget: int = Field(default=24, gt=0)
-    token_budget: int = Field(default=6000, gt=0)
-    max_hops: int = Field(default=2, ge=1, le=2)
     viewer_directory: Path = Field(
         default_factory=lambda: Path.home() / ".cache/graphme/ooxml-viewer"
     )
@@ -169,9 +162,6 @@ class Settings(BaseModel):
     chrome_executable: str | None = Field(default_factory=_installed_chrome)
     """The browser that draws OOXML pages: the Chrome installed on this machine, unless set.
     With none, Playwright's own browser (`playwright install chromium --only-shell`)."""
-    hierarchy_mode: Literal["off", "derived"] = "off"
-    """"derived" reads the outline from the rendered page, one model call per sheet.
-    Left off, the index holds no outline rather than a guessed one."""
     hierarchy_readings: int = Field(default=1, ge=1, le=4)
     """How many independent readings each page gets. Above one, they run together and
     where they disagree the model is shown both beside the page and picks one -- a page
@@ -194,11 +184,6 @@ class Settings(BaseModel):
     """The Neo4j image the local graph space runs, and `neo4j-admin` runs from in a throwaway
     container to write a `.dump` and to upload one to Aura. A dump loads into this version of
     Neo4j or a later one."""
-    unit_grouping: Literal["off", "page"] = "off"
-    """"page" asks each page which of its pieces of text are one unit, and joins them,
-    between the figures and the outline. It costs one model call per page. Left off, a unit
-    is whatever the file printed -- which for a PDF is ink grouped by where it fell, so a
-    paragraph broken across a column stays broken."""
 
     @field_validator("data_dir", "viewer_directory")
     @classmethod
@@ -253,15 +238,11 @@ class Settings(BaseModel):
         return self
 
     @property
-    def database_path(self) -> Path:
-        return self.data_dir / "graphme.sqlite3"
-
-    @property
     def asset_dir(self) -> Path:
         return self.data_dir / "assets"
 
 
-def _read_yaml(path: Path) -> dict[str, Any]:
+def read_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"configuration file does not exist: {path}")
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -274,17 +255,29 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return raw
 
 
+def app_home(environ: Mapping[str, str] = os.environ, platform: str = sys.platform) -> Path:
+    """Where the app keeps its settings, its graph data and the installed assets."""
+    if named := environ.get("GRAPHME_HOME"):
+        return Path(named)
+    if platform == "win32":
+        return Path(environ["LOCALAPPDATA"]) / "Graph-Me-Maybe"
+    if platform == "darwin":
+        return Path(environ["HOME"]) / "Library" / "Application Support" / "Graph-Me-Maybe"
+    data = environ.get("XDG_DATA_HOME") or str(Path(environ["HOME"]) / ".local" / "share")
+    return Path(data) / "graph-me-maybe"
+
+
 def load_settings(environ: dict[str, str] | None = None) -> Settings:
     if environ is None:
-        env = _read_dotenv(Path.cwd() / ".env")
+        env = read_dotenv(Path.cwd() / ".env")
         env.update(os.environ)
     else:
         env = dict(environ)
     values: dict[str, Any] = {}
     if config_path := env.get("GRAPHME_CONFIG"):
-        values.update(_read_yaml(Path(config_path).expanduser()))
+        values.update(read_yaml(Path(config_path).expanduser()))
 
-    for env_name, field_name in _ENV_FIELDS.items():
+    for env_name, field_name in ENV_FIELDS.items():
         if env_name not in env or env[env_name] == "":
             continue
         value: Any = env[env_name]
@@ -308,4 +301,13 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         values["api_key"] = env[chat.key_env]
     if (row := model_endpoint.EMBEDDERS.get(embedder)) and env.get(row.key_env):
         values["embedding_key"] = env[row.key_env]
+    if "viewer_directory" not in values:
+        # The viewer the installer put in the app's home: every command draws with it, not
+        # only `graphme app`.
+        try:
+            installed = app_home(env) / "viewer"
+        except KeyError:  # no home directory named in this environment
+            installed = None
+        if installed is not None and (installed / "dist").is_dir():
+            values["viewer_directory"] = installed
     return Settings.model_validate(values)

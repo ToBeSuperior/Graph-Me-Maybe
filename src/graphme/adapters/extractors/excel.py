@@ -9,7 +9,7 @@ from typing import Any, cast
 
 from openpyxl.cell.cell import Cell, MergedCell
 from openpyxl.reader.excel import ExcelReader
-from openpyxl.utils.cell import get_column_letter, range_boundaries
+from openpyxl.utils.cell import range_boundaries
 from openpyxl.worksheet.formula import ArrayFormula
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -63,6 +63,15 @@ _REF_RE = re.compile(
 )
 _DYNAMIC_FUNCS = ("INDIRECT", "OFFSET")
 
+
+def _ref_parts(match: re.Match[str], dollar: str = "") -> tuple[str, str]:
+    """A `_REF_RE` match as (sheet, "A1" or "A1:B2"), each cell written with `dollar`."""
+    sheet = match.group("qsheet") or match.group("sheet")
+    cell_ref = f"{dollar}{match.group('c1')}{dollar}{match.group('r1')}"
+    if match.group("c2"):
+        cell_ref += f":{dollar}{match.group('c2')}{dollar}{match.group('r2')}"
+    return sheet, cell_ref
+
 DATA_BLOCK_ROWS = 100
 """How many rows running, each holding two values or more, make a table with no border.
 
@@ -106,24 +115,11 @@ def open_workbook(source: Path, *, read_only: bool = False, data_only: bool = Fa
 
 
 @dataclass(frozen=True)
-class _TableRange:
+class _TableRange(GridRectangle):
+    """A table's (or a pivot's cache source's) rectangle on a sheet, by node."""
+
     node_id: str
     sheet: str
-    min_col: int
-    min_row: int
-    max_col: int
-    max_row: int
-    table_kind: str = "formal"
-
-    @property
-    def ref(self) -> str:
-        return (
-            f"{get_column_letter(self.min_col)}{self.min_row}:"
-            f"{get_column_letter(self.max_col)}{self.max_row}"
-        )
-
-    def contains(self, col: int, row: int) -> bool:
-        return self.min_col <= col <= self.max_col and self.min_row <= row <= self.max_row
 
 
 @dataclass(frozen=True)
@@ -142,19 +138,6 @@ class _LayoutUnit:
             return self.col, self.row, self.col, self.row
         min_col, min_row, max_col, max_row = range_boundaries(self.range_ref)
         return int(min_col), int(min_row), int(max_col), int(max_row)
-
-
-@dataclass(frozen=True)
-class _PivotSource:
-    """A pivot node's cache source rectangle, for post-hoc REFERENCES linking to
-    the recognized table it draws from (which may live on a later-parsed sheet)."""
-
-    node_id: str
-    sheet: str
-    min_col: int
-    min_row: int
-    max_col: int
-    max_row: int
 
 
 def _drawing_member_data(component: DrawingComponent) -> list[dict[str, JsonValue]]:
@@ -198,8 +181,6 @@ class ExcelExtractor:
     """
 
     format = DocumentFormat.XLSX
-    version = "2"
-    """2: a formula outside a table reads the value Excel saved for it."""
 
     def __init__(
         self,
@@ -233,11 +214,6 @@ class ExcelExtractor:
                     locator=SourceLocator(file_name=source.name, label=source.name),
                 )
             )
-        if warnings:
-            warnings = [
-                warning.model_copy(update={"document_id": document_id})
-                for warning in warnings
-            ]
 
         def add_evidence(
             nid: str, label: str, kind: EvidenceKind, text: str, loc: SourceLocator
@@ -294,10 +270,16 @@ class ExcelExtractor:
 
         table_ranges: list[_TableRange] = []
         sheet_ids: dict[str, str] = {}
-        pivot_sources: list[_PivotSource] = []
+        pivot_sources: list[_TableRange] = []
         pivot_ranges: list[_TableRange] = []
         chart_sources: list[tuple[str, list[str]]] = []
         sheet_cells = {sheet.title: written_cells(sheet) for sheet in wb.worksheets}
+        # Grouped once for the workbook; each sheet takes its own, in the same order.
+        sheet_pictures: dict[str, list[DrawingComponent]] = {}
+        if self._asset_store is not None:
+            for component in group_drawing_components(drawing_manifest):
+                if component.pictures:
+                    sheet_pictures.setdefault(component.worksheet, []).append(component)
         for sheet in wb.worksheets:
             self._extract_sheet(
                 sheet=sheet,
@@ -319,6 +301,7 @@ class ExcelExtractor:
                 pivot_ranges=pivot_ranges,
                 chart_sources=chart_sources,
                 drawing_manifest=drawing_manifest,
+                pictures=sheet_pictures.get(sheet.title, []),
             )
 
         self._link_pivots(
@@ -402,11 +385,13 @@ class ExcelExtractor:
         add_evidence: Callable[[str, str, EvidenceKind, str, SourceLocator], None],
         table_ranges: list[_TableRange],
         sheet_ids: dict[str, str],
-        pivot_sources: list[_PivotSource],
+        pivot_sources: list[_TableRange],
         pivot_ranges: list[_TableRange],
         chart_sources: list[tuple[str, list[str]]],
         drawing_manifest: DrawingManifest,
+        pictures: list[DrawingComponent],
     ) -> None:
+        first_node = len(nodes)
         hidden = sheet.sheet_state != "visible"
         sheet_id = node_id("worksheet", {"sheet": sheet.title})
         sheet_ids[sheet.title] = sheet_id
@@ -433,41 +418,8 @@ class ExcelExtractor:
         table_ids: list[str] = []
         ordered_items: list[_LayoutUnit] = []
         sheet_table_ranges: list[_TableRange] = []
-        visual_table_ranges: list[_TableRange] = []
 
-        for name in sheet.tables:
-            table = sheet.tables[name]
-            table_id = node_id("table", {"sheet": sheet.title, "name": name})
-            table_range = self._emit_table(
-                sheet=sheet,
-                value_sheet=value_sheet,
-                source=source,
-                content_hash=content_hash,
-                document_id=document_id,
-                nodes=nodes,
-                evidence=evidence,
-                add_evidence=add_evidence,
-                table_id=table_id,
-                label=name,
-                ref=table.ref,
-                metadata={"table_kind": "formal", "formal_name": name},
-            )
-            table_ids.append(table_id)
-            table_ranges.append(table_range)
-            sheet_table_ranges.append(table_range)
-            ordered_items.append(
-                _LayoutUnit(
-                    table_range.min_row,
-                    table_range.min_col,
-                    table_id,
-                    "table",
-                    range_ref=table.ref,
-                )
-            )
-
-        for candidate in detect_visual_tables(sheet, cells):
-            table_id = node_id("visual_table", {"sheet": sheet.title, "range": candidate.ref})
-            label = f"Visual table {candidate.ref}"
+        def add_table(table_id: str, label: str, ref: str, metadata: dict[str, Any]) -> None:
             table_range = self._emit_table(
                 sheet=sheet,
                 value_sheet=value_sheet,
@@ -479,43 +431,8 @@ class ExcelExtractor:
                 add_evidence=add_evidence,
                 table_id=table_id,
                 label=label,
-                ref=candidate.ref,
-                metadata=self._visual_table_metadata(candidate),
-            )
-            table_ids.append(table_id)
-            table_ranges.append(table_range)
-            sheet_table_ranges.append(table_range)
-            ordered_items.append(
-                _LayoutUnit(
-                    table_range.min_row,
-                    table_range.min_col,
-                    table_id,
-                    "table",
-                    range_ref=candidate.ref,
-                )
-            )
-            visual_table_ranges.append(table_range)
-            # Slot ownership is resolved from parsed anchor geometry during image
-            # extraction, never from component enumeration order.
-
-        taken = [
-            GridRectangle(r.min_col, r.min_row, r.max_col, r.max_row) for r in sheet_table_ranges
-        ]
-        for ref in detect_data_blocks(cells, taken, min_rows=DATA_BLOCK_ROWS):
-            table_id = node_id("data_table", {"sheet": sheet.title, "range": ref})
-            table_range = self._emit_table(
-                sheet=sheet,
-                value_sheet=value_sheet,
-                source=source,
-                content_hash=content_hash,
-                document_id=document_id,
-                nodes=nodes,
-                evidence=evidence,
-                add_evidence=add_evidence,
-                table_id=table_id,
-                label=f"Data table {ref}",
                 ref=ref,
-                metadata={"table_kind": "data"},
+                metadata=metadata,
             )
             table_ids.append(table_id)
             table_ranges.append(table_range)
@@ -526,6 +443,31 @@ class ExcelExtractor:
                 )
             )
 
+        for name in sheet.tables:
+            add_table(
+                node_id("table", {"sheet": sheet.title, "name": name}),
+                name,
+                sheet.tables[name].ref,
+                {"table_kind": "formal", "formal_name": name},
+            )
+
+        for candidate in detect_visual_tables(sheet, cells):
+            # Slot ownership is resolved from parsed anchor geometry during image
+            # extraction, never from component enumeration order.
+            add_table(
+                node_id("visual_table", {"sheet": sheet.title, "range": candidate.ref}),
+                f"Visual table {candidate.ref}",
+                candidate.ref,
+                self._visual_table_metadata(candidate),
+            )
+
+        for ref in detect_data_blocks(cells, sheet_table_ranges, min_rows=DATA_BLOCK_ROWS):
+            add_table(
+                node_id("data_table", {"sheet": sheet.title, "range": ref}),
+                f"Data table {ref}",
+                ref,
+                {"table_kind": "data"},
+            )
 
         text_items = self._extract_native_text(
             sheet=sheet,
@@ -549,9 +491,8 @@ class ExcelExtractor:
                 nodes=nodes,
                 evidence=evidence,
                 node_id=node_id,
-                drawing_manifest=drawing_manifest,
+                components=pictures,
                 table_ranges=sheet_table_ranges,
-                visual_table_ranges=visual_table_ranges,
                 warnings=warnings,
             )
         )
@@ -561,6 +502,7 @@ class ExcelExtractor:
             sheet_id=sheet_id,
             ordered_items=ordered_items,
             nodes=nodes,
+            first_node=first_node,
             edges=edges,
         )
 
@@ -671,7 +613,6 @@ class ExcelExtractor:
             min_row=min_row,
             max_col=max_col,
             max_row=max_row,
-            table_kind=str(metadata.get("table_kind", "formal")),
         )
 
     def _visual_table_metadata(self, candidate: VisualTableCandidate) -> dict[str, Any]:
@@ -820,49 +761,12 @@ class ExcelExtractor:
         nodes: list[GraphNode],
         evidence: list[EvidenceRecord],
         node_id: Callable[[str, dict[str, str]], str],
-        drawing_manifest: DrawingManifest,
+        components: list[DrawingComponent],
         table_ranges: list[_TableRange],
-        visual_table_ranges: list[_TableRange],
         warnings: list[WarningRecord],
     ) -> list[_LayoutUnit]:
         if self._asset_store is None:
             return []
-        components = [
-            component
-            for component in group_drawing_components(drawing_manifest)
-            if component.worksheet == sheet.title and component.pictures
-        ]
-        component_table: dict[str, _TableRange] = {}
-        table_components: dict[str, list[DrawingComponent]] = {}
-        for component in components:
-            member_ranges = [anchor_cell_range(member) for member in component.members]
-            if not member_ranges or any(ref is None for ref in member_ranges):
-                continue
-            member_bounds = [
-                range_boundaries(ref)
-                for ref in member_ranges
-                if ref is not None
-            ]
-            component_rect = GridRectangle(
-                min(bound[0] for bound in member_bounds),
-                min(bound[1] for bound in member_bounds),
-                max(bound[2] for bound in member_bounds),
-                max(bound[3] for bound in member_bounds),
-            )
-            matches = [
-                table
-                for table in table_ranges
-                if (
-                    table.min_col <= component_rect.min_col
-                    and table.min_row <= component_rect.min_row
-                    and table.max_col >= component_rect.max_col
-                    and table.max_row >= component_rect.max_row
-                )
-            ]
-            if len(matches) == 1:
-                component_table[component.component_id] = matches[0]
-                table_components.setdefault(matches[0].node_id, []).append(component)
-
         items: list[_LayoutUnit] = []
         table_visual_emitted: set[str] = set()
         warned_components: set[str] = set()
@@ -887,14 +791,7 @@ class ExcelExtractor:
                     matching_table_ids = [
                         table.node_id
                         for table in table_ranges
-                        if image_rect.overlaps(
-                            GridRectangle(
-                                table.min_col,
-                                table.min_row,
-                                table.max_col,
-                                table.max_row,
-                            )
-                        )
+                        if image_rect.overlaps(table)
                     ]
                     if len(matching_table_ids) == 1:
                         parent = matching_table_ids[0]
@@ -1007,7 +904,7 @@ class ExcelExtractor:
     def _image_mime_type(self, suffix: str) -> str:
         extension = suffix.lower().removeprefix(".")
         return {
-            "jpg": "image/jpg",
+            "jpg": "image/jpeg",
             "jpeg": "image/jpeg",
             "svg": "image/svg+xml",
             "tif": "image/tiff",
@@ -1022,6 +919,7 @@ class ExcelExtractor:
         sheet_id: str,
         ordered_items: list[_LayoutUnit],
         nodes: list[GraphNode],
+        first_node: int,
         edges: list[GraphEdge],
     ) -> None:
         """Hang every unit on what natively holds it, and nothing else.
@@ -1032,7 +930,10 @@ class ExcelExtractor:
         region covered it -- the outline decided here, from display text, and kept in
         ownership where retrieval fell back on it whenever no derived outline existed.
         """
-        node_indexes = {node.id: index for index, node in enumerate(nodes)}
+        # A unit's node is made while its sheet is read, so only the sheet's own are indexed.
+        node_indexes = {
+            nodes[index].id: index for index in range(first_node, len(nodes))
+        }
         for unit in ordered_items:
             owner = unit.parent_id or sheet_id
             edges.append(self._contains(content_hash, document_id, owner, unit.item_id))
@@ -1448,7 +1349,7 @@ class ExcelExtractor:
         edges: list[GraphEdge],
         node_id: Callable[[str, dict[str, str]], str],
         add_evidence: Callable[[str, str, EvidenceKind, str, SourceLocator], None],
-        pivot_sources: list[_PivotSource],
+        pivot_sources: list[_TableRange],
         pivot_ranges: list[_TableRange],
     ) -> None:
         # openpyxl exposes read-side pivots via the private `_pivots` list; each
@@ -1527,7 +1428,7 @@ class ExcelExtractor:
                 src_sheet, src_ref = src
                 min_col, min_row, max_col, max_row = range_boundaries(src_ref)
                 pivot_sources.append(
-                    _PivotSource(
+                    _TableRange(
                         node_id=pivot_id,
                         sheet=src_sheet,
                         min_col=min_col,
@@ -1544,7 +1445,7 @@ class ExcelExtractor:
         document_id: str,
         edges: list[GraphEdge],
         table_ranges: list[_TableRange],
-        pivot_sources: list[_PivotSource],
+        pivot_sources: list[_TableRange],
     ) -> None:
         # A REFERENCES edge from a pivot to each recognized table its cache
         # source overlaps. Deduped by (pivot, table).
@@ -1553,12 +1454,7 @@ class ExcelExtractor:
             for tr in table_ranges:
                 if tr.sheet != ps.sheet:
                     continue
-                if (
-                    ps.min_col <= tr.max_col
-                    and ps.max_col >= tr.min_col
-                    and ps.min_row <= tr.max_row
-                    and ps.max_row >= tr.min_row
-                ):
+                if ps.overlaps(tr):
                     key = (ps.node_id, tr.node_id)
                     if key in seen:
                         continue
@@ -1590,7 +1486,7 @@ class ExcelExtractor:
         defined_ranges: dict[str, str],
         sheet_cells: dict[str, list[Cell]],
     ) -> None:
-        seen: set[tuple[str, str]] = set()
+        seen: set[tuple[str, str, str]] = set()  # the cell's sheet too: A1 is on every sheet
         for sheet in wb.worksheets:
             for cell in sheet_cells[sheet.title]:
                 value = cell.value
@@ -1631,7 +1527,7 @@ class ExcelExtractor:
                 )
                 expanded = self._expand_named_ranges(value, defined_ranges)
                 for target in self._resolve_refs(expanded, table_ranges):
-                    key = (cell.coordinate, target.node_id)
+                    key = (sheet.title, cell.coordinate, target.node_id)
                     if source_id == target.node_id or key in seen:
                         continue
                     seen.add(key)
@@ -1701,22 +1597,13 @@ class ExcelExtractor:
     def _resolve_refs(self, formula: str, table_ranges: list[_TableRange]) -> list[_TableRange]:
         matched: list[_TableRange] = []
         for m in _REF_RE.finditer(formula):
-            sheet = m.group("qsheet") or m.group("sheet")
-            ref = f"{m.group('c1')}{m.group('r1')}"
-            if m.group("c2"):
-                ref += f":{m.group('c2')}{m.group('r2')}"
-            min_col, min_row, max_col, max_row = range_boundaries(ref)
+            sheet, ref = _ref_parts(m)
+            referenced = GridRectangle(*range_boundaries(ref))
             for tr in table_ranges:
                 if tr.sheet != sheet:
                     continue
                 # Any overlap between referenced cells and the table body links.
-                if (
-                    min_col <= tr.max_col
-                    and max_col >= tr.min_col
-                    and min_row <= tr.max_row
-                    and max_row >= tr.min_row
-                    and tr not in matched
-                ):
+                if referenced.overlaps(tr) and tr not in matched:
                     matched.append(tr)
         return matched
 
@@ -1755,10 +1642,7 @@ class ExcelExtractor:
         match = _REF_RE.fullmatch(ref)
         if match is None:
             return ref
-        sheet = match.group("qsheet") or match.group("sheet")
-        cell_ref = f"${match.group('c1')}${match.group('r1')}"
-        if match.group("c2"):
-            cell_ref += f":${match.group('c2')}${match.group('r2')}"
+        sheet, cell_ref = _ref_parts(match, "$")
         return f"{sheet}!{cell_ref}"
 
     def _referenced_cell_value(
@@ -1773,8 +1657,8 @@ class ExcelExtractor:
         match = _REF_RE.fullmatch(ref)
         if match is None:
             return None
-        sheet_name = match.group("qsheet") or match.group("sheet")
-        coordinate = f"{match.group('c1')}{match.group('r1')}"
+        sheet_name, cell_ref = _ref_parts(match)
+        coordinate = cell_ref.partition(":")[0]
         value = sheet.parent[sheet_name][coordinate].value
         if value is None and fallback is not None:
             value = fallback.parent[sheet_name][coordinate].value
@@ -1792,10 +1676,7 @@ class ExcelExtractor:
         match = _REF_RE.fullmatch(ref)
         if match is None:
             return []
-        sheet_name = match.group("qsheet") or match.group("sheet")
-        cell_ref = f"{match.group('c1')}{match.group('r1')}"
-        if match.group("c2"):
-            cell_ref += f":{match.group('c2')}{match.group('r2')}"
+        sheet_name, cell_ref = _ref_parts(match)
         target = sheet.parent[sheet_name]
         fallback_target = fallback.parent[sheet_name] if fallback is not None else None
         return [
@@ -1810,11 +1691,12 @@ class ExcelExtractor:
         # True only if at least one cell in the region carries a value; an empty
         # rectangle (a pivot whose cached region was never written to the grid)
         # has none, and must not be treated as a values-bearing pivot.
-        for row in sheet[ref]:
-            for cell in row:
-                if cell.value is not None:
-                    return True
-        return False
+        min_col, min_row, max_col, max_row = range_boundaries(ref)
+        return any(
+            cell.value is not None
+            for (row, col), cell in sheet._cells.items()
+            if min_row <= row <= max_row and min_col <= col <= max_col
+        )
 
     def _table_text(
         self, sheet: Worksheet, ref: str, *, fallback: Worksheet | None = None

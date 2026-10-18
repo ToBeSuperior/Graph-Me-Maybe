@@ -12,7 +12,7 @@ each on their own, and the outline pass kept doing so after the joining pass was
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TypeVar
 
 T = TypeVar("T")
@@ -28,6 +28,16 @@ SAME_COLUMN_OVERLAP = 0.5
 column. A column's blocks are not all the same width -- a paragraph's last line is short,
 an indented one starts further in -- so what makes a column is that they stand over each
 other, not that they measure the same."""
+
+
+def stated_box(metadata: Mapping[str, object]) -> list[float] | None:
+    """The `normalized_bbox` an extraction recorded: four fractions of the page, or None."""
+    box = metadata.get("normalized_bbox")
+    if isinstance(box, list) and len(box) == 4 and all(
+        isinstance(value, int | float) for value in box
+    ):
+        return [float(value) for value in box]
+    return None
 
 
 def reading_order(

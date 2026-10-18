@@ -18,12 +18,13 @@ import time
 from collections.abc import Callable
 from urllib.parse import urlsplit
 
+from graphme.config import LOOPBACK
+
 _log = logging.getLogger(__name__)
 
 CONTAINER = "graphme-neo4j"
 VOLUME = "graphme-neo4j-data"
 LOGS = "graphme-neo4j-logs"
-LOOPBACK = ("127.0.0.1", "localhost", "::1")
 WAIT_SECONDS = 120
 _starting = threading.Lock()
 
@@ -125,7 +126,7 @@ def ensure_local_neo4j(
             f"로컬 Neo4j가 {WAIT_SECONDS}초 안에 응답하지 않았습니다. 컨테이너 상태는 "
             f"`docker logs {CONTAINER}`로 봅니다. 컨테이너가 떠 있는데도 이 컴퓨터의 "
             f"{port}번 포트로 답이 없으면 Docker의 포트 전달 문제입니다 -- colima라면 "
-            "`colima restart` 후 다시 실행하세요."
+            "`colima stop && colima start --port-forwarder grpc` 후 다시 실행하세요."
         )
 
 

@@ -8,10 +8,6 @@ from graphme.domain.models import (
     HierarchyChoice,
     HierarchyScopeRequest,
     HierarchyScopeResult,
-    PageSegmentationRequest,
-    PageSegmentationResult,
-    RelationProposal,
-    RelationRequest,
     UnitGroupingRequest,
     UnitGroupingResult,
     VisualCaptionRequest,
@@ -22,19 +18,6 @@ from graphme.domain.models import (
 class VisionProvider(Protocol):
     @property
     def model(self) -> str: ...
-
-    def segment_page(
-        self,
-        *,
-        request: PageSegmentationRequest,
-        image: bytes,
-    ) -> PageSegmentationResult: ...
-
-    def propose_relations(
-        self,
-        *,
-        request: RelationRequest,
-    ) -> tuple[RelationProposal, ...]: ...
 
     def resolve_hierarchy_scope(
         self,

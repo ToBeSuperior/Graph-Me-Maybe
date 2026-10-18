@@ -8,17 +8,10 @@ import numpy as np
 from PIL import Image, UnidentifiedImageError
 
 from graphme.domain.enums import SemanticUnitKind
-from graphme.domain.ids import canonical_json, content_id, sha256_bytes
 from graphme.domain.models import (
-    Caption,
     DocumentReferenceRequest,
     DocumentReferenceResult,
-    EmbeddingRecord,
-    EmbeddingRequest,
-    EvidenceClaim,
-    EvidenceRecord,
     FigureGroupingResult,
-    GeneratedAnswer,
     HierarchyChoice,
     HierarchyScopeRequest,
     HierarchyScopeResult,
@@ -26,128 +19,12 @@ from graphme.domain.models import (
     NormalizedBBox,
     PageSegmentationRequest,
     PageSegmentationResult,
-    RelationProposal,
-    RelationRequest,
-    RetrievedContext,
     SegmentedUnit,
     UnitGroupingRequest,
     UnitGroupingResult,
     VisualCaptionRequest,
     VisualCaptionResult,
 )
-
-
-class HashEmbeddingProvider:
-    """Deterministic local embeddings for explicit test-profile runtimes."""
-
-    def __init__(self, *, dimensions: int) -> None:
-        self._dimensions = dimensions
-
-    @property
-    def name(self) -> str:
-        return "hash"
-
-    @property
-    def model(self) -> str:
-        return "deterministic-sha256"
-
-    @property
-    def dimensions(self) -> int:
-        return self._dimensions
-
-    def cache_key(self, request: EmbeddingRequest) -> str:
-        return (
-            f"{self.name}:{self.model}:{request.input_type.value}:"
-            f"{request.representation_hash}"
-        )
-
-    def embed(
-        self, requests: tuple[EmbeddingRequest, ...]
-    ) -> tuple[EmbeddingRecord, ...]:
-        records = []
-        for request in requests:
-            cache_key = self.cache_key(request)
-            digest = bytes.fromhex(sha256_bytes(cache_key.encode()))
-            vector = tuple(
-                digest[index % len(digest)] / 255.0
-                for index in range(self._dimensions)
-            )
-            records.append(
-                EmbeddingRecord(
-                    id=content_id("embedding", sha256_bytes(cache_key.encode())),
-                    owner_id=request.id,
-                    provider=self.name,
-                    model=self.model,
-                    dimensions=self._dimensions,
-                    vector=vector,
-                    representation_hash=request.representation_hash,
-                    cache_key=cache_key,
-                )
-            )
-        return tuple(records)
-
-
-class DeterministicGenerationProvider:
-    """Offline generation with citations limited to supplied source evidence."""
-
-    @property
-    def model(self) -> str:
-        return "deterministic-local"
-
-    def caption(
-        self,
-        *,
-        node_id: str,
-        evidence: tuple[EvidenceRecord, ...],
-        correction: str | None = None,
-    ) -> Caption:
-        serialized = [item.model_dump(mode="json") for item in evidence]
-        source_hash = sha256_bytes(canonical_json(serialized).encode())
-        summaries = tuple(item.text for item in evidence if item.text)
-        summary = "\n".join(summaries) or "Deterministic offline evidence"
-        return Caption(
-            id=content_id("caption", source_hash),
-            document_id=evidence[0].document_id,
-            node_id=node_id,
-            summary=summary,
-            confidence=1.0,
-            claims=tuple(
-                EvidenceClaim(statement=item.text, evidence_ids=(item.id,))
-                for item in evidence
-                if item.text
-            ),
-            model=self.model,
-            source_hash=source_hash,
-        )
-
-    def summarize_embedding_input(
-        self,
-        *,
-        evidence: tuple[EvidenceRecord, ...],
-        reason: str,
-    ) -> str:
-        summaries = tuple(item.text for item in evidence if item.text)
-        return "\n".join(summaries) or "Deterministic offline evidence"
-
-    def answer(
-        self,
-        *,
-        context: RetrievedContext,
-        evidence: tuple[EvidenceRecord, ...],
-        repair: str | None = None,
-    ) -> GeneratedAnswer:
-        source = tuple(item for item in evidence if not item.generated)
-        generated_text = next(
-            (item.text for item in evidence if item.generated and item.text),
-            None,
-        )
-        return GeneratedAnswer(
-            text=(
-                generated_text
-                or "Deterministic offline answer grounded in local source evidence."
-            ),
-            citation_evidence_ids=tuple(item.id for item in source),
-        )
 
 
 class DeterministicVisionProvider:
@@ -354,13 +231,6 @@ class DeterministicVisionProvider:
             structured_data=structured_data,
             confidence=0.75,
         )
-
-    def propose_relations(
-        self,
-        *,
-        request: RelationRequest,
-    ) -> tuple[RelationProposal, ...]:
-        return ()
 
     def resolve_hierarchy_scope(
         self,

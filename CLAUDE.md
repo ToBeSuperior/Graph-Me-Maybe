@@ -26,7 +26,7 @@ Also gitignored and absent from a clone: `/test_dataset/`, `/reports/`, `/data/`
 
 ```bash
 uv sync --extra dev                    # install
-uv run graphme --help              # ingest | query | inspect | evaluate | xlsx-bundle | export-neo4j
+uv run graphme --help              # every command; xlsx-bundle renders one workbook to pages
 uv run graphme build-graph <folder> # every document into the Neo4j graph space, then linked
 uv run graphme embed-graph          # cut the space into passages, embed them (embedder's key)
 uv run graphme ask "<question>"     # GraphRAG over the space (neo4j-graphrag)
@@ -69,19 +69,18 @@ dependency-free; `ports/` declares Protocols; `adapters/` implements them; `appl
 orchestrates; `runtime.py` is the only place that wires concrete adapters together, and
 both the Typer CLI and the FastAPI app go through it.
 
-### The indexing pipeline
+### The document graph pipeline
 
-`application/indexing.py` (`DocumentIndexBuilder.build`) is the spine, and the order
+`application/document_graph.py` (`DocumentGraphBuilder.build`) is the spine, and the order
 matters more than any single module:
 
 ```
-extract → (visual observation → semantic reconciliation) → grounding
-        → validate → visual binding → validate
+extract → validate → visual binding → validate
         → [derived only] figure grouping → widen figures → validate
                        → text grouping (PDF, PPTX) → validate
                        → outline decisions + figure-part placement
         → enrichment (captions, references) → validate
-        → relations → compose → embeddings → atomic persist
+        → put in the graph space → link mentions (SAME_AS)
 ```
 
 A rendered page is asked three separate questions, and the order is the point: which
@@ -123,8 +122,7 @@ sheet maps 1:1 to a page. PDFs are rastered directly by PyMuPDF.
 
 Every read of a PDF page's text goes through `extractors/pdf.py` `page_text`: some PDFs write no
 space between words and only move the pen, and pymupdf fills that gap for a Latin font but not
-for a CJK one, so Korean ran together. A gap over `WORD_GAP` of the font size is a space. Bump
-`PDFExtractor.version` when what is read off a page changes -- it is the index cache key.
+for a CJK one, so Korean ran together. A gap over `WORD_GAP` of the font size is a space.
 
 Each render serves from a site of its own under its temporary workspace, on a port the OS
 assigns (`browser_capture.py`, one handler serving the render's files over the bundle -- no links). Copying the document
@@ -172,8 +170,8 @@ rule for all four formats.
 
 ### Hierarchy
 
-`GRAPHME_HIERARCHY_MODE` is `off` by default: no outline is written at all. The
-marker-based pass was removed because a marker is display text and an outline nobody can
+`build-graph` and the demo always read the outline off the page (`derived` in `graph_parts`).
+The marker-based pass was removed because a marker is display text and an outline nobody can
 trust is worse than none.
 
 `derived` reads the outline off the rendered page, one model call per scope, for every
@@ -302,7 +300,7 @@ same shortened ids and keeps whichever one it picks, whole. Never merge two read
 hierarchy assembled from parts of both is one nobody judged.
 
 A page the model gives no usable answer for is skipped rather than failing the document,
-and `derive` returns it in `HierarchyDerivation.unread_pages`; indexing turns each into a
+and `derive` returns it in `HierarchyDerivation.unread_pages`; the graph build turns each into a
 `hierarchy_page_unread` warning. A page left flat because it failed must not look like a page
 read as flat.
 
@@ -311,12 +309,9 @@ is busy, for minutes at a time. Transient statuses and transport errors say noth
 page, so they are retried on their own schedule (`TRANSIENT_RETRY_DELAYS`, several minutes in
 all), counted apart from the attempts a malformed answer gets; a 20-second window left pages
 flat through ordinary overloads.
-`application/indexing.py` fails closed both ways — `derived` without a provider is
-refused, and a provider without `derived` is refused too, so the index can never silently
-contain something other than what the mode says.
 
 What the model is sent, and why, is in `docs/method.md`. Two constraints are easy to
-break: a unit is addressed by a **shortened** id (`short_unit_ids()` in
+break: a unit is addressed by a **shortened** id (`short_ids()` in
 `adapters/vision/chat_completions.py`) because a full UUID is not something a model can copy
 back, and the response asks for nothing the prompt did not supply — an echoed identifier
 proves nothing when this side is the one that sent the request.
@@ -343,7 +338,7 @@ on, so DOCX passes `page_of` from the same layout the crops came from.
 
 ### Questions over the graph space
 
-`adapters/storage/graph_rag.py` sits on the graph space, not on the index, and shares its
+`adapters/storage/graph_rag.py` sits on the graph space and shares its
 driver. `embed-graph` cuts each document's outline into passages
 (`application/graph_chunks.py`: a section that fits `CHUNK_TOKENS` is one passage, a larger
 one is cut between its items under its headings, a single unit too big is cut between its

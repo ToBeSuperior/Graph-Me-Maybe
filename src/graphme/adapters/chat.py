@@ -35,6 +35,26 @@ MAX_REQUEST_BASE64 = 32 * 1024 * 1024
 
 Content = str | list[dict[str, Any]]
 
+TRANSIENT_STATUS = frozenset({408, 429, 502, 503, 504, 529})
+"""Endpoint answers that say nothing about the request (529 is Anthropic's "overloaded").
+A caller retries them on its own schedule, counted apart from the attempts a malformed
+answer gets."""
+
+
+def is_transient(error: httpx.HTTPError) -> bool:
+    """A timeout or a dropped connection always; a status only when it says "not now"."""
+    if not isinstance(error, httpx.HTTPStatusError):
+        return True
+    return error.response.status_code in TRANSIENT_STATUS
+
+
+def image_part(png: bytes) -> dict[str, Any]:
+    """A PNG as one part of a chat message."""
+    return {
+        "type": "image_url",
+        "image_url": {"url": "data:image/png;base64," + base64.b64encode(png).decode("ascii")},
+    }
+
 
 @dataclass(frozen=True, slots=True)
 class Endpoint:

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from graphme import launcher, model_endpoint
-from graphme.config import _read_dotenv, load_settings
+from graphme.config import load_settings, read_dotenv
 
 
 def test_the_home_is_the_platform_s_app_folder_unless_named() -> None:
@@ -33,16 +33,6 @@ def test_a_settings_file_is_written_once_and_never_over_the_user_s(tmp_path: Pat
     (home / ".env").write_text("OPENAI_API_KEY=invented\n")
     launcher.prepare(home)
     assert (home / ".env").read_text() == "OPENAI_API_KEY=invented\n"
-
-
-def test_the_installed_viewer_is_used_unless_another_is_named(tmp_path: Path) -> None:
-    (tmp_path / "viewer").mkdir()
-    assert launcher.asset_defaults(tmp_path, {}) == {
-        "GRAPHME_VIEWER_DIR": str(tmp_path / "viewer")}
-    assert launcher.asset_defaults(tmp_path, {"GRAPHME_VIEWER_DIR": "/mine"}) == {}
-    (tmp_path / ".env").write_text("GRAPHME_VIEWER_DIR=/in-env\n")
-    assert launcher.asset_defaults(tmp_path, {}) == {}
-    assert launcher.asset_defaults(tmp_path / "none", {}) == {}
 
 
 def test_the_installed_web_app_is_served(tmp_path: Path) -> None:
@@ -90,7 +80,7 @@ def test_started_it_serves_from_its_home_and_opens_when_ready(
 
 def test_the_settings_file_written_on_a_fresh_home_loads(tmp_path: Path) -> None:
     launcher.prepare(tmp_path)
-    written = _read_dotenv(tmp_path / ".env")
+    written = read_dotenv(tmp_path / ".env")
     known = {p.key_env for p in model_endpoint.PROVIDERS.values()} | {
         e.key_env for e in model_endpoint.EMBEDDERS.values()}
     assert {name for name in written if name.endswith("_KEY")} <= known

@@ -36,7 +36,6 @@ from graphme.application.unit_placement import (
 )
 from graphme.application.xlsx_visual_binding import VISUAL_TYPES, read_node_crop
 from graphme.domain.enums import DocumentFormat, NodeType
-from graphme.domain.ids import canonical_json
 from graphme.domain.models import (
     ExtractedDocument,
     GraphNode,
@@ -52,7 +51,6 @@ from graphme.ports.vision import VisionProvider
 
 _log = logging.getLogger(__name__)
 
-RENDERER_VERSION = "ooxml-browser-1"
 PICTURE_TYPES = {NodeType.IMAGE, NodeType.CHART}
 """Units whose label cannot identify them. A table's label carries its header row and
 cell range; a picture's is "그림 5", so its crop is shown alongside."""
@@ -428,19 +426,7 @@ class RenderedHierarchyScopeProvider:
                 document_id=extracted.document.id,
                 scope=scope.scope,
                 page_index=scope.page_index,
-                renderer_version=RENDERER_VERSION,
-                mapping_hash=hashlib.sha256(
-                    canonical_json([u.id for u in scope.units]).encode()
-                ).hexdigest(),
                 covered_unit_ids=unit_ids,
-                manifest_hash=hashlib.sha256(
-                    canonical_json(
-                        {
-                            "page": page.label or page.index,
-                            "size": [page.width, page.height],
-                        }
-                    ).encode()
-                ).hexdigest(),
             ),
         )
 

@@ -94,6 +94,12 @@ def capture(kind: str, source: Path, workspace: Path, *, width: int, dpr: float,
     """Draw `source` and write each page as `page-NNN.png`, with `manifest.json` beside them."""
     from playwright.sync_api import Error, sync_playwright
 
+    part = bundle / ("xlsx" if kind == "xlsx" else "dist")
+    if not part.is_dir():  # otherwise the page only says a module failed to load
+        raise RuntimeError(
+            f"뷰어 번들이 {bundle}에 없습니다 ({part.name}/) -- 설치 프로그램을 다시 실행하거나 "
+            "src/graphme/adapters/rendering/viewer/setup.sh로 만들고, 다른 곳에 있다면 "
+            "GRAPHME_VIEWER_DIR로 가리키세요.")
     site = workspace / "site"
     site.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, site / f"sample.{kind}")

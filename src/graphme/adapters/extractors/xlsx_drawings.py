@@ -31,7 +31,7 @@ def _hash(payload: bytes) -> str:
 
 def _relationships(archive: ZipFile, part: str) -> dict[str, tuple[str, str]]:
     rels_name = rels_part(part)
-    if rels_name not in archive.namelist():
+    if rels_name not in archive.NameToInfo:
         return {}
     return {rid: (target, kind) for _, rid, kind, target in relations(archive, rels_name)}
 
@@ -295,7 +295,7 @@ def _walk_objects(
         if media_rid in drawing_rels:
             target, _ = drawing_rels[media_rid]
             media_target = target
-            if target in archive.namelist():
+            if target in archive.NameToInfo:
                 media_bytes = archive.read(target)
     raw = ET.tostring(element, encoding="utf-8")
     identity = ":".join(
@@ -379,7 +379,7 @@ def parse_xlsx_drawings(source: Path, *, workbook_hash: str | None = None) -> Dr
             if not sheet_rid or sheet_rid not in workbook_rels:
                 continue
             worksheet_part = workbook_rels[sheet_rid][0]
-            if worksheet_part not in archive.namelist():
+            if worksheet_part not in archive.NameToInfo:
                 continue
             worksheet = ET.fromstring(archive.read(worksheet_part))
             sheet_rels = _relationships(archive, worksheet_part)
@@ -388,7 +388,7 @@ def parse_xlsx_drawings(source: Path, *, workbook_hash: str | None = None) -> Dr
                 if not drawing_rid or drawing_rid not in sheet_rels:
                     continue
                 drawing_part = sheet_rels[drawing_rid][0]
-                if drawing_part not in archive.namelist():
+                if drawing_part not in archive.NameToInfo:
                     warnings.append(
                         f"missing drawing part {drawing_part} for {title}:{drawing_rid}"
                     )

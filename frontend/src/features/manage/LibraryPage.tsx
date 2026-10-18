@@ -27,7 +27,7 @@ function stateOf(item: LibraryItem): { word: WordKey; tone: 'accent' | 'ok' | 'd
 }
 
 /** Where a row opens: a graph document by its id, a file only the server holds by the file's. */
-export const docLink = (item: LibraryItem) =>
+const docLink = (item: LibraryItem) =>
   item.in_space ? `/manage/docs/${encodeURIComponent(item.document_id!)}` : `/manage/docs/${item.file_id}?demo=1`;
 
 /** A document read but not in the graph -- failed, or passed over by a cancel: read again, or

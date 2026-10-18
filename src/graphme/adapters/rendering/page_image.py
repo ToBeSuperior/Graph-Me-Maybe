@@ -96,11 +96,7 @@ class PageImageRenderer:
         self._validate_source(source, document_format)
         try:
             if document_format is DocumentFormat.PDF:
-                return self._render_pdf_with_mapping(
-                    pdf_source=source,
-                    original_source=source,
-                    document_format=document_format,
-                )
+                return self._render_pdf_with_mapping(source)
             return self._render_office_with_mapping(source, document_format)
         except (pymupdf.EmptyFileError, pymupdf.FileDataError) as exc:
             raise ValueError(f"Unable to render PDF: {source}") from exc
@@ -185,16 +181,10 @@ class PageImageRenderer:
             self._validate_pdf_has_pages(document, source)
             return self._rasterize_pdf(document)
 
-    def _render_pdf_with_mapping(
-        self,
-        *,
-        pdf_source: Path,
-        original_source: Path,
-        document_format: DocumentFormat,
-    ) -> PageImageRenderResult:
-        with pymupdf.open(pdf_source) as document:  # type: ignore[no-untyped-call]
-            self._validate_pdf_has_pages(document, pdf_source)
-            mappings = self._map_document_pages(original_source, document.page_count)
+    def _render_pdf_with_mapping(self, source: Path) -> PageImageRenderResult:
+        with pymupdf.open(source) as document:  # type: ignore[no-untyped-call]
+            self._validate_pdf_has_pages(document, source)
+            mappings = self._map_document_pages(source, document.page_count)
             pages = self._rasterize_pdf(document)
         return PageImageRenderResult(pages=pages, mappings=mappings)
 

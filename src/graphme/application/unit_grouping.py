@@ -19,6 +19,7 @@ from graphme.application.reading_order import (
     SAME_COLUMN_OVERLAP,
     overlap,
     reading_order,
+    stated_box,
 )
 from graphme.domain.enums import EdgeType, EvidenceKind, NodeType
 from graphme.domain.ids import stable_id
@@ -178,7 +179,7 @@ def _small_print(
     with no size, from a format that does not say, is never small.
     """
     size = {node.id: node.metadata.get("font_size") for node in extracted.nodes}
-    box = {node.id: _box(node) for node in extracted.nodes}
+    box = {node.id: stated_box(node.metadata) for node in extracted.nodes}
     small: set[str] = set()
     for held in by_page.values():
         known = {
@@ -335,17 +336,8 @@ def in_reading_order(units: Sequence[GraphNode]) -> list[GraphNode]:
     return [
         unit
         for page in sorted(by_page)
-        for unit in reading_order(by_page[page], _box, width=1.0)
+        for unit in reading_order(by_page[page], lambda u: stated_box(u.metadata), width=1.0)
     ]
-
-
-def _box(unit: GraphNode) -> list[float] | None:
-    box = unit.metadata.get("normalized_bbox")
-    if isinstance(box, list) and len(box) == 4 and all(
-        isinstance(value, int | float) for value in box
-    ):
-        return [float(value) for value in box]  # type: ignore[arg-type]
-    return None
 
 
 def _page(node: GraphNode) -> int:
@@ -443,12 +435,12 @@ def _around(held: Sequence[GraphNode]) -> list[float] | None:
     there: a section's first paragraph arrived ahead of two headings printed above it.
     """
     home = _page(held[0])
-    start = _box(held[0])
+    start = stated_box(held[0].metadata)
     boxes = [
         box
         for node in held
         if _page(node) == home
-        and (box := _box(node)) is not None
+        and (box := stated_box(node.metadata)) is not None
         and (start is None or overlap((start[0], start[2]), box) >= SAME_COLUMN_OVERLAP)
     ]
     if not boxes:

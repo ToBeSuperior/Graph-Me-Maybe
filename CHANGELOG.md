@@ -3,6 +3,24 @@
 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고, 버전은
 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.1.5] - 2026-10-18
+
+### 제거
+
+- 문서 하나를 SQLite 색인으로 다루던 예전 경로와 그 CLI 명령 `ingest`·`query`·`inspect`·`evaluate`·`export-neo4j`를 지웠습니다. 문서는 `build-graph`로 그래프 공간에 올리고 `ask`로 묻고 `export-corpus`로 내보냅니다. 그 경로만 읽던 설정 `GRAPHME_HIERARCHY_MODE`·`GRAPHME_UNIT_GROUPING`·`GRAPHME_NODE_BUDGET`·`GRAPHME_TOKEN_BUDGET`·`GRAPHME_MAX_HOPS`도 더는 읽지 않습니다.
+- 쓰이지 않던 코드(호출하는 곳이 없는 grounding 경로, VLM 페이지 분할, 읽히지 않는 필드)와 중복 코드를 정리했습니다.
+
+### 고침
+
+- 설치 프로그램으로 깐 뒤 `graphme build-graph` 등 CLI·Python API가 앱 폴더의 뷰어를 찾지 못해 DOCX·PPTX·XLSX를 그리지 못하던 것. 이제 모든 명령이 설치된 뷰어를 씁니다. 뷰어가 없으면 그렇다고, 어떻게 만드는지 말합니다.
+- 엑셀: 두 시트의 같은 셀이 같은 표를 읽는 수식에서 두 번째 연결이 빠지던 것. JPEG 그림의 형식을 `image/jpg`가 아니라 `image/jpeg`로 적습니다.
+- 첨부 파일 이름의 내부 구분자(`.emb…`)가 Python API 예제와 HTTP 예제의 근거 목록에 나오던 것(`graphme.shown_name`).
+- colima의 기본 포트 전달(ssh)에서 처음 띄운 Neo4j에 연결하지 못하던 것: README와 오류 메시지가 `--port-forwarder grpc`를 안내합니다.
+
+### 바뀜
+
+- 엑셀·PDF 추출이 같은 영역·페이지를 여러 번 읽지 않습니다(결과는 같고 더 빠름).
+
 ## [0.1.4] - 2026-10-18
 
 ### 고침

@@ -29,6 +29,3 @@ class Embedder:
     key_env: str
     model: str
     dimensions: int
-    tokens_per_input: int
-    tokens_per_request: int
-    inputs_per_request: int

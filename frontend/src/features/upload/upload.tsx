@@ -12,7 +12,7 @@ const READABLE = /\.(xlsx|pptx|docx|pdf)$/i;
 
 /** What a folder holds that is the user's and can be read: Office's lock files and anything
  * hidden are passed over. `path` is where the file sat in the folder. */
-export const readable = (file: File, path = file.webkitRelativePath || file.name) =>
+const readable = (file: File, path = file.webkitRelativePath || file.name) =>
   READABLE.test(file.name) && !file.name.startsWith('~$') && !path.split('/').some((p) => p.startsWith('.'));
 
 /** Every file under what was dropped, folders walked. */
@@ -37,7 +37,7 @@ export async function droppedFiles(items: DataTransferItemList): Promise<{ file:
   return out;
 }
 
-export interface Uploading { done: number; total: number; current: string }
+interface Uploading { done: number; total: number; current: string }
 
 interface UploadApi {
   uploading: Uploading | null;

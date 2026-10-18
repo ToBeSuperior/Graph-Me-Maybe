@@ -184,9 +184,6 @@ class PowerPointExtractor:
     """Extract the authoritative native structure and content of a PPTX deck."""
 
     format = DocumentFormat.PPTX
-    version = "2"
-    """2: a line break parts its words, a group stating no child space keeps its
-    children, and a chart python-pptx cannot read costs only its own series."""
 
     def __init__(self, *, asset_store: AssetStore | None = None) -> None:
         self._asset_store = asset_store
@@ -262,7 +259,6 @@ class PowerPointExtractor:
                 self._edge(content_hash, document_id, document_id, slide_id, EdgeType.CONTAINS)
             )
 
-            child_ids: list[str] = []
             drawn = flatten_shapes(slide.shapes)
             drawn += flatten_shapes(
                 _layout_shapes(slide, slide_width, slide_height), from_layout=True
@@ -286,7 +282,6 @@ class PowerPointExtractor:
                     evidence=evidence,
                 )
                 if child_id is not None:
-                    child_ids.append(child_id)
                     edges.append(
                         self._edge(
                             content_hash,

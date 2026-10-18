@@ -23,7 +23,6 @@ import re
 import threading
 import time
 import unicodedata
-from abc import abstractmethod
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future
 from dataclasses import dataclass, field
@@ -31,19 +30,17 @@ from typing import Any, cast
 
 import httpx
 import neo4j
-from neo4j_graphrag.embeddings import OpenAIEmbeddings
-from neo4j_graphrag.embeddings.base import Embedder
 from neo4j_graphrag.indexes import create_vector_index
 from neo4j_graphrag.retrievers import HybridCypherRetriever
 from neo4j_graphrag.types import RetrieverResultItem
 from pydantic import BaseModel, Field
 
-from graphme.adapters.chat import Endpoint, complete
+from graphme.adapters.chat import Endpoint, complete, image_part, is_transient
+from graphme.adapters.embedding import BatchEmbedder
 from graphme.adapters.export.neo4j import CHUNK_LABEL, NODE_LABEL
 from graphme.adapters.storage.neo4j_space import CHUNK_TEXT_INDEX, Neo4jGraphSpace, checked_name
 from graphme.adapters.storage.similar_documents import SimilarDocuments
 from graphme.adapters.strict_schema import strict_response_schema
-from graphme.adapters.vision.chat_completions import _is_transient, image_part
 from graphme.application.corpus_links import document_numbers
 from graphme.application.graph_chunks import CHUNK_RULE, chunks
 from graphme.application.passage_scores import IMPORTANCE_RULE, centroid, importance
@@ -131,28 +128,6 @@ Answer:"""
 
 class GraphNotEmbedded(RuntimeError):
     """A question was asked of a space nothing was embedded in yet."""
-
-
-class BatchEmbedder(Embedder):
-    """Embeds a question, and many passages in one call -- a whole space one call a passage
-    takes far too long."""
-
-    @abstractmethod
-    def embed_texts(self, texts: list[str]) -> list[list[float]]: ...
-
-
-class OpenAIBatchEmbeddings(OpenAIEmbeddings, BatchEmbedder):
-    """OpenAI's embeddings endpoint, or a provider's compatible one (`base_url`). Vectors are
-    asked for as floats -- the client otherwise asks for base64, which a compatible layer need
-    not speak -- and put back in the order the texts were sent."""
-
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        response = self.client.embeddings.create(
-            input=texts, model=self.model, encoding_format="float")
-        return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
-
-    def embed_query(self, text: str, **kwargs: Any) -> list[float]:
-        return self.embed_texts([text])[0]
 
 
 @dataclass(frozen=True, slots=True)
@@ -466,7 +441,7 @@ class GraphRag:
             try:
                 return complete(self._client, self._endpoint, **ask)
             except httpx.HTTPError as error:
-                if not _is_transient(error):
+                if not is_transient(error):
                     raise
             self._wait(delay)
         return complete(self._client, self._endpoint, **ask)

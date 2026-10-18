@@ -74,8 +74,6 @@ class SheetMeasurement:
     drawing_content_range: str | None
     visual_content_range: str | None
     cell_count: int
-    merged_range_count: int
-    table_count: int
     drawing_count: int
     contributors: tuple[RangeContributor, ...]
 
@@ -151,7 +149,6 @@ def measure_workbook(source: Path) -> WorkbookMeasurement:
                     )
                 )
             visual_bounds = cell_bounds
-            merged_count = len(sheet.merged_cells.ranges)
             for merged in sheet.merged_cells.ranges:
                 value = CellRange(merged.min_row, merged.max_row, merged.min_col, merged.max_col)
                 visual_bounds = _with_range(
@@ -190,8 +187,6 @@ def measure_workbook(source: Path) -> WorkbookMeasurement:
                     drawing_content_range=drawing_bounds.a1 if drawing_bounds else None,
                     visual_content_range=visual_bounds.a1 if visual_bounds else None,
                     cell_count=sum(cell.value is not None for cell in sheet._cells.values()),
-                    merged_range_count=merged_count,
-                    table_count=len(sheet.tables),
                     drawing_count=len(sheet_drawings),
                     contributors=tuple(contributors),
                 )

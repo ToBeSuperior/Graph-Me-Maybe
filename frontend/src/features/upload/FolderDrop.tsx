@@ -9,7 +9,7 @@ import { useSettings } from '../../lib/queries';
 import { droppedFiles, useUpload } from './upload';
 
 /** The hidden folder picker and a way to open it. */
-export function useFolderPicker() {
+function useFolderPicker() {
   const { add } = useUpload();
   const input = useRef<HTMLInputElement>(null);
   const element = (

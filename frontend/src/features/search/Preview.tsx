@@ -120,7 +120,7 @@ export const Preview = memo(function Preview({ row, question }: { row: Row; ques
 });
 
 /** "Open in Manage" as a link that looks like a button. */
-export function OpenInManage({ id }: { id: string }) {
+function OpenInManage({ id }: { id: string }) {
   const t = useT();
   return (
     <Link to={`/manage/docs/${encodeURIComponent(id)}`}

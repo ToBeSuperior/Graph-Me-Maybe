@@ -34,9 +34,3 @@ def stable_id(document_hash: str, locator: str) -> str:
     if not locator:
         raise ValueError("locator must not be empty")
     return str(uuid.uuid5(ID_NAMESPACE, f"{document_hash}:{locator}"))
-
-
-def content_id(kind: str, content_hash: str) -> str:
-    if not kind or not content_hash:
-        raise ValueError("kind and content_hash must not be empty")
-    return str(uuid.uuid5(ID_NAMESPACE, f"content:{kind}:{content_hash}"))

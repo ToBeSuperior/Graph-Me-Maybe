@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -11,26 +10,18 @@ import httpx
 
 from graphme import model_endpoint
 from graphme.adapters.chat import Endpoint
-from graphme.adapters.embedding.text import TextEmbeddingProvider
+from graphme.adapters.embedding import OpenAIBatchEmbeddings
 from graphme.adapters.export.neo4j_admin import DockerNeo4jAdmin
 from graphme.adapters.extractors.docx import DocxExtractor
 from graphme.adapters.extractors.excel import ExcelExtractor
 from graphme.adapters.extractors.pdf import PDFExtractor
 from graphme.adapters.extractors.powerpoint import PowerPointExtractor
-from graphme.adapters.generation.chat_completions import ChatCompletionsGenerationAdapter
-from graphme.adapters.offline import (
-    DeterministicGenerationProvider,
-    DeterministicVisionProvider,
-    HashEmbeddingProvider,
-)
 from graphme.adapters.rendering.browser_office import BrowserOfficeRenderer
-from graphme.adapters.rendering.page_image import PageImageRenderer
 from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.rendering.visual_binding import RenderedVisualBinder
 from graphme.adapters.storage.assets import LocalAssetStore
-from graphme.adapters.storage.graph import SQLiteGraphStore
-from graphme.adapters.storage.graph_rag import GraphRag, OpenAIBatchEmbeddings
-from graphme.adapters.storage.local_neo4j import LOOPBACK, ensure_local_neo4j, own_port
+from graphme.adapters.storage.graph_rag import GraphRag
+from graphme.adapters.storage.local_neo4j import ensure_local_neo4j, own_port
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, PasswordWanted
 from graphme.adapters.vision.chat_completions import ChatCompletionsVLMAdapter
 from graphme.adapters.vision.hierarchy_scope import RenderedHierarchyScopeProvider
@@ -38,42 +29,13 @@ from graphme.adapters.vision.text_grouping import RenderedUnitGrouper
 from graphme.application.corpus_build import BuildReport, StepListener, build_graph
 from graphme.application.document_graph import DocumentGraphBuilder
 from graphme.application.embedded_documents import unpack_embedded
-from graphme.application.embedding import EmbeddingGenerator
-from graphme.application.evaluate import EvaluationService
-from graphme.application.grounding import GroundedDocumentBuilder
-from graphme.application.index_representation import MultimodalIndexComposer
-from graphme.application.indexing import DocumentIndexBuilder
-from graphme.application.ingest import DocumentIngestor, documents_at, format_of
-from graphme.application.inspect import InspectionService
+from graphme.application.ingest import documents_at, format_of
 from graphme.application.page_enrichment import RenderedPageEnricher
-from graphme.application.query import QueryService
-from graphme.application.relations import RelationReconciler
-from graphme.application.semantic_reconciliation import SemanticReconciler
-from graphme.config import Settings, load_settings
+from graphme.config import LOOPBACK, Settings, load_settings
 from graphme.domain.enums import DocumentFormat
-from graphme.ports.embedding import EmbeddingProvider
-from graphme.ports.generation import GenerationProvider
 from graphme.ports.vision import VisionProvider
 
 _log = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class Runtime:
-    settings: Settings
-    store: SQLiteGraphStore
-    ingest: DocumentIngestor
-    inspect: InspectionService
-    query: QueryService
-    page_renderer: PageImageRenderer
-    evaluate: EvaluationService
-
-
-def create_store(settings: Settings | None = None) -> SQLiteGraphStore:
-    settings = settings or load_settings()
-    store = SQLiteGraphStore(settings.database_path)
-    store.initialize()
-    return store
 
 
 def chat_endpoint(settings: Settings) -> Endpoint:
@@ -117,124 +79,6 @@ def create_embedder(settings: Settings) -> OpenAIBatchEmbeddings:
     )
 
 
-def settings_for_evaluation(
-    profile: str, *, settings: Settings | None = None
-) -> Settings:
-    settings = settings or load_settings()
-    if profile == "test":
-        return settings.model_copy(
-            update={"profile": "test", "embedding_provider": "hash"}
-        )
-    if profile != "live":
-        raise ValueError(f"unsupported evaluation profile: {profile}")
-    if settings.profile != "local" or settings.embedding_provider not in model_endpoint.EMBEDDERS:
-        raise ValueError("live evaluation requires a provider embedder")
-    return settings
-
-
-def create_runtime(
-    *,
-    settings: Settings | None = None,
-    client: httpx.Client | None = None,
-) -> Runtime:
-    settings = settings or load_settings()
-    store = create_store(settings)
-    assets = LocalAssetStore(settings.asset_dir)
-
-    embedding: EmbeddingProvider
-    generation: GenerationProvider
-    vision: VisionProvider
-    if settings.profile == "test" and settings.embedding_provider in {"fake", "hash"}:
-        embedding = HashEmbeddingProvider(dimensions=settings.embedding_dimensions)
-        generation = DeterministicGenerationProvider()
-        vision = DeterministicVisionProvider()
-    else:
-        endpoint = chat_endpoint(settings)
-        embedder = create_embedder(settings)
-        if client is None:
-            raise ValueError("an HTTP client is required for the local runtime")
-        embedding = TextEmbeddingProvider(
-            name=settings.embedding_provider,
-            model=settings.embedding_model,
-            dimensions=settings.embedding_dimensions,
-            embedder=embedder,
-        )
-        generation = ChatCompletionsGenerationAdapter(
-            base_url=endpoint.base_url,
-            model=endpoint.model,
-            client=client,
-            api_key=endpoint.key,
-            wire=endpoint.wire,
-        )
-        vision = create_vision(settings, client)
-
-    query = QueryService(
-        store=store,
-        embedding_provider=embedding,
-        generation_provider=generation,
-        settings=settings,
-    )
-    browser_renderer = create_browser_renderer(settings)
-    page_renderer = PageImageRenderer(
-        browser_renderer=browser_renderer,
-        asset_store=assets,
-    )
-    # Crops and the hierarchy pass work on pages, whichever thing drew them.
-    drawn_pages = PageRenderer(browser=browser_renderer)
-    grounding = GroundedDocumentBuilder(
-        renderer=page_renderer,
-        asset_store=assets,
-        vision_provider=vision,
-    )
-    index_builder = DocumentIndexBuilder(
-        grounding=grounding,
-        semantic_reconciler=SemanticReconciler(),
-        visual_observer=grounding,
-        relations=RelationReconciler(provider=vision),
-        composer=MultimodalIndexComposer(asset_store=assets),
-        embeddings=EmbeddingGenerator(
-            generation_provider=generation,
-            embedding_provider=embedding,
-            store=store,
-            limits=model_endpoint.EMBEDDERS.get(settings.embedding_provider),
-        ),
-        # Off by default: the derived outline costs a model call per sheet, and
-        # nothing else builds one.
-        hierarchy_mode=settings.hierarchy_mode,
-        **graph_parts(
-            settings,
-            renderer=drawn_pages,
-            vision=vision,
-            assets=assets,
-            derived=settings.hierarchy_mode == "derived",
-            unit_grouping=settings.unit_grouping == "page",
-        ),
-    )
-    ingest = DocumentIngestor(
-        store=store,
-        index_builder=index_builder,
-        embedding_provider=embedding.name,
-        embedding_model=embedding.model,
-        embedding_dimensions=embedding.dimensions,
-    )
-    return Runtime(
-        settings=settings,
-        store=store,
-        ingest=ingest,
-        inspect=InspectionService(store=store),
-        page_renderer=page_renderer,
-        query=query,
-        evaluate=EvaluationService(
-            query_service=query,
-            expected_profile="test" if settings.profile == "test" else "live",
-        ),
-    )
-
-
-def evaluation_profile(suite: Path) -> str:
-    return EvaluationService.read_suite(suite).profile
-
-
 def create_vision(settings: Settings, client: httpx.Client) -> ChatCompletionsVLMAdapter:
     """The page-reading model: one adapter shape for every pass that reads a page."""
     endpoint = chat_endpoint(settings)
@@ -259,17 +103,14 @@ def graph_parts(
     renderer: Any,
     vision: VisionProvider,
     assets: Any,
-    derived: bool,
-    unit_grouping: bool,
     limiter: AbstractContextManager[Any] | None = None,
     workers: int = 1,
 ) -> dict[str, Any]:
     """What turning a document into its graph needs, wired one way for every caller.
 
-    `derived` reads the outline off the page, and with it the figures and, after the
-    outline, what visuals show and which documents the pages name; without it there is
-    none of these. `unit_grouping` joins printed pieces into paragraphs before the
-    outline. `limiter` and `workers` are for a caller reading several documents at once.
+    The outline is read off the page, and with it the figures, the paragraphs before the
+    outline and, after it, what visuals show and which documents the pages name.
+    `limiter` and `workers` are for a caller reading several documents at once.
     """
     return {
         "extractors": {
@@ -279,42 +120,29 @@ def graph_parts(
             DocumentFormat.DOCX: DocxExtractor(asset_store=assets),
         },
         "visual_binder": RenderedVisualBinder(renderer=renderer, asset_store=assets),
-        "hierarchy_provider": (
-            RenderedHierarchyScopeProvider(
-                renderer=renderer,
-                vision=vision,
-                asset_store=assets,
-                readings=settings.hierarchy_readings,
-                limiter=limiter,
-                workers=workers,
-            )
-            if derived
-            else None
+        "hierarchy_provider": RenderedHierarchyScopeProvider(
+            renderer=renderer,
+            vision=vision,
+            asset_store=assets,
+            readings=settings.hierarchy_readings,
+            limiter=limiter,
+            workers=workers,
         ),
         # Between the figures and the outline: what a figure swallowed is not a paragraph,
         # and an outline drawn over half a paragraph places half a paragraph.
-        "unit_grouper": (
-            RenderedUnitGrouper(renderer=renderer, vision=vision, limiter=limiter)
-            if derived and unit_grouping
-            else None
-        ),
-        # Captions and named documents are read off the same rendering the outline is, so
-        # a document read without a model gets neither. A named document stands as an empty
-        # node; which indexed document it is is said across the corpus
-        # (`application/corpus_links.py`), whatever order they arrive in.
-        "enricher": (
-            RenderedPageEnricher(
-                renderer=renderer, vision=vision, asset_store=assets,
-                workers=workers, limiter=limiter,
-            )
-            if derived
-            else None
+        "unit_grouper": RenderedUnitGrouper(renderer=renderer, vision=vision, limiter=limiter),
+        # Captions and named documents are read off the same rendering the outline is. A
+        # named document stands as an empty node; which indexed document it is is said across
+        # the corpus (`application/corpus_links.py`), whatever order they arrive in.
+        "enricher": RenderedPageEnricher(
+            renderer=renderer, vision=vision, asset_store=assets,
+            workers=workers, limiter=limiter,
         ),
     }
 
 
 def create_graph_builder(settings: Settings, **parts: Any) -> DocumentGraphBuilder:
-    """A document into its graph -- the same reading the index, the space and the demo get."""
+    """A document into its graph -- the same reading the space and the demo get."""
     return DocumentGraphBuilder(**graph_parts(settings, **parts))
 
 
@@ -370,8 +198,6 @@ def corpus_graph_builder(settings: Settings, client: httpx.Client) -> DocumentGr
         renderer=PageRenderer(browser=create_browser_renderer(settings)),
         vision=create_vision(settings, client),
         assets=LocalAssetStore(settings.asset_dir),
-        derived=True,
-        unit_grouping=True,
     )
 
 

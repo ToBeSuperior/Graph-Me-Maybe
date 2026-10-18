@@ -29,9 +29,6 @@ class DocxExtractor:
     """Extract body content from a DOCX using its native reading order."""
 
     format = DocumentFormat.DOCX
-    version = "3"
-    """2: a merged cell's words are written once, not in every slot it spans.
-    3: words in a content control, a tracked insertion or a simple field are read."""
 
     def __init__(self, *, asset_store: AssetStore | None = None) -> None:
         self._asset_store = asset_store

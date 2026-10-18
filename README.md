@@ -99,7 +99,7 @@ brew install --cask google-chrome                     # 이미 있으면 생략
 
 # Docker: 아래 둘 중 하나
 # Docker Desktop: https://www.docker.com/products/docker-desktop/ 에서 받아 설치하고 앱을 한 번 실행
-brew install colima docker && colima start --cpu 2 --memory 4   # 또는 colima (앱 없이 터미널로)
+brew install colima docker && colima start --cpu 2 --memory 4 --port-forwarder grpc   # 또는 colima (앱 없이 터미널로)
 docker info                                           # 오류 없이 나오면 준비 완료
 ```
 
@@ -141,6 +141,7 @@ docker info
   `docker info`가 sudo 없이 되면 됩니다.
 - Docker는 그래프 DB(Neo4j)를 띄우는 데 씁니다. Neo4j를 따로 설치하거나 계정을 만들 필요는 없습니다.
 - Docker VM 메모리는 4GB 이상을 권합니다(Neo4j 기본 heap 1g + 페이지 캐시 512m). colima 기본값(2GB)으로는 빠듯합니다.
+- colima는 `--port-forwarder grpc`로 띄웁니다. 기본값(ssh)에서는 처음 띄운 Neo4j의 포트로 응답이 오지 않아 `120초 안에 응답하지 않았습니다`로 멈추는 일이 있었습니다.
 - colima와 Docker Desktop은 재부팅하면 꺼집니다. 데모 전에 `colima start`(또는 Docker Desktop 실행)를 먼저 합니다.
   colima를 로그인 때 자동으로 켜려면 `brew services start colima`.
 
@@ -217,8 +218,7 @@ uv run graphme embed-graph            # 질문용 청크 임베딩, 중요도, �
 uv run graphme ask "질문"              # 답과 근거
 ```
 
-데모와 `build-graph`는 항상 계층을 읽습니다(VLM 호출이 페이지마다 있습니다). `GRAPHME_HIERARCHY_MODE`는
-단일 문서용 `graphme ingest`에만 적용됩니다.
+데모와 `build-graph`는 항상 계층을 읽습니다(VLM 호출이 페이지마다 있습니다).
 
 ---
 
@@ -356,9 +356,9 @@ docker volume rm graphme-neo4j-data graphme-neo4j-logs
 
 | 증상 | 원인 → 해결 |
 |---|---|
-| `로컬 그래프 DB(Neo4j)를 띄우려면 Docker가 필요합니다` | Docker가 설치돼 있지 않음 → 0단계의 Docker 설치(macOS는 `brew install colima docker && colima start --memory 4`) 후 데모 재시작. Docker 없이 쓰려면 이미 설치된 Neo4j(brew 등)를 켜고 `.env`에 `GRAPHME_NEO4J_PASSWORD` |
+| `로컬 그래프 DB(Neo4j)를 띄우려면 Docker가 필요합니다` | Docker가 설치돼 있지 않음 → 0단계의 Docker 설치(macOS는 `brew install colima docker && colima start --memory 4 --port-forwarder grpc`) 후 데모 재시작. Docker 없이 쓰려면 이미 설치된 Neo4j(brew 등)를 켜고 `.env`에 `GRAPHME_NEO4J_PASSWORD` |
 | `로컬 Neo4j를 띄우지 못했습니다: Cannot connect to the Docker daemon` | Docker가 꺼져 있음 → Docker Desktop을 켜거나 `colima start` |
-| `로컬 Neo4j가 120초 안에 응답하지 않았습니다` | 컨테이너는 떠 있는데 포트 전달이 안 됨(colima에서 가끔 생김) → `colima restart` 후 다시 실행 |
+| `로컬 Neo4j가 120초 안에 응답하지 않았습니다` | 컨테이너는 떠 있는데 포트 전달이 안 됨. colima의 기본 포트 전달(ssh)은 새로 연 포트로 응답을 넘기지 못할 때가 있음 → `colima stop && colima start --port-forwarder grpc`(한 번 바꾸면 유지됨) 후 다시 실행. 급하면 `colima restart` |
 | 화면 대신 "The web app is not built" | 웹 앱을 빌드하지 않음 → `(cd frontend && npm ci && npm run build)` |
 | DOCX·PPTX·XLSX 페이지가 안 그려짐 | 뷰어 번들 미설치(`~/.cache/graphme/ooxml-viewer/dist`가 없음) → 1단계의 `setup.sh`. Chrome이 기본 위치에 없으면 `.env`에 `GRAPHME_CHROME_EXECUTABLE` |
 | `setup.sh`가 `wasm-pack: not found`로 멈춤 | wasm-pack 미설치 → 0단계의 wasm-pack 설치 후 `setup.sh` 다시 실행 |
@@ -395,7 +395,7 @@ with graphme.GraphMe() as g:              # 설정은 .env / 환경변수 (Graph
     report = g.add("docs/")               # 폴더나 파일 하나 -> BuildReport
     g.embed()                             # 검색할 구절을 자르고 임베딩
     for hit in g.search("기밀 시험 압력은?"):
-        print(hit.file, hit.score)
+        print(graphme.shown_name(hit.file), hit.score)   # 첨부 파일의 내부 구분자(.emb…)는 빼고
     answer = g.ask("기밀 시험 압력은?")
     print(answer.text)
     g.export("out/")                      # neo4j-admin import 묶음 (dump=True면 .dump)
@@ -449,9 +449,6 @@ graphme export-corpus OUT           # Neo4j import 묶음 (--dump / --json / --c
 graphme xlsx-bundle WORKBOOK OUT    # XLSX를 페이지와 매핑 묶음으로 렌더
 ```
 
-`ingest`·`inspect`·`query`·`evaluate`·`export-neo4j`는 문서 하나를 SQLite 색인으로 다루는 예전 경로입니다. 이 경로만
-임베딩 제공자(`GRAPHME_EMBEDDING_PROVIDER`, 그래프와 같은 것)를 쓰고 `GRAPHME_HIERARCHY_MODE`(기본 `off`)를 따릅니다.
-
 ### 그래프 공간 내보내기
 
 ```bash
@@ -504,7 +501,6 @@ cd frontend && npm run typecheck && npm test && npm run e2e && npm run build   #
 - Source crop과 generated interpretation을 구분합니다.
 - Generated evidence는 citation authority로 사용하지 않습니다.
 - 기밀 문서를 모델·임베딩 provider에 보내기 전에 그 provider의 데이터 처리 조건을 확인합니다.
-- Query와 inspect 결과에 credential이나 raw provider payload를 기록하지 않습니다.
 
 ---
 
@@ -519,7 +515,7 @@ cd frontend && npm run typecheck && npm test && npm run e2e && npm run build   #
 - PDF scan-only 문서는 명시적으로 분류하지만 OCR/VLM 결과를 canonical text node로 자동 승격하지 않습니다. 두 단 읽기 순서는 띠·단 규칙으로 처리하지만, 단이 불규칙하게 섞인 레이아웃과 borderless table 해석은 제한적입니다.
 - PPTX grouped shapes/SmartArt/external media의 재귀 해석과 렌더링 효과의 완전한 재현은 지원 범위가 제한적입니다.
 - DOCX body node는 document root의 직접 자식입니다. 제목 스타일을 계층으로 읽지 않으며, header/footer/footnote/comment는 포괄적으로 추출하지 않습니다.
-- 계층 패스는 페이지마다 VLM을 호출하므로 `graphme ingest`의 기본값은 `off`입니다(데모와 `build-graph`는 항상 켭니다). 모델이 쓸 수 있는 답을 주지 않은 페이지는 계층 없이 남고 `hierarchy_page_unread` 경고로 기록됩니다.
+- 계층 패스는 페이지마다 VLM을 호출합니다. 모델이 쓸 수 있는 답을 주지 않은 페이지는 계층 없이 남고 `hierarchy_page_unread` 경고로 기록됩니다.
 - Neo4j 내보내기: `.dump`를 빈 Neo4j 5.26에 `neo4j-admin database load`로 넣어 문서·구절·벡터와 벡터·전문 검색 인덱스가 살아나는 것까지 확인했습니다. Aura 업로드는 확인하지 않았습니다.
 - 실제 datasets와 generated indexes는 저장소에 포함되지 않습니다.
 

@@ -14,10 +14,8 @@ from fastapi import Request
 
 from graphme import model_endpoint
 from graphme.adapters.chat import auth_headers
-from graphme.config import _ENV_FIELDS, Settings, _read_dotenv, _read_yaml
+from graphme.config import ENV_FIELDS, LOOPBACK, Settings, read_dotenv, read_yaml
 from graphme.server.state import BUILDING, Busy, Demo
-
-LOOPBACK = {"127.0.0.1", "localhost", "::1", "[::1]"}
 
 
 def _models(base_url: str, headers: dict[str, str]) -> str | None:
@@ -57,13 +55,13 @@ def editable(settings: Settings) -> tuple[tuple[str, bool], ...]:
 
 def _field(settings: Settings, env: str) -> str:
     """The settings field a variable fills: a key by the row that names it, the rest by
-    `_ENV_FIELDS`."""
+    `ENV_FIELDS`."""
     row = model_endpoint.EMBEDDERS.get(settings.embedding_provider)
     if row is not None and env == row.key_env:
         return "embedding_key"
     if env == model_endpoint.PROVIDERS[settings.provider].key_env:
         return "api_key"
-    return _ENV_FIELDS[env]
+    return ENV_FIELDS[env]
 
 
 def described(settings: Settings) -> dict[str, Any]:
@@ -89,13 +87,13 @@ def _pinned(env_file: Path, names: set[str]) -> list[str]:
     """Which of `names` are set where this page cannot clear them: the shell, or the
     GRAPHME_CONFIG file."""
     pinned = sorted(name for name in names if os.environ.get(name))
-    config = {**_read_dotenv(env_file), **os.environ}.get("GRAPHME_CONFIG")
+    config = {**read_dotenv(env_file), **os.environ}.get("GRAPHME_CONFIG")
     try:
-        written = _read_yaml(Path(config).expanduser()) if config else {}
+        written = read_yaml(Path(config).expanduser()) if config else {}
     except (OSError, ValueError):
         written = {}  # an unreadable file is refused when the settings are read
     return pinned + sorted(f"{name} (GRAPHME_CONFIG)" for name in names
-                           if name not in pinned and written.get(_ENV_FIELDS[name]))
+                           if name not in pinned and written.get(ENV_FIELDS[name]))
 
 
 def changed(
@@ -124,7 +122,7 @@ def changed(
         if pinned := _pinned(env_file, dropped):
             raise ValueError(f"{', '.join(pinned)}가 이전 제공자의 값으로 고정돼 "
                              "있습니다 -- 지우고 서버를 다시 시작하세요")
-    stored = {k: v for k, v in _read_dotenv(env_file).items() if k not in dropped}
+    stored = {k: v for k, v in read_dotenv(env_file).items() if k not in dropped}
     try:
         new = load({**stored, **os.environ, **values})
     except ValueError as error:

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any, Protocol
@@ -10,7 +8,7 @@ from typing import Annotated, Any, Protocol
 import httpx
 import typer
 
-from graphme.adapters.export.neo4j import graph_records, records_cypher, to_cypher
+from graphme.adapters.export.neo4j import records_cypher
 from graphme.adapters.storage.graph_rag import GraphAnswer
 from graphme.api import MODEL_WAIT, GraphMe
 from graphme.application.corpus_build import (
@@ -18,39 +16,10 @@ from graphme.application.corpus_build import (
     BuildStep,
     StepListener,
 )
-from graphme.application.ingest import IngestResult, documents_in
-from graphme.application.inspect import InspectionReport, InspectionService
+from graphme.application.embedded_documents import shown_name
 from graphme.application.xlsx_bundle import XlsxBundleOrchestrator
 from graphme.config import load_settings
-from graphme.domain.models import Answer, ExtractedDocument
-from graphme.runtime import (
-    create_browser_renderer,
-    create_neo4j_admin,
-    create_runtime,
-    create_store,
-    evaluation_profile,
-    settings_for_evaluation,
-)
-
-
-class QueryService(Protocol):
-    def query(self, *, document_id: str, question: str) -> Answer: ...
-
-
-class IngestService(Protocol):
-    def ingest(self, source: Path) -> IngestResult: ...
-
-
-class InspectService(Protocol):
-    def inspect(self, document_id: str) -> str: ...
-
-    def inspect_record(self, document_id: str) -> InspectionReport: ...
-
-    def graph(self, document_id: str) -> ExtractedDocument: ...
-
-
-class EvaluationService(Protocol):
-    def evaluate(self, suite: Path) -> str: ...
+from graphme.runtime import create_browser_renderer
 
 
 class CorpusService(Protocol):
@@ -62,13 +31,12 @@ class CorpusService(Protocol):
         self, document_ids: list[str] | None = None
     ) -> dict[str, list[dict[str, Any]]]: ...
 
-    def bundle(self, folder: Path, document_ids: list[str] | None = None) -> int:
-        """The import bundle written into `folder`, read from the space as it is written;
-        how many documents left."""
-        ...
-
-    def dump(self, bundle: Path, target: Path) -> None:
-        """The import bundle in `bundle` as one `.dump` file, written by `neo4j-admin`."""
+    def export(
+        self, target: Path, document_ids: list[str] | None = None, *, dump: bool = False
+    ) -> int:
+        """The import bundle written into `target`, read from the space as it is written --
+        or with `dump`, one `.dump` file made from it by `neo4j-admin`; how many documents
+        left."""
         ...
 
     def files(self, document_ids: list[str]) -> dict[str, str]:
@@ -100,10 +68,6 @@ class RagService(Protocol):
 
 def create_app(
     *,
-    query_service: QueryService,
-    ingest_service: IngestService,
-    inspect_service: InspectService,
-    evaluation_service: EvaluationService,
     corpus_service: CorpusService | None = None,
     rag_service: RagService | None = None,
 ) -> typer.Typer:
@@ -112,65 +76,6 @@ def create_app(
     @app.callback()
     def main() -> None:
         pass
-
-    @app.command(short_help="Documents into the single-document index (SQLite).")
-    def ingest(source: Path) -> None:
-        """One document, or every document in a folder -- a corpus is a folder of them."""
-        if not source.is_dir():
-            result = ingest_service.ingest(source)
-            typer.echo(f"document_id={result.document_id}")
-            typer.echo(f"reused={str(result.reused).lower()}")
-            return
-        failed = 0
-        documents = documents_in(source)
-        for path in documents:
-            # One document that cannot be read is one document, not the folder -- whatever
-            # stopped it, a provider that turned it away included.
-            try:
-                result = ingest_service.ingest(path)
-            except Exception as error:  # noqa: BLE001 -- reported below, never swallowed
-                failed += 1
-                typer.echo(f"failed={path} error={error}")
-                continue
-            typer.echo(
-                f"document_id={result.document_id} reused={str(result.reused).lower()}"
-                f" source={path}"
-            )
-        typer.echo(f"ingested={len(documents) - failed} failed={failed}")
-        if failed:
-            raise typer.Exit(1)
-
-    @app.command(short_help="Answer a question about one ingested document.")
-    def query(document_id: str, question: str) -> None:
-        answer = query_service.query(document_id=document_id, question=question)
-        typer.echo(answer.text)
-        for citation in answer.citations:
-            typer.echo(citation.render())
-
-    @app.command(short_help="Show one ingested document: its nodes, edges and evidence.")
-    def inspect(
-        document_id: str,
-        json_output: bool = typer.Option(False, "--json"),
-    ) -> None:
-        if json_output:
-            typer.echo(inspect_service.inspect_record(document_id).model_dump_json())
-        else:
-            typer.echo(inspect_service.inspect(document_id))
-
-    @app.command("export-neo4j", short_help="One ingested document as Neo4j Cypher or records.")
-    def export_neo4j(
-        document_id: str,
-        output: Path,
-        json_output: bool = typer.Option(False, "--json", help="Neo4j records, not Cypher"),
-    ) -> None:
-        extracted = inspect_service.graph(document_id)
-        output.write_text(
-            json.dumps(graph_records(extracted), ensure_ascii=False, indent=2)
-            if json_output
-            else to_cypher(extracted),
-            encoding="utf-8",
-        )
-        typer.echo(f"written={output}")
 
     @app.command("export-corpus",
                  short_help="The graph space for Neo4j: bundle, .dump, JSON or Cypher.")
@@ -205,12 +110,8 @@ def create_app(
                 encoding="utf-8",
             )
             written = sum(1 for node in records["nodes"] if "Document" in node["labels"])
-        elif dump_output:
-            with tempfile.TemporaryDirectory() as folder:
-                written = corpus_service.bundle(Path(folder), chosen)
-                corpus_service.dump(Path(folder), output)
         else:
-            written = corpus_service.bundle(output, chosen)
+            written = corpus_service.export(output, chosen, dump=dump_output)
         typer.echo(f"written={output} documents={written}")
 
     @app.command("build-graph", short_help="A folder's documents into the graph space, linked.")
@@ -290,10 +191,10 @@ def create_app(
         if rag_service is None:
             raise typer.BadParameter("no graph space is configured")
         answer = rag_service.ask(question, top_k=top_k)
-        typer.echo(_shown(answer.text))
+        typer.echo(shown_name(answer.text))
         typer.echo("")
         for source in answer.sources:
-            typer.echo(f"- [{_shown(source.file)}] {source.id} score={source.score:.3f}")
+            typer.echo(f"- [{shown_name(source.file)}] {source.id} score={source.score:.3f}")
 
     @app.command(short_help="Serve the pipeline and the graph space over HTTP (/v1, /docs).")
     def serve(
@@ -308,8 +209,8 @@ def create_app(
         """The API at /v1, its contract at /docs, and the web app at / when there is one.
         Without GRAPHME_API_KEY it asks for no key, and so opens on this machine only."""
         # Here only: no other command waits for the web framework to load.
+        from graphme.config import LOOPBACK
         from graphme.server import app as server
-        from graphme.server.settings import LOOPBACK
 
         if openapi:
             typer.echo(server.openapi())
@@ -331,10 +232,6 @@ def create_app(
         from graphme.launcher import launch
 
         launch(port=port, browser=not no_browser)
-
-    @app.command(short_help="Run an evaluation suite.")
-    def evaluate(suite: Path) -> None:
-        typer.echo(evaluation_service.evaluate(suite))
 
     @app.command("xlsx-bundle",
                  short_help="Render an XLSX workbook into a page and mapping bundle.")
@@ -366,55 +263,8 @@ def create_app(
     return app
 
 
-_DIGEST = re.compile(r"\.emb[0-9a-f]{8}(?=\.[A-Za-z0-9]{1,8}\b)")
-
-
-def _shown(text: str) -> str:
-    """File names as a reader knows them: an attachment's digest (`embedded_name`) tells two
-    files apart for the program and stays in the API, but means nothing printed."""
-    return _DIGEST.sub("", text)
-
-
 def _client() -> httpx.Client:
     return httpx.Client(timeout=MODEL_WAIT)
-
-
-class _RuntimeQueryService:
-    def query(self, *, document_id: str, question: str) -> Answer:
-        with _client() as client:
-            return create_runtime(client=client).query.query(
-                document_id=document_id,
-                question=question,
-            )
-
-
-class _RuntimeIngestService:
-    def ingest(self, source: Path) -> IngestResult:
-        with _client() as client:
-            return create_runtime(client=client).ingest.ingest(source)
-
-
-class _RuntimeInspectService:
-    @staticmethod
-    def _service() -> InspectionService:
-        settings = load_settings()
-        return InspectionService(store=create_store(settings))
-
-    def inspect(self, document_id: str) -> str:
-        return self._service().inspect(document_id)
-
-    def inspect_record(self, document_id: str) -> InspectionReport:
-        return self._service().inspect_record(document_id)
-
-    def graph(self, document_id: str) -> ExtractedDocument:
-        return self._service().graph(document_id)
-
-
-class _RuntimeEvaluationService:
-    def evaluate(self, suite: Path) -> str:
-        settings = settings_for_evaluation(evaluation_profile(suite))
-        with _client() as client:
-            return create_runtime(settings=settings, client=client).evaluate.evaluate(suite)
 
 
 class _RuntimeCorpusService:
@@ -428,18 +278,17 @@ class _RuntimeCorpusService:
         self, document_ids: list[str] | None = None
     ) -> dict[str, list[dict[str, Any]]]:
         with GraphMe() as g:
-            return g._graph_space().corpus(document_ids)
+            return g.graph_space().corpus(document_ids)
 
-    def bundle(self, folder: Path, document_ids: list[str] | None = None) -> int:
+    def export(
+        self, target: Path, document_ids: list[str] | None = None, *, dump: bool = False
+    ) -> int:
         with GraphMe() as g:
-            return g.export(folder, documents=document_ids)
-
-    def dump(self, bundle: Path, target: Path) -> None:
-        create_neo4j_admin(load_settings()).dump(bundle, target)
+            return g.export(target, dump=dump, documents=document_ids)
 
     def files(self, document_ids: list[str]) -> dict[str, str]:
         with GraphMe() as g:
-            return g._graph_space().files(document_ids)
+            return g.graph_space().files(document_ids)
 
     def count(self) -> int:
         with GraphMe() as g:
@@ -465,10 +314,6 @@ class _RuntimeRagService:
 
 
 app = create_app(
-    query_service=_RuntimeQueryService(),
-    ingest_service=_RuntimeIngestService(),
-    inspect_service=_RuntimeInspectService(),
-    evaluation_service=_RuntimeEvaluationService(),
     corpus_service=_RuntimeCorpusService(),
     rag_service=_RuntimeRagService(),
 )

@@ -95,3 +95,11 @@ def test_a_document_is_read_with_its_words_and_its_pages_shown_to_the_model(
              if isinstance(message["content"], list) for part in message["content"]
              if part["type"] == "image_url"]
     assert shown, "the model is shown the drawn page"
+
+
+def test_an_attachments_digest_is_left_out_of_the_name_a_reader_is_shown() -> None:
+    import graphme
+
+    shown = graphme.shown_name("출하 검사 체크리스트.emb0acdc95f.xlsx")
+    assert shown == "출하 검사 체크리스트.xlsx"
+    assert graphme.shown_name("plain.emb.docx") == "plain.emb.docx"

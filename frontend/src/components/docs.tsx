@@ -18,7 +18,7 @@ export function FileIcon({ file, className }: { file: string; className?: string
   return <Icon className={cn('size-4 shrink-0', known?.color ?? 'text-muted', className)} aria-hidden />;
 }
 
-export const HOP_BG = { 1: 'bg-hop-1', 2: 'bg-hop-2', 3: 'bg-hop-3' } as const;
+const HOP_BG = { 1: 'bg-hop-1', 2: 'bg-hop-2', 3: 'bg-hop-3' } as const;
 
 export function HopBadge({ hop }: { hop: 1 | 2 | 3 }) {
   const t = useT();

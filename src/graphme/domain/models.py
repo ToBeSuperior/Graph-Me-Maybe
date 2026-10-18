@@ -3,23 +3,18 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Literal, TypeAlias
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing_extensions import TypeAliasType
 
 from graphme.domain.enums import (
-    CaptionStatus,
     DocumentFormat,
     EdgeType,
-    EmbeddingInputType,
     EvidenceKind,
-    IngestionStatus,
     NodeType,
-    RelationBasis,
     SemanticUnitKind,
     Severity,
-    SubgraphTemplate,
 )
 from graphme.domain.ids import stable_id
 
@@ -54,17 +49,6 @@ class SourceLocator(DomainModel):
         if value is not None and (value[2] < value[0] or value[3] < value[1]):
             raise ValueError("bbox must be ordered as x0, y0, x1, y1")
         return value
-
-    def render(self, node_id: str | None = None) -> str:
-        coordinate = self.label
-        if self.sheet and self.cell_range:
-            coordinate = f"{self.sheet}!{self.cell_range}"
-        elif self.page:
-            coordinate = f"page {self.page}: {self.label}"
-        elif self.slide:
-            coordinate = f"slide {self.slide}: {self.label}"
-        suffix = f" | node:{node_id}" if node_id else ""
-        return f"[{self.file_name} > {coordinate}{suffix}]"
 
 
 class NormalizedBBox(DomainModel):
@@ -155,14 +139,10 @@ class HierarchyImageDescriptor(DomainModel):
     size_bytes: int = Field(gt=0)
     width: int = Field(gt=0)
     height: int = Field(gt=0)
-    coordinate_system: Literal["image_pixels"] = "image_pixels"
     document_id: str = Field(min_length=1)
     scope: str = Field(min_length=1, max_length=200)
     page_index: int = Field(ge=1)
-    renderer_version: str = Field(min_length=1, max_length=100)
-    mapping_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     covered_unit_ids: tuple[str, ...] = Field(min_length=1, max_length=500)
-    manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @field_validator("covered_unit_ids")
     @classmethod
@@ -588,154 +568,6 @@ class HierarchyScopeResult(DomainModel):
         return self
 
 
-class RelationProposal(DomainModel):
-    source_id: str = Field(min_length=1)
-    target_id: str = Field(min_length=1)
-    type: EdgeType
-    basis: RelationBasis
-    evidence_ids: tuple[str, ...] = Field(min_length=1)
-    rationale: str = Field(min_length=1)
-    confidence: Confidence
-    provenance_page_indexes: tuple[int, ...] = Field(min_length=1)
-
-    @field_validator("evidence_ids")
-    @classmethod
-    def require_unique_evidence_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if any(not evidence_id for evidence_id in value):
-            raise ValueError("relation evidence IDs must not be empty")
-        if len(set(value)) != len(value):
-            raise ValueError("relation evidence IDs must be unique")
-        return value
-
-    @field_validator("provenance_page_indexes")
-    @classmethod
-    def require_unique_positive_pages(cls, value: tuple[int, ...]) -> tuple[int, ...]:
-        if any(page < 1 for page in value):
-            raise ValueError("relation provenance pages must be positive")
-        if len(set(value)) != len(value):
-            raise ValueError("relation provenance pages must be unique")
-        return value
-
-
-class RelationNodeContext(DomainModel):
-    id: str = Field(min_length=1)
-    type: NodeType
-    label: str = Field(min_length=1, max_length=500)
-    page_index: int = Field(ge=1)
-    interpreted_text: str | None = Field(default=None, max_length=4000)
-
-
-class RelationEvidenceContext(DomainModel):
-    id: str = Field(min_length=1)
-    node_id: str = Field(min_length=1)
-    kind: EvidenceKind
-    page_index: int = Field(ge=1)
-    generated: bool
-    summary: str | None = Field(default=None, max_length=4000)
-
-
-class RelationRequest(DomainModel):
-    request_id: str = Field(min_length=1)
-    node_ids: tuple[str, ...] = Field(min_length=1, max_length=200)
-    evidence_ids: tuple[str, ...] = Field(max_length=400)
-    page_indexes: tuple[int, ...] = Field(min_length=1, max_length=2)
-    nodes: tuple[RelationNodeContext, ...] = Field(default=(), max_length=200)
-    evidence: tuple[RelationEvidenceContext, ...] = Field(default=(), max_length=400)
-
-    @model_validator(mode="after")
-    def require_unique_values(self) -> RelationRequest:
-        for label, values in (
-            ("node IDs", self.node_ids),
-            ("evidence IDs", self.evidence_ids),
-            ("page indexes", self.page_indexes),
-        ):
-            if len(set(values)) != len(values):
-                raise ValueError(f"relation request {label} must be unique")
-        if any(not node_id for node_id in self.node_ids):
-            raise ValueError("relation request node IDs must not be empty")
-        if any(not evidence_id for evidence_id in self.evidence_ids):
-            raise ValueError("relation request evidence IDs must not be empty")
-        if any(page < 1 for page in self.page_indexes):
-            raise ValueError("relation request pages must be positive")
-        if self.nodes:
-            context_node_ids = tuple(item.id for item in self.nodes)
-            if context_node_ids != self.node_ids:
-                raise ValueError("relation node context must align with node IDs")
-            if any(item.page_index not in self.page_indexes for item in self.nodes):
-                raise ValueError("relation node context references an unknown page")
-        if self.evidence:
-            context_evidence_ids = tuple(item.id for item in self.evidence)
-            if context_evidence_ids != self.evidence_ids:
-                raise ValueError(
-                    "relation evidence context must align with evidence IDs"
-                )
-            if any(
-                item.node_id not in self.node_ids for item in self.evidence
-            ):
-                raise ValueError(
-                    "relation evidence context references an unknown node"
-                )
-            if any(
-                item.page_index not in self.page_indexes
-                for item in self.evidence
-            ):
-                raise ValueError(
-                    "relation evidence context references an unknown page"
-                )
-        return self
-
-    def bindable(
-        self, proposals: tuple[RelationProposal, ...]
-    ) -> tuple[RelationProposal, ...]:
-        """Only the proposals whose every id is one that was supplied.
-
-        A relation is a proposal, not an obligation: the pass asks what the page relates
-        and any answer at all is usable. So one proposal naming a node, a piece of
-        evidence or a page that was never sent is the model inventing an id -- it is
-        dropped, and the proposals that do bind back are kept. Throwing the answer away
-        over one of them is how a whole document came to fail at its last model call.
-        """
-        known_nodes = set(self.node_ids)
-        known_evidence = set(self.evidence_ids)
-        known_pages = set(self.page_indexes)
-        return tuple(
-            proposal
-            for proposal in proposals
-            if proposal.source_id in known_nodes
-            and proposal.target_id in known_nodes
-            and set(proposal.evidence_ids).issubset(known_evidence)
-            and set(proposal.provenance_page_indexes).issubset(known_pages)
-        )
-
-    def validate_proposals(
-        self, proposals: tuple[RelationProposal, ...]
-    ) -> tuple[RelationProposal, ...]:
-        known_nodes = set(self.node_ids)
-        known_evidence = set(self.evidence_ids)
-        known_pages = set(self.page_indexes)
-        for proposal in proposals:
-            if (
-                proposal.source_id not in known_nodes
-                or proposal.target_id not in known_nodes
-            ):
-                raise ValueError("relation proposal references an unknown node")
-            if not set(proposal.evidence_ids).issubset(known_evidence):
-                raise ValueError("relation proposal references unknown evidence")
-            if not set(proposal.provenance_page_indexes).issubset(known_pages):
-                raise ValueError("relation proposal references an unknown page")
-        return proposals
-
-
-class RelationResult(DomainModel):
-    request_id: str = Field(min_length=1)
-    proposals: tuple[RelationProposal, ...]
-
-    def validate_for(self, request: RelationRequest) -> tuple[RelationProposal, ...]:
-        if self.request_id != request.request_id:
-            raise ValueError("relation result request ID must match request")
-        return request.validate_proposals(self.proposals)
-
-
 class DocumentRecord(DomainModel):
     id: str = Field(min_length=1)
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -835,216 +667,6 @@ class WarningRecord(DomainModel):
     message: str = Field(min_length=1)
     severity: Severity = Severity.WARNING
     locator: SourceLocator | None = None
-
-
-class EvidenceClaim(DomainModel):
-    statement: str = Field(min_length=1)
-    evidence_ids: tuple[str, ...] = Field(min_length=1)
-
-
-class Caption(DomainModel):
-    id: str = Field(min_length=1)
-    document_id: str = Field(min_length=1)
-    node_id: str = Field(min_length=1)
-    summary: str = Field(min_length=1)
-    entities: tuple[str, ...] = ()
-    measures: tuple[str, ...] = ()
-    trends: tuple[str, ...] = ()
-    time_range: str | None = None
-    source_context: str = ""
-    confidence: Confidence
-    claims: tuple[EvidenceClaim, ...] = ()
-    status: CaptionStatus = CaptionStatus.PENDING
-    validation_errors: tuple[str, ...] = ()
-    model: str | None = None
-    source_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class TextPart(DomainModel):
-    type: Literal["text"] = "text"
-    text: str = Field(min_length=1)
-
-
-class ImagePart(DomainModel):
-    type: Literal["image"] = "image"
-    asset_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    mime_type: str = Field(pattern=r"^image/")
-    width: int | None = Field(default=None, gt=0)
-    height: int | None = Field(default=None, gt=0)
-    size_bytes: int | None = Field(default=None, gt=0)
-
-
-class VideoPart(DomainModel):
-    type: Literal["video"] = "video"
-    asset_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    mime_type: str = Field(pattern=r"^video/")
-    size_bytes: int | None = Field(default=None, gt=0)
-
-
-EmbeddingPart: TypeAlias = TextPart | ImagePart | VideoPart
-
-
-class EmbeddingRequest(DomainModel):
-    id: str = Field(min_length=1)
-    input_type: EmbeddingInputType
-    parts: tuple[EmbeddingPart, ...] = Field(min_length=1)
-    representation_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class EmbeddingRecord(DomainModel):
-    id: str = Field(min_length=1)
-    owner_id: str = Field(min_length=1)
-    provider: str = Field(min_length=1)
-    model: str = Field(min_length=1)
-    model_version: str | None = None
-    dimensions: int = Field(gt=0)
-    vector: tuple[float, ...]
-    representation_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    cache_key: str = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def match_dimensions(self) -> EmbeddingRecord:
-        if len(self.vector) != self.dimensions:
-            raise ValueError("embedding vector length must match dimensions")
-        return self
-
-
-class SubgraphRecord(DomainModel):
-    id: str = Field(min_length=1)
-    document_id: str = Field(min_length=1)
-    template: SubgraphTemplate
-    seed_node_id: str = Field(min_length=1)
-    node_ids: tuple[str, ...] = Field(min_length=1)
-    edge_ids: tuple[str, ...] = ()
-    representation_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    estimated_tokens: int = Field(ge=0)
-
-    @model_validator(mode="after")
-    def include_seed(self) -> SubgraphRecord:
-        if self.seed_node_id not in self.node_ids:
-            raise ValueError("subgraph node_ids must include the seed")
-        if len(set(self.node_ids)) != len(self.node_ids):
-            raise ValueError("subgraph node_ids must be unique")
-        return self
-
-
-class RetrievalHit(DomainModel):
-    subgraph_id: str = Field(min_length=1)
-    score: float = Field(ge=-1.0, le=1.0)
-    seed_node_id: str = Field(min_length=1)
-    node_ids: tuple[str, ...]
-
-
-class RetrievedContext(DomainModel):
-    document_id: str = Field(min_length=1)
-    question: str = Field(min_length=1)
-    hits: tuple[RetrievalHit, ...]
-    node_scores: dict[str, float]
-    selected_node_ids: tuple[str, ...]
-    evidence_ids: tuple[str, ...]
-    hops_used: int = Field(ge=0, le=2)
-    estimated_tokens: int = Field(ge=0)
-
-
-class Citation(DomainModel):
-    evidence_id: str = Field(min_length=1)
-    node_id: str = Field(min_length=1)
-    locator: SourceLocator
-
-    def render(self) -> str:
-        return self.locator.render(self.node_id)
-
-
-class GeneratedAnswer(DomainModel):
-    text: str = Field(min_length=1)
-    citation_evidence_ids: tuple[str, ...]
-    abstained: bool = False
-    abstention_reason: str | None = None
-
-    @model_validator(mode="after")
-    def validate_abstention(self) -> GeneratedAnswer:
-        if self.abstained:
-            if not self.abstention_reason:
-                raise ValueError("abstaining answers require a reason")
-            if self.citation_evidence_ids:
-                raise ValueError("abstaining answers must not cite evidence")
-        elif self.abstention_reason is not None:
-            raise ValueError("non-abstaining answers must not include an abstention reason")
-        return self
-
-
-class Answer(DomainModel):
-    document_id: str = Field(min_length=1)
-    question: str = Field(min_length=1)
-    text: str
-    citations: tuple[Citation, ...]
-    model: str
-    repaired: bool = False
-    abstained: bool = False
-    abstention_reason: str | None = None
-
-    @model_validator(mode="after")
-    def validate_abstention(self) -> Answer:
-        if self.abstained:
-            if not self.abstention_reason:
-                raise ValueError("abstaining answers require a reason")
-            if self.citations:
-                raise ValueError("abstaining answers must not have citations")
-        elif self.abstention_reason is not None:
-            raise ValueError("non-abstaining answers must not include an abstention reason")
-        return self
-
-
-class EvaluationRecord(DomainModel):
-    case_id: str = Field(min_length=1)
-    question: str = Field(min_length=1)
-    expected_evidence_ids: tuple[str, ...]
-    retrieved_evidence_ids: tuple[str, ...]
-    evidence_retrieved: bool
-    answer_correct: bool | None = None
-    citations_correct: bool | None = None
-    profile: Literal["test", "live"]
-    failure_reason: str | None = None
-
-
-class IndexManifest(DomainModel):
-    document_id: str = Field(min_length=1)
-    run_id: str = Field(min_length=1)
-    ready_at: datetime
-    embedding_provider: str = Field(min_length=1)
-    embedding_model: str = Field(min_length=1)
-    embedding_dimensions: int = Field(gt=0)
-    subgraph_count: int = Field(ge=0)
-    embedding_count: int = Field(ge=0)
-    extractor_version: str | None = None
-    pipeline_version: str | None = None
-
-    @property
-    def embedding_coverage(self) -> float:
-        if self.subgraph_count == 0:
-            return 0.0
-        return self.embedding_count / self.subgraph_count
-
-
-class IngestionRun(DomainModel):
-    id: str = Field(min_length=1)
-    document_id: str | None = None
-    source_path: Path
-    status: IngestionStatus = IngestionStatus.PENDING
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    error: str | None = None
-
-    @model_validator(mode="after")
-    def validate_state(self) -> IngestionRun:
-        if (
-            self.status in {IngestionStatus.SUCCEEDED, IngestionStatus.FAILED}
-            and not self.finished_at
-        ):
-            raise ValueError("terminal ingestion runs require finished_at")
-        if self.status is IngestionStatus.FAILED and not self.error:
-            raise ValueError("failed ingestion runs require an error")
-        return self
 
 
 class ExtractedDocument(DomainModel):

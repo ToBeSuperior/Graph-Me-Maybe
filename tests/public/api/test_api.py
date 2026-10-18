@@ -13,7 +13,7 @@ from graphme import api
 def test_the_public_names_are_these() -> None:
     assert sorted(graphme.__all__) == sorted([
         "read", "GraphMe", "Settings", "load_settings", "ExtractedDocument", "BuildReport",
-        "GraphSource", "GraphAnswer", "GraphNotEmbedded", "__version__",
+        "GraphSource", "GraphAnswer", "GraphNotEmbedded", "__version__", "shown_name",
     ])
     for name in graphme.__all__:
         assert hasattr(graphme, name)

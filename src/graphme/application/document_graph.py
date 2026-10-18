@@ -1,9 +1,9 @@
 """One document into its graph: the steps every caller runs, in the order they depend on.
 
-The index, the graph space and the demo all need the same graph of a document, so there is
-one place that makes it. A caller that shows progress runs the steps one by one; a caller
-that only wants the graph runs `build`. Nothing here is about retrieval -- relations,
-subgraphs and embeddings are the index's, added on top of this graph.
+The graph space and the demo both need the same graph of a document, so there is one place
+that makes it. A caller that shows progress runs the steps one by one; a caller that only
+wants the graph runs `build`. Nothing here is about retrieval -- passages and their vectors
+are added to the graph space afterwards.
 
 1. extract     what the file states
 2. bind        each table and picture its crop, and what it encloses
@@ -19,10 +19,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 from graphme.application.embedded_documents import cite_embedded
-from graphme.application.grounding import GroundedDocumentBuilder
 from graphme.application.hierarchy_decisions import (
     HierarchyScopeProvider,
     apply_hierarchy_decisions,
@@ -30,7 +29,6 @@ from graphme.application.hierarchy_decisions import (
     note_unread_pages,
 )
 from graphme.application.page_enrichment import PageEnricher
-from graphme.application.semantic_reconciliation import SemanticReconciler
 from graphme.application.xlsx_visual_binding import VisualBinder
 from graphme.domain.enums import DocumentFormat
 from graphme.domain.models import ExtractedDocument, HierarchyDecision
@@ -49,28 +47,17 @@ class UnitGrouper(Protocol):
     def group(self, *, extracted: ExtractedDocument, source: Path) -> ExtractedDocument: ...
 
 
-class VisualObserver(Protocol):
-    def observe(self, *, source: Path, document_format: DocumentFormat) -> tuple[Any, ...]: ...
-
-
 class DocumentGraphBuilder:
     def __init__(
         self,
         *,
         extractors: Mapping[DocumentFormat, DocumentExtractor],
-        grounding: GroundedDocumentBuilder | None = None,
-        semantic_reconciler: SemanticReconciler | None = None,
-        visual_observer: VisualObserver | None = None,
         visual_binder: VisualBinder | None = None,
         hierarchy_provider: HierarchyScopeProvider | None = None,
         unit_grouper: UnitGrouper | None = None,
         enricher: PageEnricher | None = None,
     ) -> None:
         self._extractors = extractors
-        self._grounding = grounding
-        """Builds a graph from the rendering alone, for a format no extractor reads."""
-        self._semantic_reconciler = semantic_reconciler
-        self._visual_observer = visual_observer
         self._binder = visual_binder
         self._hierarchy = hierarchy_provider
         self._grouper = unit_grouper
@@ -93,18 +80,8 @@ class DocumentGraphBuilder:
     def extract(self, source: Path, document_format: DocumentFormat) -> ExtractedDocument:
         extractor = self._extractors.get(document_format)
         if extractor is None:
-            if self._grounding is None:
-                raise ValueError(f"no extractor for {document_format.value}")
-            return self._grounding.build(
-                source=source, document_format=document_format
-            ).validate_canonical_semantic_graph()
-        extracted = extractor.extract(source)
-        if self._semantic_reconciler is not None and self._visual_observer is not None:
-            extracted = self._semantic_reconciler.reconcile(
-                extracted,
-                self._visual_observer.observe(source=source, document_format=document_format),
-            )
-        return extracted.validate_canonical_semantic_graph()
+            raise ValueError(f"no extractor for {document_format.value}")
+        return extractor.extract(source).validate_canonical_semantic_graph()
 
     def bind(self, extracted: ExtractedDocument, source: Path) -> ExtractedDocument:
         """Each table and picture its crop. Before the outline is read, so the outline never

@@ -16,7 +16,6 @@ from openpyxl.cell.cell import Cell, MergedCell
 from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, TwoCellAnchor
 from openpyxl.styles.borders import Side
 from openpyxl.utils.cell import get_column_letter, range_boundaries
-from openpyxl.worksheet.cell_range import CellRange
 from openpyxl.worksheet.formula import ArrayFormula, DataTableFormula
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -194,6 +193,10 @@ def detect_visual_tables(
     horizontal, vertical = _border_segments(written_cells(sheet) if cells is None else cells)
     formal = tuple(GridRectangle(*range_boundaries(table.ref)) for table in sheet.tables.values())
     drawings = drawing_footprints(sheet)
+    sheet_merges = tuple(
+        GridRectangle(merge.min_col, merge.min_row, merge.max_col, merge.max_row)
+        for merge in sheet.merged_cells.ranges
+    )
     candidates: list[VisualTableCandidate] = []
     for rectangle in _component_rectangles(horizontal, vertical):
         if rectangle.max_col <= rectangle.min_col or rectangle.max_row <= rectangle.min_row:
@@ -204,13 +207,8 @@ def detect_visual_tables(
             continue
         internal_h = _full_horizontal_rules(rectangle, horizontal)
         internal_v = _full_vertical_rules(rectangle, vertical)
-        merges = _contained_merges(sheet, rectangle)
-        populated = sum(
-            sheet.cell(row=row, column=col).value is not None
-            for row in range(rectangle.min_row, rectangle.max_row + 1)
-            for col in range(rectangle.min_col, rectangle.max_col + 1)
-        )
-        styled = _supporting_style_cells(sheet, rectangle)
+        merges = _contained_merges(sheet_merges, rectangle)
+        populated, styled, kinds = _scan(sheet, rectangle)
         repeated = _repeated_column_spans(merges, rectangle)
         # Outer boxes and decorated prose are deliberately rejected. A visual table
         # needs internal rules plus either repeated merge topology or enough values.
@@ -221,14 +219,14 @@ def detect_visual_tables(
         if not repeated and populated < 4 and not (populated >= 3 and styled >= 3):
             continue
         table_drawings = tuple(d for d in drawings if d.rectangle.overlaps(rectangle))
-        values = _values(sheet, rectangle)
+        values = _values(sheet, sheet_merges, rectangle)
         candidates.append(
             VisualTableCandidate(
                 sheet=sheet.title,
                 rectangle=rectangle,
                 values=values,
-                column_groups=_column_groups(sheet, rectangle, merges, repeated),
-                row_bands=_row_bands(sheet, rectangle, internal_h),
+                column_groups=_column_groups(kinds, rectangle, repeated),
+                row_bands=_row_bands(kinds, rectangle, internal_h),
                 image_slots=_image_slots(merges, table_drawings),
                 drawings=table_drawings,
                 merges=merges,
@@ -428,10 +426,12 @@ def _full_vertical_rules(
     )
 
 
-def _contained_merges(sheet: Worksheet, rectangle: GridRectangle) -> tuple[GridRectangle, ...]:
+def _contained_merges(
+    merges: Sequence[GridRectangle], rectangle: GridRectangle
+) -> tuple[GridRectangle, ...]:
     return tuple(
-        GridRectangle(merge.min_col, merge.min_row, merge.max_col, merge.max_row)
-        for merge in sheet.merged_cells.ranges
+        merge
+        for merge in merges
         if (
             rectangle.min_col <= merge.min_col <= merge.max_col <= rectangle.max_col
             and rectangle.min_row <= merge.min_row <= merge.max_row <= rectangle.max_row
@@ -473,42 +473,40 @@ def _repeated_column_spans(
 
 
 def _column_groups(
-    sheet: Worksheet,
+    kinds: dict[tuple[int, int], ValueKind],
     rectangle: GridRectangle,
-    merges: Sequence[GridRectangle],
     repeated: Sequence[tuple[int, int]],
 ) -> tuple[ColumnGroup, ...]:
-    del merges  # topology has already been reduced to the repeated spans
     groups: list[ColumnGroup] = []
     cursor = rectangle.min_col
     for index, (start, end) in enumerate(repeated):
         if cursor < start:
             role: GroupRole = "stub" if cursor == rectangle.min_col else "field"
             area = GridRectangle(cursor, rectangle.min_row, start - 1, rectangle.max_row)
-            groups.append(ColumnGroup(area, role, _value_kind(sheet, area)))
+            groups.append(ColumnGroup(area, role, _value_kind(kinds, area)))
         area = GridRectangle(start, rectangle.min_row, end, rectangle.max_row)
-        groups.append(ColumnGroup(area, "repeated", _value_kind(sheet, area), index))
+        groups.append(ColumnGroup(area, "repeated", _value_kind(kinds, area), index))
         cursor = end + 1
     if cursor <= rectangle.max_col:
         role = "stub" if not groups else "field"
         area = GridRectangle(cursor, rectangle.min_row, rectangle.max_col, rectangle.max_row)
-        groups.append(ColumnGroup(area, role, _value_kind(sheet, area)))
+        groups.append(ColumnGroup(area, role, _value_kind(kinds, area)))
     if not groups:
         for col in range(rectangle.min_col, rectangle.max_col + 1):
             area = GridRectangle(col, rectangle.min_row, col, rectangle.max_row)
-            groups.append(ColumnGroup(area, "field", _value_kind(sheet, area)))
+            groups.append(ColumnGroup(area, "field", _value_kind(kinds, area)))
     return tuple(groups)
 
 
 def _row_bands(
-    sheet: Worksheet, rectangle: GridRectangle, internal_rules: Sequence[int]
+    kinds: dict[tuple[int, int], ValueKind], rectangle: GridRectangle, internal_rules: Sequence[int]
 ) -> tuple[RowBand, ...]:
     starts = (rectangle.min_row, *internal_rules)
     ends = (*[rule - 1 for rule in internal_rules], rectangle.max_row)
     return tuple(
         RowBand(
             area := GridRectangle(rectangle.min_col, start, rectangle.max_col, end),
-            _value_kind(sheet, area),
+            _value_kind(kinds, area),
         )
         for start, end in zip(starts, ends, strict=True)
     )
@@ -533,65 +531,89 @@ def _image_slots(
     )
 
 
-def _supporting_style_cells(sheet: Worksheet, rectangle: GridRectangle) -> int:
-    count = 0
+def _scan(
+    sheet: Worksheet, rectangle: GridRectangle
+) -> tuple[int, int, dict[tuple[int, int], ValueKind]]:
+    """How many cells in the rectangle hold a value, how many are styled, and the kind of
+    each value, read in one pass over the cells the file wrote: `sheet.cell()` would insert
+    an empty one for each miss. A position the file left out has the sheet's default style,
+    which is what an empty cell made for it would have."""
+    blank_styled = _styled(Cell(sheet))
+    populated = styled = 0
+    kinds: dict[tuple[int, int], ValueKind] = {}
     for row in range(rectangle.min_row, rectangle.max_row + 1):
         for col in range(rectangle.min_col, rectangle.max_col + 1):
-            cell = sheet.cell(row, col)
-            has_fill = cell.fill.fill_type is not None
-            has_font = cell.font.bold or cell.font.italic or cell.font.sz is not None
-            has_alignment = any(
-                value is not None
-                for value in (
-                    cell.alignment.horizontal,
-                    cell.alignment.vertical,
-                    cell.alignment.wrap_text,
-                )
-            )
-            if has_fill or has_font or has_alignment:
-                count += 1
-    return count
+            cell = sheet._cells.get((row, col))
+            if cell is None:
+                styled += blank_styled
+                continue
+            styled += _styled(cell)
+            if cell.value is None:
+                continue
+            populated += 1
+            if not isinstance(cell, MergedCell):
+                kinds[(row, col)] = _kind_of(cell)
+    return populated, styled, kinds
 
 
-def _values(sheet: Worksheet, rectangle: GridRectangle) -> tuple[tuple[object | None, ...], ...]:
+def _styled(cell: Cell | MergedCell) -> bool:
+    has_fill = cell.fill.fill_type is not None
+    has_font = cell.font.bold or cell.font.italic or cell.font.sz is not None
+    has_alignment = any(
+        value is not None
+        for value in (
+            cell.alignment.horizontal,
+            cell.alignment.vertical,
+            cell.alignment.wrap_text,
+        )
+    )
+    return bool(has_fill or has_font or has_alignment)
+
+
+def _values(
+    sheet: Worksheet, merges: Sequence[GridRectangle], rectangle: GridRectangle
+) -> tuple[tuple[object | None, ...], ...]:
+    def value_at(row: int, col: int) -> object | None:
+        cell = sheet._cells.get((row, col))
+        return None if cell is None else cell.value
+
     anchors: dict[tuple[int, int], object | None] = {}
-    for merge in sheet.merged_cells.ranges:
-        if CellRange(merge.coord).isdisjoint(CellRange(rectangle.ref)):
+    for merge in merges:
+        if not merge.overlaps(rectangle):
             continue
-        value = sheet.cell(merge.min_row, merge.min_col).value
+        value = value_at(merge.min_row, merge.min_col)
         for row in range(merge.min_row, merge.max_row + 1):
             for col in range(merge.min_col, merge.max_col + 1):
                 anchors[(row, col)] = value
     return tuple(
         tuple(
-            anchors.get((row, col), sheet.cell(row, col).value)
+            anchors.get((row, col), value_at(row, col))
             for col in range(rectangle.min_col, rectangle.max_col + 1)
         )
         for row in range(rectangle.min_row, rectangle.max_row + 1)
     )
 
 
-def _value_kind(sheet: Worksheet, rectangle: GridRectangle) -> ValueKind:
-    kinds: set[ValueKind] = set()
-    for row in range(rectangle.min_row, rectangle.max_row + 1):
-        for col in range(rectangle.min_col, rectangle.max_col + 1):
-            cell = sheet.cell(row, col)
-            if isinstance(cell, MergedCell) or cell.value is None:
-                continue
-            if cell.data_type == "f" or is_formula(cell.value):
-                kinds.add("formula")
-            elif cell.is_date:
-                kinds.add("date")
-            elif isinstance(cell.value, bool):
-                kinds.add("boolean")
-            elif isinstance(cell.value, (int, float)):
-                kinds.add("number")
-            else:
-                kinds.add("text")
-    if not kinds:
+def _kind_of(cell: Cell) -> ValueKind:
+    if cell.data_type == "f" or is_formula(cell.value):
+        return "formula"
+    if cell.is_date:
+        return "date"
+    if isinstance(cell.value, bool):
+        return "boolean"
+    if isinstance(cell.value, (int, float)):
+        return "number"
+    return "text"
+
+
+def _value_kind(
+    kinds: dict[tuple[int, int], ValueKind], rectangle: GridRectangle
+) -> ValueKind:
+    found = {kind for (row, col), kind in kinds.items() if rectangle.contains(col, row)}
+    if not found:
         return "empty"
-    if len(kinds) == 1:
-        return next(iter(kinds))
+    if len(found) == 1:
+        return next(iter(found))
     return "mixed"
 
 

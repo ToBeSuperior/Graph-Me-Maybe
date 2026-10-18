@@ -93,3 +93,6 @@ Thumbs.db
 
 # Point-in-time copies taken before a revert; local only.
 /.local-backup-*/
+
+# Local tests of the removed single-document pipeline, kept aside rather than deleted.
+/.removed-legacy-tests/

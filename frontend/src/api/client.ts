@@ -6,7 +6,6 @@ import { keyWanted } from '../lib/key';
 import type { components, paths } from './schema';
 
 export type Schemas = components['schemas'];
-export type Library = Schemas['Library'];
 export type LibraryItem = Schemas['LibraryItem'];
 export type Pages = Schemas['Pages'];
 export type PageInfo = Schemas['PageInfo'];
@@ -17,7 +16,6 @@ export type GraphNode = Schemas['GraphNode'];
 export type Source = Schemas['Source'];
 export type Answer = Schemas['Answer'];
 export type ExportJob = Schemas['ExportJob'];
-export type ServerSettings = Schemas['ServerSettings'];
 export type Job = BuildState | ExportJob;
 
 export const api = createClient<paths>({ baseUrl: '' });
@@ -66,5 +64,5 @@ export const pageImage = (file: string, index: number) => `/v1/files/${file}/pag
 export const nodeCrop = (file: string, index: number, node: string) =>
   `/v1/files/${file}/pages/${index}/crop?node=${encodeURIComponent(node)}`;
 
-export const BUILDING = ['reading', 'linking', 'embedding'];
+const BUILDING = ['reading', 'linking', 'embedding'];
 export const isBuilding = (b?: BuildState | null) => !!b && BUILDING.includes(b.state);

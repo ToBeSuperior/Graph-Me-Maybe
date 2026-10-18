@@ -7,10 +7,10 @@ import { Button, Kbd } from '../../components/ui';
 import { cn } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 
-export const TOP_K = [5, 10, 15, 20];
-export const DEFAULT_K = 5;
+const TOP_K = [5, 10, 15, 20];
+const DEFAULT_K = 5;
 /** The longest question the demo takes (`MAX_QUESTION_CHARS` in app.py). */
-export const QUESTION_CHARS = 1000;
+const QUESTION_CHARS = 1000;
 
 /** The passage count a page was asked with, or the default when it is none of the choices. */
 export const topKOf = (value: string | null) => (TOP_K.includes(Number(value)) ? Number(value) : DEFAULT_K);

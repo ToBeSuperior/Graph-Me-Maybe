@@ -679,10 +679,18 @@ NOT_BUILT = """<!doctype html><meta charset="utf-8"><title>Not built</title>
 page.</p>"""
 
 
+def make_demo(settings: Settings, *, scratch: bool = False) -> Demo:
+    """The server's state, drawing pages through the browser; its files under `data_dir`, or
+    with `scratch` in a temporary folder of its own."""
+    # ponytail: one folder for every server on this data_dir, no lock -- two running at once
+    # share (and can overwrite) its uploads; a folder per process if that is wanted.
+    root = None if scratch else settings.data_dir.resolve() / "server"
+    return Demo(settings, PageRenderer(browser=create_browser_renderer(settings)), root=root)
+
+
 def openapi() -> str:
     """The API's contract as JSON: what `npm run api` makes the web app's types from."""
-    settings = Settings(profile="test", embedding_provider="hash")
-    demo = Demo(settings, PageRenderer(browser=create_browser_renderer(settings)))
+    demo = make_demo(Settings(profile="test", embedding_provider="hash"), scratch=True)
     return json.dumps(create_app(demo).openapi(), ensure_ascii=False, indent=1)
 
 
@@ -694,10 +702,7 @@ def serve(settings: Settings, *, host: str, port: int, web: Path | None) -> None
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     for problem in preflight(settings):
         logging.warning("준비 안 됨: %s", problem)
-    # ponytail: one folder for every server on this data_dir, no lock -- two running at once
-    # share (and can overwrite) its uploads; a folder per process if that is wanted.
-    demo = Demo(settings, PageRenderer(browser=create_browser_renderer(settings)),
-                root=settings.data_dir.resolve() / "server")
+    demo = make_demo(settings)
     if web is None and WEB.is_dir():
         web = WEB
     uvicorn.run(create_app(demo, web=web), host=host, port=port, log_level="info")
