@@ -367,6 +367,7 @@ def test_while_the_graph_is_being_opened_another_request_is_told_to_wait(
     from graphme.adapters.storage.local_neo4j import DockerStarting
     held = threading.Event()
     release = threading.Event()
+    demo.graph._space = None  # not opened yet: the opening below holds the way
 
     def opening() -> None:
         with demo.opening_space:
@@ -380,3 +381,30 @@ def test_while_the_graph_is_being_opened_another_request_is_told_to_wait(
             demo.space(wait=0.1)
     finally:
         release.set()
+
+
+def test_a_page_request_never_does_the_slow_opening_itself(demo, monkeypatch) -> None:
+    # The first request after Docker came up started the Neo4j container itself and was held
+    # 25 seconds, with no "preparing" answer the page could show.
+    import threading
+    import time
+
+    from graphme.adapters.storage.local_neo4j import DockerStarting
+
+    opened = threading.Event()
+    space = demo.graph._space
+    demo.graph._space = None
+
+    def slow() -> object:
+        time.sleep(0.5)
+        demo.graph._space = space
+        opened.set()
+        return space
+
+    monkeypatch.setattr(demo.graph, "graph_space", slow)
+    started = time.monotonic()
+    with pytest.raises(DockerStarting):
+        demo.space(wait=0.05)
+    assert time.monotonic() - started < 0.3
+    assert opened.wait(5)  # the opening went on behind it
+    assert demo.space(wait=0.05) is space

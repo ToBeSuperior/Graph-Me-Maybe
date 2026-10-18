@@ -3,7 +3,6 @@ import { lazy, StrictMode, Suspense, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, Navigate, RouterProvider, useParams } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import { retryDelay, retrying } from './api/client';
 import { AppShell } from './components/AppShell';
 import { KeyGate } from './components/KeyGate';
 import { TipProvider } from './components/ui';
@@ -15,6 +14,7 @@ import { ManageLayout } from './features/manage/ManageLayout';
 import { AskPage } from './features/search/AskPage';
 import { UploadProvider } from './features/upload/upload';
 import { LangProvider } from './lib/i18n';
+import { queryDefaults } from './lib/queries';
 import { ThemeProvider, useTheme } from './lib/theme';
 import './styles.css';
 
@@ -25,9 +25,7 @@ const later = (page: ReactNode) => <Suspense fallback={<div className="skeleton 
 
 // Answers are kept until the graph changes (lib/queries.ts says when); a failure is retried
 // once, not three times over a minute -- unless the server says to wait (Docker starting).
-const client = new QueryClient({
-  defaultOptions: { queries: { staleTime: Infinity, retry: retrying, retryDelay, refetchOnWindowFocus: false } },
-});
+const client = new QueryClient({ defaultOptions: { queries: queryDefaults } });
 
 // The app's own window (WebView2, WebKit) has no reload of its own: F5 and Ctrl/Cmd+R do it.
 addEventListener('keydown', (event) => {

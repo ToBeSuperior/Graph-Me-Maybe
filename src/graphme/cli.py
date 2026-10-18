@@ -111,6 +111,9 @@ def create_app(
             )
             written = sum(1 for node in records["nodes"] if "Document" in node["labels"])
         else:
+            if dump_output:
+                # One file: into a folder as graph.dump, else with its extension.
+                output = output / "graph.dump" if output.is_dir() else output.with_suffix(".dump")
             written = corpus_service.export(output, chosen, dump=dump_output)
         typer.echo(f"written={output} documents={written}")
 

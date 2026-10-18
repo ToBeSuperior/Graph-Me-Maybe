@@ -3,7 +3,7 @@
 // changes (a build ends, a document is deleted, the graph is reset).
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
-import { api, call, isBuilding, lastBuild, type BuildState } from '../api/client';
+import { api, call, isBuilding, isWaiting, lastBuild, retryDelay, retrying, type BuildState } from '../api/client';
 
 export const keys = {
   build: ['build'] as const,
@@ -38,16 +38,28 @@ export function graphReset(client: QueryClient) {
   graphChanged(client);
 }
 
-export const useLibrary = () =>
-  useQuery({ queryKey: keys.library, queryFn: () => call(api.GET('/v1/documents')) });
+/** Every query's: an answer kept until the graph changes (`graphChanged` says when); a failure
+ * asked again once -- or, while the server says to wait (the graph DB starting), every three
+ * seconds until it answers. */
+export const queryDefaults = {
+  staleTime: Infinity, retry: retrying, retryDelay, refetchOnWindowFocus: false,
+  refetchInterval: (query: { state: { error: unknown } }) => (isWaiting(query.state.error) ? 3000 : false),
+} as const;
+
+/** What the graph holds is asked again whenever its page is opened or the window comes back:
+ * the command line (`graphme build-graph`) changes the graph without the page knowing. */
+const fresh = { refetchOnMount: 'always', refetchOnWindowFocus: 'always' } as const;
+
+export const libraryOptions = { queryKey: keys.library, queryFn: () => call(api.GET('/v1/documents')), ...fresh };
+export const useLibrary = () => useQuery(libraryOptions);
 
 /** The keys and model the server runs with, what keeps it from running, and whether it has
  * the demo's samples. */
 export const useSettings = () =>
   useQuery({ queryKey: keys.settings, queryFn: () => call(api.GET('/v1/settings')), retry: false });
 
-export const useCorpusMap = () =>
-  useQuery({ queryKey: keys.map, queryFn: () => call(api.GET('/v1/graph/map')), retry: 1 });
+export const corpusMapOptions = { queryKey: keys.map, queryFn: () => call(api.GET('/v1/graph/map')), ...fresh };
+export const useCorpusMap = () => useQuery(corpusMapOptions);
 
 /** Where the newest build stands -- null before the first -- asked every two seconds while it
  * runs. */

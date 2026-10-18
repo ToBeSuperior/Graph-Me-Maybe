@@ -281,6 +281,9 @@ class Demo:
         # those pages instead of drawing its own.
         self.preparing = threading.Lock()
         self.opening_space = threading.Lock()
+        self._opener: threading.Thread | None = None
+        self._starting_opener = threading.Lock()
+        self._open_failed: Exception | None = None
 
     def reconfigure(self, settings: Settings) -> None:
         """New keys or model, taken up from the next reading and the next question. The graph
@@ -294,14 +297,35 @@ class Demo:
         """The graph space every built document is put in, opened on first use. A build waits
         for it however long; a page's request (`wait`) only so long."""
         # The first use may start the local Neo4j; the page asks for the list and the map at once.
-        # Pulling and starting it takes minutes: a request arriving meanwhile is told to wait
-        # (503, Retry-After) rather than held past the page's own timeout.
-        if not self.opening_space.acquire(timeout=wait):
+        if wait < 0:
+            with self.opening_space:
+                return self.graph.graph_space()
+        if self.graph._space is not None:
+            return self.graph._space
+        # Pulling and starting Neo4j takes minutes, so a page's request never does it: it is done
+        # behind, and the request told to wait (503, Retry-After) while it goes on.
+        with self._starting_opener:  # the list and the map ask at once: one opening
+            opener = self._opener
+            if opener is None or not opener.is_alive():
+                if (failed := self._open_failed) is not None:
+                    self._open_failed = None
+                    raise failed
+                opener = self._opener = threading.Thread(target=self._open_behind, daemon=True)
+                opener.start()
+        opener.join(wait)
+        if opener.is_alive():
             raise DockerStarting("그래프 DB를 준비하는 중입니다 -- 준비되면 저절로 이어집니다.")
+        if (failed := self._open_failed) is not None:
+            self._open_failed = None
+            raise failed
+        return self.graph.graph_space()
+
+    def _open_behind(self) -> None:
         try:
-            return self.graph.graph_space()
-        finally:
-            self.opening_space.release()
+            with self.opening_space:
+                self.graph.graph_space()
+        except Exception as error:  # noqa: BLE001 -- said to the next request
+            self._open_failed = error
 
     def admin(self) -> DockerNeo4jAdmin:
         """`neo4j-admin`, in a throwaway container of the configured Neo4j image."""

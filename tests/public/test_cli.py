@@ -261,3 +261,24 @@ def test_build_graph_embeds_what_it_read_so_questions_work_at_once(tmp_path: Pat
     assert embedded == ["all"] and "embedded=3" in done.output
     skipped = CliRunner().invoke(app, ["build-graph", str(tmp_path), "--no-embed"])
     assert skipped.exit_code == 0 and embedded == ["all"]
+
+
+@pytest.mark.parametrize("given", ["graph", "graph.dump", "folder/"])
+def test_a_dump_is_a_dump_file_wherever_it_is_asked_for(tmp_path: Path, given: str) -> None:
+    # `export-corpus graph --dump` wrote a file named `graph`, with no extension.
+    from graphme.cli import create_app
+
+    written: list[Path] = []
+
+    class _Corpus:
+        def export(self, target: Path, document_ids=None, *, dump: bool = False) -> int:
+            written.append(target)
+            return 1
+
+    (tmp_path / "folder").mkdir()
+    out = tmp_path / given.rstrip("/")
+    done = CliRunner().invoke(create_app(corpus_service=_Corpus()),
+                              ["export-corpus", str(out), "--dump"])
+    assert done.exit_code == 0, done.output
+    expected = (tmp_path / "folder" if given.endswith("/") else tmp_path) / "graph.dump"
+    assert written == [expected]

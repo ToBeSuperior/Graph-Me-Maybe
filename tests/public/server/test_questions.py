@@ -114,6 +114,7 @@ def test_a_question_with_the_space_down_is_a_503(demo: Demo) -> None:
     def down() -> None:
         raise ConnectionError("no Neo4j")
 
+    demo.graph._space = None  # never opened
     demo.graph.graph_space = down  # type: ignore[method-assign]
     client = TestClient(server_app.create_app(demo, web=None), base_url="http://127.0.0.1:8765",
                         raise_server_exceptions=False)

@@ -38,3 +38,15 @@ def test_nothing_starts_a_program_but_through_it() -> None:
                     and node.attr in {"run", "Popen", "call", "check_call", "check_output"}):
                 direct.append(f"{path.relative_to(SRC)}:{node.lineno}")
     assert direct == []
+
+
+def test_text_from_a_program_is_read_as_utf8_whatever_the_code_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Korean Windows read docker's output as cp949 and a reader thread died on a UTF-8 byte.
+    seen: list[dict[str, object]] = []
+    monkeypatch.setattr(subprocess, "run", lambda args, **kwargs: seen.append(kwargs))
+    processes.run(["docker", "start", "-a", "x"], capture_output=True, text=True)
+    processes.run(["docker", "inspect", "x"], capture_output=True)
+    assert seen[0]["encoding"] == "utf-8" and seen[0]["errors"] == "replace"
+    assert "encoding" not in seen[1]  # bytes asked for stay bytes

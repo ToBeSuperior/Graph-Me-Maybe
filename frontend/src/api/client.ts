@@ -22,11 +22,12 @@ export const api = createClient<paths>({ baseUrl: '' });
 
 /** An answer the server says to wait for (Docker starting, `Retry-After`) is asked again until
  * it comes; any other failure once. */
-export const retrying = (failures: number, error: unknown) =>
-  (error instanceof ApiError && error.waiting) || failures < 1;
+export const isWaiting = (error: unknown) => error instanceof ApiError && error.waiting;
+
+export const retrying = (failures: number, error: unknown) => isWaiting(error) || failures < 1;
 
 export const retryDelay = (failures: number, error: unknown) =>
-  error instanceof ApiError && error.waiting ? 3000 : Math.min(1000 * 2 ** failures, 30000);
+  isWaiting(error) ? 3000 : Math.min(1000 * 2 ** failures, 30000);
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number, readonly waiting = false) { super(message); }
