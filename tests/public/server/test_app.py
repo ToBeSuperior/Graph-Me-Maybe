@@ -87,3 +87,16 @@ def test_routes_of_the_callers_own_sit_under_v1_behind_the_key(demo: Demo) -> No
     assert client.post("/v1/samples", headers=keyed).json() == {"said": "invented"}
     assert client.get("/v1/settings", headers=keyed).json()["samples"] is True
     assert "/v1/samples" in create_app(demo, extra=own).openapi()["paths"]
+
+
+def test_while_docker_starts_the_page_is_told_to_ask_again(demo: Demo) -> None:
+    from graphme.adapters.storage.local_neo4j import DockerStarting
+
+    def starting() -> None:
+        raise DockerStarting("Docker를 켜는 중입니다")
+
+    demo.space = starting  # type: ignore[assignment,method-assign]
+    said = TestClient(create_app(demo), base_url="http://127.0.0.1:8765").get("/v1/graph/map")
+
+    assert said.status_code == 503 and said.headers.get("Retry-After")
+    assert "Docker를 켜는 중" in said.json()["detail"]

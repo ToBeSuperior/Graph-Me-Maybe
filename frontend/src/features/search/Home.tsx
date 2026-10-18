@@ -2,6 +2,7 @@
 // after, one question box with the questions asked before and, with the samples in, some to try.
 import { Database, History } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { ApiError } from '../../api/client';
 import { Button, Empty, Skeleton } from '../../components/ui';
 import { useT } from '../../lib/i18n';
 import { useCorpusMap } from '../../lib/queries';
@@ -23,6 +24,14 @@ export function Home() {
   const total = map.data?.total ?? 0;
   const hasSamples = !!map.data?.documents.some((d) => d.label === SAMPLE_FILE);
 
+  const waiting = map.failureReason instanceof ApiError && map.failureReason.waiting;
+  if (map.isPending && waiting) {
+    return (
+      <Empty className="pt-24" icon={<Database className="size-5" />} title={t('dbStarting')}>
+        <p>{map.failureReason?.message}</p>
+      </Empty>
+    );
+  }
   if (map.isPending) {
     return <div className="mx-auto max-w-2xl space-y-4 px-6 pt-24"><Skeleton className="h-10 w-2/3" /><Skeleton className="h-14" /></div>;
   }

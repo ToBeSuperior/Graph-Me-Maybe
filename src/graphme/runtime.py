@@ -21,7 +21,11 @@ from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.rendering.visual_binding import RenderedVisualBinder
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import GraphRag
-from graphme.adapters.storage.local_neo4j import ensure_local_neo4j, own_port
+from graphme.adapters.storage.local_neo4j import (
+    ensure_local_neo4j,
+    own_port,
+    start_docker_desktop,
+)
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, PasswordWanted
 from graphme.adapters.vision.chat_completions import ChatCompletionsVLMAdapter
 from graphme.adapters.vision.hierarchy_scope import RenderedHierarchyScopeProvider
@@ -153,8 +157,10 @@ def create_graph_space(settings: Settings) -> Neo4jGraphSpace:
     """The one graph every document of a corpus is put in -- on this machine, a Neo4j
     started for it when none answers there."""
     memory = (settings.neo4j_heap, settings.neo4j_pagecache)
+    starter = start_docker_desktop if settings.docker_autostart else None
     if not settings.neo4j_password:  # with a password it is one pointed at on purpose
-        ensure_local_neo4j(settings.neo4j_uri, settings.neo4j_admin_image, memory)
+        ensure_local_neo4j(settings.neo4j_uri, settings.neo4j_admin_image, memory,
+                           start_docker=starter)
     try:
         return Neo4jGraphSpace.from_settings(settings)
     except PasswordWanted:
@@ -165,7 +171,7 @@ def create_graph_space(settings: Settings) -> Neo4jGraphSpace:
     uri = f"bolt://127.0.0.1:{own_port()}"
     _log.warning("%s의 Neo4j는 비밀번호를 요구해서, 이 앱의 Neo4j를 %s에서 씁니다",
                  settings.neo4j_uri, uri)
-    ensure_local_neo4j(uri, settings.neo4j_admin_image, memory)
+    ensure_local_neo4j(uri, settings.neo4j_admin_image, memory, start_docker=starter)
     return Neo4jGraphSpace.from_settings(settings.model_copy(update={"neo4j_uri": uri}))
 
 

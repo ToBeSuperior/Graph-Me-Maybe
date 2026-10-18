@@ -47,6 +47,7 @@ ENV_FIELDS = {
     "GRAPHME_NEO4J_HEAP": "neo4j_heap",
     "GRAPHME_API_KEY": "server_key",
     "GRAPHME_NEO4J_PAGECACHE": "neo4j_pagecache",
+    "GRAPHME_DOCKER_AUTOSTART": "docker_autostart",
 }
 _FLOAT_FIELDS = {"render_timeout_seconds", "relevance_floor", "hybrid_dense_weight"}
 _INT_FIELDS = {
@@ -170,6 +171,8 @@ class Settings(BaseModel):
     """The graph space a corpus is put in (`graphme build-graph`). At this machine's address
     with nothing answering, a Neo4j without authentication is started there (`local_neo4j`)."""
     neo4j_user: str = "neo4j"
+    # Docker Desktop started when the graph needs it and it is off (Windows, macOS).
+    docker_autostart: bool = True
     neo4j_password: str | None = Field(default=None, repr=False)
     """Only for a Neo4j run with a password; the one started here needs none."""
     server_key: str | None = Field(default=None, repr=False)

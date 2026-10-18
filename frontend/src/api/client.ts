@@ -20,8 +20,16 @@ export type Job = BuildState | ExportJob;
 
 export const api = createClient<paths>({ baseUrl: '' });
 
+/** An answer the server says to wait for (Docker starting, `Retry-After`) is asked again until
+ * it comes; any other failure once. */
+export const retrying = (failures: number, error: unknown) =>
+  (error instanceof ApiError && error.waiting) || failures < 1;
+
+export const retryDelay = (failures: number, error: unknown) =>
+  error instanceof ApiError && error.waiting ? 3000 : Math.min(1000 * 2 ** failures, 30000);
+
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number) { super(message); }
+  constructor(message: string, readonly status: number, readonly waiting = false) { super(message); }
 }
 
 /** The answer's data, or an ApiError with the server's `detail` (or the status when it says none). */
@@ -37,7 +45,7 @@ export async function call<T>(request: Promise<{ data?: T; error?: unknown; resp
   if (got.response.status === 401) keyWanted(); // the page asks for the server's key
   const detail = (got.error as { detail?: unknown } | undefined)?.detail;
   throw new ApiError(typeof detail === 'string' ? detail : got.response.statusText || String(got.response.status),
-    got.response.status);
+    got.response.status, got.response.headers.has('Retry-After'));
 }
 
 /** A request the contract does not type -- an upload's form, the demo's samples -- answered as

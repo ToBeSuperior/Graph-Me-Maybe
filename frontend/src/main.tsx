@@ -3,6 +3,7 @@ import { lazy, StrictMode, Suspense, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, Navigate, RouterProvider, useParams } from 'react-router-dom';
 import { Toaster } from 'sonner';
+import { retryDelay, retrying } from './api/client';
 import { AppShell } from './components/AppShell';
 import { KeyGate } from './components/KeyGate';
 import { TipProvider } from './components/ui';
@@ -23,9 +24,9 @@ const MapPage = lazy(() => import('./features/manage/MapPage').then((m) => ({ de
 const later = (page: ReactNode) => <Suspense fallback={<div className="skeleton m-6 h-96" />}>{page}</Suspense>;
 
 // Answers are kept until the graph changes (lib/queries.ts says when); a failure is retried
-// once, not three times over a minute.
+// once, not three times over a minute -- unless the server says to wait (Docker starting).
 const client = new QueryClient({
-  defaultOptions: { queries: { staleTime: Infinity, retry: 1, refetchOnWindowFocus: false } },
+  defaultOptions: { queries: { staleTime: Infinity, retry: retrying, retryDelay, refetchOnWindowFocus: false } },
 });
 
 /** The old pages' links: `/?doc=<id>` opened a document, `/qfolder` the folders. */

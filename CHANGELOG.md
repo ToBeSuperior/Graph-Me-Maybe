@@ -3,6 +3,17 @@
 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고, 버전은
 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.1.8] - 2026-10-18
+
+### 추가
+
+- 그래프가 필요한데 Docker Desktop이 꺼져 있으면 앱이 켭니다(Windows `docker desktop start`, 없으면 `Docker Desktop.exe`; macOS `open -a Docker`). 켜지는 동안 화면은 "Docker를 켜는 중"을 보여 주고 저절로 다시 묻습니다(서버는 503과 `Retry-After`). 3분이 지나도 준비되지 않으면 약관 동의 같은 확인이 떠 있는지 보라고 말합니다. `GRAPHME_DOCKER_AUTOSTART=0`으로 끕니다.
+
+### 고침
+
+- Docker가 꺼져 있을 때 요청마다 `docker`를 다시 실행하던 것. 꺼져 있다는 결과를 5초 동안 기억해, 한 화면의 요청들이 한 번의 확인을 나눠 씁니다.
+- README: WSL에 깔았던 앱을 키·그래프까지 완전히 지우는 방법.
+
 ## [0.1.7] - 2026-10-18
 
 ### 고침

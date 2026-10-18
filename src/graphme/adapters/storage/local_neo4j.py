@@ -11,11 +11,15 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import os
 import socket
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from graphme import processes
@@ -28,6 +32,74 @@ VOLUME = "graphme-neo4j-data"
 LOGS = "graphme-neo4j-logs"
 WAIT_SECONDS = 120
 _starting = threading.Lock()
+DOCKER_START_SECONDS = 180  # Docker Desktop's own start, a minute or two
+OFF_SECONDS = 5
+
+
+class DockerStarting(RuntimeError):
+    """Docker Desktop was started for the graph and is not up yet: ask again shortly."""
+
+
+class DockerOff:
+    """A stopped Docker as last seen, kept a few seconds -- a screen's requests come together,
+    and each ran `docker` again -- and when Docker Desktop was started, which is done once."""
+
+    def __init__(self) -> None:
+        self.seen = -math.inf
+        self.error: RuntimeError | None = None
+        self.started: float | None = None
+
+    def recent(self, now: float) -> RuntimeError | None:
+        return self.error if now - self.seen < OFF_SECONDS else None
+
+    def said(self, now: float, start_docker: Callable[[], bool] | None) -> RuntimeError:
+        if self.started is None and start_docker is not None and start_docker():
+            self.started = now
+        error: RuntimeError
+        if self.started is not None and now - self.started < DOCKER_START_SECONDS:
+            error = DockerStarting(
+                "Docker를 켜는 중입니다 -- 준비되면 저절로 이어집니다(보통 1~2분).")
+        elif self.started is not None:
+            error = RuntimeError(
+                "Docker Desktop을 켰지만 준비되지 않았습니다. Docker Desktop 창에 약관 동의나 "
+                "로그인 같은 확인이 떠 있는지 보세요.")
+        else:
+            error = RuntimeError(
+                "Docker가 실행 중이 아닙니다. Docker Desktop(또는 colima)을 켠 뒤 다시 "
+                "실행하세요. 직접 띄운 Neo4j라면 GRAPHME_NEO4J_PASSWORD를 설정하세요.")
+        self.seen, self.error = now, error
+        return error
+
+    def up(self) -> None:
+        self.error, self.started = None, None
+
+
+_off = DockerOff()
+
+
+def start_docker_desktop() -> bool:
+    """Docker Desktop started, without waiting for it. Linux's Docker Engine is a service the
+    app does not start."""
+    try:
+        if sys.platform == "win32":
+            try:
+                done = processes.run(["docker", "desktop", "start", "--detach"],
+                                     capture_output=True, text=True, timeout=30)
+                if done.returncode == 0:
+                    return True
+            except subprocess.TimeoutExpired:
+                return True
+            programs = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files"))
+            desktop = programs / "Docker" / "Docker" / "Docker Desktop.exe"
+            if desktop.is_file():
+                os.startfile(desktop)  # a window program: no console either
+                return True
+            return False
+        if sys.platform == "darwin":
+            return processes.run(["open", "-a", "Docker"], capture_output=True).returncode == 0
+    except OSError:
+        return False
+    return False
 
 
 # Bolt's opening: the magic number, then four versions offered (5.x, then 4.4). Docker's own
@@ -50,6 +122,8 @@ def ensure_local_neo4j(
     run: Callable[..., subprocess.CompletedProcess[str]] = processes.run,
     answers: Callable[[str, int], bool] = _answers,
     sleep: Callable[[float], None] = time.sleep,
+    start_docker: Callable[[], bool] | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> bool:
     """Whether a Neo4j had to be started for `uri`. Nothing is started for an address that
     is not this machine's, or where something already answers. `memory` is its heap and page
@@ -60,6 +134,8 @@ def ensure_local_neo4j(
         return False
     # Two first uses at once -- the page asks for the list and the map together -- start one.
     with _starting:
+        if (seen := _off.recent(clock())) is not None:
+            raise seen
         up = answers(host, port)
         heap, pagecache = memory
         wanted = [f"NEO4J_server_memory_heap_max__size={heap}",
@@ -79,9 +155,8 @@ def ensure_local_neo4j(
         if known.returncode != 0 and _daemon_down(known.stderr):
             # What answers cannot be told for ours -- WSL's, reached from Windows by its
             # localhost forwarding, looks the same -- and nothing can be started.
-            raise RuntimeError(
-                "Docker가 실행 중이 아닙니다. Docker Desktop(또는 colima)을 켠 뒤 다시 "
-                "실행하세요. 직접 띄운 Neo4j라면 GRAPHME_NEO4J_PASSWORD를 설정하세요.")
+            raise _off.said(clock(), start_docker)
+        _off.up()
         # Memory and authentication are fixed when a container is made: ours, made otherwise, is
         # made again on the same volume -- even while it is what answers. When something else
         # answers, ours is not running and is left as it is.
