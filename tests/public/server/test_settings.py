@@ -178,6 +178,13 @@ def test_without_a_key_only_this_machines_pages_reach_the_api(page: Any) -> None
     """A keyless server is this machine's: a name rebound to 127.0.0.1, or another site's
     page posting to it, is turned away -- a folder build would read this machine's files."""
     _, demo, _, _ = page
+
+    def no_space() -> None:
+        # Only the gate is asked here: a real space would start Docker's Neo4j on the machine
+        # running the tests, and its log landed in another test's output.
+        raise RuntimeError("no graph space in this test")
+
+    demo.space = no_space  # type: ignore[assignment,method-assign]
     rebound = TestClient(create_app(demo), base_url="http://evil.example:8765")
     here = TestClient(create_app(demo), base_url="http://127.0.0.1:8765")
 
@@ -185,7 +192,7 @@ def test_without_a_key_only_this_machines_pages_reach_the_api(page: Any) -> None
     assert rebound.get("/health").status_code == 200
     told = here.post("/v1/jobs/embed", headers={"origin": "https://evil.example"})
     assert told.status_code == 403 and told.json()["detail"]
-    assert here.get("/v1/documents", headers={"origin": "http://localhost:5173"}).status_code == 200
+    assert here.get("/v1/documents", headers={"origin": "http://localhost:5173"}).status_code != 403
 
 
 def test_a_save_is_taken_up_as_the_server_was_started(page: Any) -> None:
