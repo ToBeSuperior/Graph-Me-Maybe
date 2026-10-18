@@ -109,7 +109,8 @@ def capture(kind: str, source: Path, workspace: Path, *, width: int, dpr: float,
     for entry in pages:
         data = entry.pop("dataUrl").split(",", 1)[1]
         (workspace / f"page-{entry['index'] + 1:03d}.png").write_bytes(base64.b64decode(data))
-    (workspace / "manifest.json").write_text(json.dumps({"kind": kind, "pages": pages}, indent=2))
+    (workspace / "manifest.json").write_text(
+        json.dumps({"kind": kind, "pages": pages}, indent=2), encoding="utf-8")
 
 
 def main(argv: list[str]) -> int:

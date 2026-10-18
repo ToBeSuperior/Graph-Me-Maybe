@@ -57,7 +57,7 @@ class EvaluationService:
 
     @staticmethod
     def read_suite(suite: Path) -> EvaluationSuite:
-        return EvaluationSuite.model_validate_json(suite.read_text())
+        return EvaluationSuite.model_validate_json(suite.read_text(encoding="utf-8"))
 
     def evaluate_record(self, suite: Path) -> EvaluationReport:
         definition = self.read_suite(suite)

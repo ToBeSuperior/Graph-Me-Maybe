@@ -213,7 +213,9 @@ def _run_capture(
         import os
         import sys
 
-        environment = {**os.environ, "DIST_ROOT": str(viewer_directory)}
+        # Its messages carry file names: UTF-8 both ways, not Windows' ANSI code page.
+        environment = {**os.environ, "DIST_ROOT": str(viewer_directory),
+                       "PYTHONIOENCODING": "utf-8"}
         if chrome_executable:
             environment["BROWSER_PATH"] = chrome_executable
         completed = subprocess.run(
@@ -221,14 +223,14 @@ def _run_capture(
                 sys.executable, "-m", "graphme.adapters.rendering.browser_capture",
                 kind, str(source), str(workspace), str(width), str(device_pixel_ratio),
             ],
-            check=False, capture_output=True, text=True, timeout=timeout_seconds,
-            env=environment,
+            check=False, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout_seconds, env=environment,
         )
         if completed.returncode != 0:
             # Surface the browser's own message; a bare exit code says nothing usable.
             detail = (completed.stderr.strip() or completed.stdout.strip())[:1_500]
             raise RuntimeError(detail or f"the renderer exited with {completed.returncode}")
-        manifest = json.loads((workspace / "manifest.json").read_text())
+        manifest = json.loads((workspace / "manifest.json").read_text(encoding="utf-8"))
         return [
             RenderedPage(
                 index=entry["index"] + 1,
@@ -309,7 +311,8 @@ class BrowserOfficeRenderer:
                             scale=self._device_pixel_ratio,
                         ),
                         ensure_ascii=False,
-                    )
+                    ),
+                    encoding="utf-8",
                 )
             if document_format is DocumentFormat.DOCX:
                 staged = _without_vml_copies(source, workspace)
