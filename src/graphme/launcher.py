@@ -67,6 +67,10 @@ def web_directory(home: Path) -> Path | None:
 def free_port(start: int = FIRST_PORT) -> int:
     for port in range(start, start + 50):
         with socket.socket() as probe:
+            if sys.platform != "win32":
+                # As the server binds: a connection the last run closed, still in TIME_WAIT,
+                # is not a port in use. (On Windows the option would let a bind steal one.)
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 probe.bind(("127.0.0.1", port))
             except OSError:

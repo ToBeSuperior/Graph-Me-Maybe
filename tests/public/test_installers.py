@@ -318,12 +318,23 @@ def test_the_windows_closing_line_names_a_custom_home_and_docker_needs_a_restart
 
 
 @posix
-@pytest.mark.parametrize(("fonts", "warned"),
-                         [("", True), ("NotoSansCJK-Regular.ttc: Noto", False)])
-def test_linux_without_a_hangul_font_is_told_how_to_get_one(fonts: str, warned: bool) -> None:
-    # Chrome there sees only Linux's fonts (under WSL, not Windows'): Korean pages draw as boxes.
-    script = (f'GRAPHME_INSTALL_LIB=1 . "{ROOT / "install.sh"}"; uname() {{ echo Linux; }};'
-              f' fc_list() {{ printf "%s" "{fonts}"; }}; check_hangul_font')
+def test_the_latest_release_is_read_from_the_api_not_the_lagging_redirect() -> None:
+    # Right after a release github.com/…/releases/latest still pointed at the one before.
+    script = (f'GRAPHME_INSTALL_LIB=1 . "{ROOT / "install.sh"}"; unset GRAPHME_VERSION;'
+              ' curl() { case "$*" in'
+              ' *api.github.com*) printf \'{\\n  "url": "x",\\n  "tag_name": "v9.9.3",\\n}\\n\' ;;'
+              ' *) printf "https://github.com/ToBeSuperior/Graph-Me-Maybe/releases/tag/v9.9.2" ;;'
+              ' esac; }; release_tag')
     done = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=10)
-    assert done.returncode == 0, done.stderr
-    assert ("fonts-noto-cjk" in done.stdout + done.stderr) is warned
+    assert (done.returncode, done.stdout) == (0, "v9.9.3"), done.stderr
+
+
+@posix
+def test_without_the_api_the_redirect_still_finds_a_release() -> None:
+    # The API allows 60 unauthenticated calls an hour; a shared address can run out.
+    script = (f'GRAPHME_INSTALL_LIB=1 . "{ROOT / "install.sh"}"; unset GRAPHME_VERSION;'
+              ' curl() { case "$*" in *api.github.com*) return 22 ;;'
+              ' *) printf "https://github.com/ToBeSuperior/Graph-Me-Maybe/releases/tag/v9.9.2" ;;'
+              ' esac; }; release_tag')
+    done = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=10)
+    assert (done.returncode, done.stdout) == (0, "v9.9.2"), done.stderr

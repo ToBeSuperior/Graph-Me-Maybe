@@ -47,6 +47,11 @@ ensure_uv() {
 
 release_tag() {
   if [ -n "${GRAPHME_VERSION:-}" ]; then printf '%s' "$GRAPHME_VERSION"; return; fi
+  # The API first: right after a release, github.com/.../releases/latest still pointed at the
+  # one before for a while. The redirect stays for when the API's hourly limit is used up.
+  tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+    | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
+  if [ -n "$tag" ]; then printf '%s' "$tag"; return; fi
   url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest") \
     || die "could not find the latest release"
   printf '%s' "${url##*/}"
@@ -89,16 +94,6 @@ has_chrome() {
       || [ -x "$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ] ;;
     *) command -v google-chrome >/dev/null 2>&1 || command -v chromium >/dev/null 2>&1 ;;
   esac
-}
-
-fc_list() { fc-list :lang=ko 2>/dev/null; }
-
-# Chrome on Linux sees only Linux's fonts -- under WSL, not Windows' -- so Korean pages draw as boxes.
-check_hangul_font() {
-  [ "$(uname -s)" = Linux ] || return 0
-  [ -n "$(fc_list)" ] && return 0
-  say "no Korean font: Korean text in DOCX, PPTX and XLSX pages draws as boxes. Install one:"
-  say "  sudo apt install -y fonts-noto-cjk && fc-cache -f"
 }
 
 offer_docker() {
@@ -194,7 +189,6 @@ install() {
     say "no Google Chrome: fetching Playwright's Chromium to draw pages with"
     "$python" -m playwright install chromium --only-shell || say "warning: Playwright's Chromium did not download; install Google Chrome, or run: $python -m playwright install chromium --only-shell"
   fi
-  check_hangul_font
   offer_docker
   make_shortcut "$bin"
   say "installed. Open it with: $(open_hint)   (a new terminal finds the command)"

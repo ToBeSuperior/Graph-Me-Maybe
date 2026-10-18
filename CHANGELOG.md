@@ -3,11 +3,19 @@
 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고, 버전은
 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.1.4] - 2026-10-18
+
+### 고침
+
+- 설치 프로그램이 최신 릴리스를 GitHub API로 찾습니다. 릴리스 직후 `releases/latest` 주소가 한동안 이전 버전을 가리켜 한 버전 낮은 것이 설치됐습니다(API 한도가 찼을 때만 그 주소를 씀).
+- Linux·WSL: DOCX·PPTX·XLSX 페이지의 한글을 앱에 든 글꼴(Pretendard)로 그립니다. 시스템에 한글 글꼴이 없어도 네모로 깨지지 않고, `fonts-noto-cjk` 설치가 필요 없습니다.
+- 앱을 끄자마자 다시 띄우면 8765가 아니라 8766으로 뜨던 것: 막 닫힌 연결(TIME_WAIT)이 남은 포트를 사용 중으로 보지 않습니다.
+
 ## [0.1.3] - 2026-10-18
 
 ### 고침
 
-- Linux·WSL: 한글 글꼴이 없으면 설치 프로그램이 `fonts-noto-cjk` 설치를 안내합니다(없으면 Office 페이지의 한글이 네모로 그려짐).
+- Linux·WSL: 한글 글꼴이 없으면 설치 프로그램이 `fonts-noto-cjk` 설치를 안내합니다(0.1.4에서 앱 글꼴로 대신해 안내는 빠짐).
 - README: Linux·WSL 설치 경로, Node 24, 공개 저장소 주소, 설치 프로그램이 웹 앱을 함께 까는 것을 반영했습니다.
 
 ## [0.1.2] - 2026-10-18

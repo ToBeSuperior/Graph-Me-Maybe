@@ -3,6 +3,7 @@ Invented paths only; nothing is served."""
 from __future__ import annotations
 
 import socket
+import sys
 from pathlib import Path
 
 import pytest
@@ -131,3 +132,28 @@ def test_a_browser_named_by_the_user_is_kept_even_under_wsl() -> None:
         fallback=fallback.append)
 
     assert (ran, fallback) == ([], ["http://127.0.0.1:8765"])
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="TIME_WAIT reuse is the POSIX rule")
+def test_a_port_the_app_just_closed_is_free_again() -> None:
+    # A server that closed a connection first leaves it in TIME_WAIT for a minute. The server
+    # binds over it (SO_REUSEADDR); the probe did not, and the app came up on the next port.
+    with socket.socket() as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+        port = server.getsockname()[1]
+        client = socket.create_connection(("127.0.0.1", port))
+        accepted, _ = server.accept()
+        accepted.close()  # the server's side closes first: its end waits
+        client.close()
+
+    assert launcher.free_port(port) == port
+
+
+def test_a_port_something_listens_on_is_skipped() -> None:
+    with socket.socket() as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+        port = server.getsockname()[1]
+
+        assert launcher.free_port(port) != port

@@ -20,9 +20,8 @@ curl -fsSL https://raw.githubusercontent.com/ToBeSuperior/Graph-Me-Maybe/main/in
 powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/ToBeSuperior/Graph-Me-Maybe/main/install.ps1 | iex"
 ```
 
-Linux와 WSL(Windows의 Ubuntu)은 macOS와 같은 `install.sh` 한 줄을 씁니다. 페이지를 그리는 Chrome이 Linux 안의 글꼴만
-보므로 한글 글꼴이 있어야 합니다(`sudo apt install -y fonts-noto-cjk`; 없으면 설치 프로그램이 알려 줍니다). WSL에서 `graphme app`은
-Windows 기본 브라우저로 화면을 엽니다.
+Linux와 WSL(Windows의 Ubuntu)은 macOS와 같은 `install.sh` 한 줄을 씁니다. 한글은 앱에 든 글꼴(Pretendard)로 그리므로
+글꼴을 따로 설치하지 않아도 됩니다. WSL에서 `graphme app`은 Windows 기본 브라우저로 화면을 엽니다.
 
 - 그 뒤로는 응용 프로그램 폴더(macOS) 또는 시작 메뉴(Windows)의 **Graph-Me-Maybe**, 또는
   `graphme app`으로 엽니다. 키는 앱의 **관리 › 키와 모델**에서 넣습니다.
@@ -117,9 +116,8 @@ curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.15.0/wasm-
 # Chrome (/usr/bin/google-chrome에 설치되면 앱이 알아서 찾음)
 wget -q -P /tmp https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
 sudo apt install -y /tmp/google-chrome-stable_current_amd64.deb
-# 한글 글꼴: 없으면 Office 문서 페이지의 한글이 네모(□)로 그려짐
+# 한글은 앱에 든 글꼴로 그림. 중국어·일본어 문서도 그린다면 CJK 글꼴:
 sudo apt install -y fonts-noto-cjk && fc-cache -f
-fc-list :lang=ko | head -1                            # 한 줄이라도 나오면 됨
 # Docker Engine: https://docs.docker.com/engine/install/ubuntu/ 를 따른 뒤
 sudo usermod -aG docker "$USER"                       # 다시 로그인해야 적용 -- 앱은 sudo 없이 docker를 부릅니다
 docker info
@@ -134,8 +132,8 @@ docker info
   브라우저로 화면을 엽니다(`wslview`, 없으면 `explorer.exe`). 다른 브라우저를 쓰려면 `BROWSER`에 적습니다.
 - macOS 경로(`/Applications/Google Chrome.app/...`)가 아니라 WSL 안의 `google-chrome`이 필요합니다 — 페이지를 그리는 데
   쓰므로 지우지 않습니다. Windows에 설치된 Chrome은 서버가 쓸 수 없습니다.
-- 한글 글꼴도 WSL 안에 있어야 합니다(위 `fonts-noto-cjk`). 페이지를 그리는 WSL 안의 Chrome은 Windows의 글꼴(맑은 고딕 등)을
-  보지 못해서, 없으면 Office 문서 페이지의 한글이 네모(□)로 깨집니다. 설치 전에 그려진 문서는 데모를 다시 띄운 뒤 다시 그려야 합니다.
+- 한글은 앱에 든 글꼴(Pretendard)로 그립니다. 페이지를 그리는 WSL 안의 Chrome은 Windows의 글꼴(맑은 고딕 등)을 보지 못하므로,
+  앱이 Chrome에 이 글꼴을 직접 알려 줍니다.
 - Ubuntu의 기본 Node는 너무 오래됐으므로 nvm으로 24를 받습니다. Node 22(npm 10)는 뷰어 번들을 설치하다 멈춥니다.
 
 **Docker에 대해**

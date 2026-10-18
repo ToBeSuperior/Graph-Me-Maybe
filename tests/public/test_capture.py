@@ -102,3 +102,24 @@ def test_an_old_playwright_dir_setting_is_ignored() -> None:
 
     settings = load_settings({"GRAPHME_PROFILE": "test", "GRAPHME_PLAYWRIGHT_DIR": "frontend"})
     assert not hasattr(settings, "playwright_directory")
+
+
+def test_chrome_on_linux_is_given_the_bundled_hangul_font(tmp_path: Path) -> None:
+    # fontconfig knows only what the system installed -- under WSL not even Windows' fonts --
+    # so a Korean page drew as boxes wherever no Korean font had been installed.
+    from graphme.adapters.rendering import browser_capture
+
+    environment = browser_capture.font_environment(tmp_path, platform="linux")
+
+    assert environment is not None
+    conf = Path(environment["FONTCONFIG_FILE"]).read_text(encoding="utf-8")
+    assert f"<dir>{browser_capture.FONTS}</dir>" in conf
+    assert (browser_capture.FONTS / "Pretendard-Regular.otf").is_file()
+    assert "fonts.conf</include>" in conf  # the system's fonts stay
+
+
+def test_chrome_elsewhere_keeps_its_own_fonts(tmp_path: Path) -> None:
+    from graphme.adapters.rendering import browser_capture
+
+    assert browser_capture.font_environment(tmp_path, platform="darwin") is None
+    assert browser_capture.font_environment(tmp_path, platform="win32") is None

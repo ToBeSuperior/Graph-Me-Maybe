@@ -13,7 +13,7 @@ from graphme.application.corpus_build import BuildReport
 from graphme.config import Settings, load_settings
 from graphme.domain.models import ExtractedDocument
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 __all__ = [
     "BuildReport", "ExtractedDocument", "GraphAnswer", "GraphMe", "GraphNotEmbedded",

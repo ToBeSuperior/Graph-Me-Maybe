@@ -21,7 +21,8 @@ import sys
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+from xml.sax.saxutils import escape
 
 if TYPE_CHECKING:
     from playwright.sync_api import ConsoleMessage
@@ -36,6 +37,27 @@ TYPES = {
 }
 """Named here: Windows reads types from the registry, where .js can be text/plain, and a
 browser refuses a module script served so."""
+FONTS = Path(__file__).resolve().parents[2] / "fonts"
+
+
+def font_environment(workspace: Path, *, platform: str = sys.platform) -> dict[str, str] | None:
+    """Chrome on Linux finds fonts through fontconfig, which knows only what the system
+    installed -- under WSL not even Windows' -- so Korean pages drew as boxes wherever no
+    Korean font had been installed. The bundled Hangul font is added beside the system's."""
+    if not platform.startswith("linux"):
+        return None
+    system = os.environ.get("FONTCONFIG_FILE", "/etc/fonts/fonts.conf")
+    cache = Path.home() / ".cache" / "graphme" / "fontconfig"
+    conf = workspace / "fonts.conf"
+    conf.write_text(
+        '<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n'
+        f'  <include ignore_missing="yes">{escape(system)}</include>\n'
+        f"  <dir>{escape(str(FONTS))}</dir>\n"
+        f"  <cachedir>{escape(str(cache))}</cachedir>\n</fontconfig>\n",
+        encoding="utf-8")
+    return {**os.environ, "FONTCONFIG_FILE": str(conf)}
+
+
 NO_BROWSER = ("no browser to draw pages with: install Google Chrome, or run "
               "`python -m playwright install chromium --only-shell`")
 
@@ -86,7 +108,9 @@ def capture(kind: str, source: Path, workspace: Path, *, width: int, dpr: float,
             with sync_playwright() as playwright:
                 try:
                     browser = playwright.chromium.launch(
-                        headless=True, executable_path=browser_path or None)
+                        headless=True, executable_path=browser_path or None,
+                        env=cast("dict[str, str | float | bool] | None",
+                                 font_environment(workspace)))
                 except Error as error:
                     if "xecutable doesn't exist" in str(error) or "ENOENT" in str(error):
                         raise RuntimeError(NO_BROWSER) from None
