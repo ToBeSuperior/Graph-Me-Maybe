@@ -65,7 +65,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/ToB
 | 항목 | 용도 | 없으면 |
 |---|---|---|
 | Python 3.11+, [`uv`](https://docs.astral.sh/uv/) | 앱 실행 (`.python-version`의 3.11을 uv가 알아서 받음) | 실행 불가 |
-| Node.js 20.19+ 또는 22.12+, npm | 웹 앱 빌드 (`frontend/`) | 화면이 없음 |
+| Node.js 24+ (npm 11+) | 웹 앱 빌드 (`frontend/`), 뷰어 번들 빌드 (npm 10은 뷰어 설치에서 멈춤) | 화면이 없음 |
 | Google Chrome (또는 `uv run playwright install chromium --only-shell`) | DOCX·PPTX·XLSX 렌더링 | DOCX·PPTX·XLSX를 그리지 못함 (PDF는 브라우저 없이 됨) |
 | [rustup](https://rustup.rs/) + `rustup target add wasm32-unknown-unknown`, [`wasm-pack`](https://github.com/rustwasm/wasm-pack) | 뷰어 번들 1회 빌드 (XLSX 파서를 wasm으로 컴파일) | 〃 (`setup.sh`가 `wasm-pack: not found`로 멈춤) |
 | Docker | 그래프 DB(Neo4j) 자동 실행, `.dump`·Aura 내보내기 | 아래 "그래프 DB(Neo4j)는 어떻게 뜨나" 참고 |

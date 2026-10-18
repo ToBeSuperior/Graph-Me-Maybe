@@ -303,9 +303,14 @@ class XlsxBundleOrchestrator:
                             member,
                             replacements.get(member.filename, archive.read(member)),
                         )
-                os.replace(temporary_path, prepared_source)
-            finally:
+            except BaseException:
                 temporary_path.unlink(missing_ok=True)
+                raise
+        # Replaced once the source is closed: Windows refuses to replace a file still open.
+        try:
+            os.replace(temporary_path, prepared_source)
+        finally:
+            temporary_path.unlink(missing_ok=True)
 
     @staticmethod
     def _worksheet_parts(

@@ -20,7 +20,7 @@ jobs:
           python-version: "3.11"
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"  # npm 10 (Node 22) fails installing the viewer's workspaces
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
