@@ -180,5 +180,10 @@ def main() -> None:
         sys.stdout = sys.stderr = log
     launch(port=None, browser=True, environ=environ,
            window=lambda url: show_window(url, where / "webview"))
-    # The window is closed: the app ends with it, whatever threads a build or a driver left.
+    # The window is closed: a Docker Desktop the app started goes with it (the window is gone,
+    # so the wait is not seen), then the app ends, whatever threads a build or a driver left.
+    from graphme.adapters.storage import local_neo4j
+
+    if local_neo4j.started_docker():
+        local_neo4j.stop_docker_desktop()
     os._exit(0)

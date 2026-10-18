@@ -3,6 +3,12 @@
 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고, 버전은
 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.1.12] - 2026-10-19
+
+### 고침
+
+- 앱이 자동으로 켠 Docker Desktop이 앱을 닫은 뒤에도 남아 있던 것. Windows의 Docker Desktop은 몇 초마다 CLI 플러그인을 한꺼번에 실행해 PC 전체를 잠깐씩 멈추게 할 수 있습니다. 이제 앱이 켠 Docker Desktop은 앱 창을 닫을 때 같이 끕니다(Windows `docker desktop stop`, macOS `quit app "Docker"`). 사용자가 원래 켜 두었던 Docker는 건드리지 않습니다.
+
 ## [0.1.11] - 2026-10-19
 
 ### 고침

@@ -109,3 +109,28 @@ def test_on_macos_docker_desktop_starts_without_its_window(
                         subprocess.CompletedProcess(args, 0, "", ""))
     assert local_neo4j.start_docker_desktop() is True
     assert ran == [["open", "-g", "-j", "-a", "Docker"]]  # not brought forward, hidden
+
+
+def test_only_a_docker_desktop_this_app_started_is_known_as_its_own() -> None:
+    # Left running after the app closed, the Docker Desktop it had started kept the PC busy.
+    run, _ = _docker(_DOWN)
+    assert local_neo4j.started_docker() is False
+    _ask(run, at=0)  # no starter: the user's Docker, or none, is never the app's
+    assert local_neo4j.started_docker() is False
+    _ask(run, at=10, start_docker=lambda: True)
+    assert local_neo4j.started_docker() is True
+
+
+@pytest.mark.parametrize(("platform", "said"), [
+    ("win32", ["docker", "desktop", "stop"]),
+    ("darwin", ["osascript", "-e", 'quit app "Docker"']),
+])
+def test_docker_desktop_is_stopped_the_way_each_system_does(
+    monkeypatch: pytest.MonkeyPatch, platform: str, said: list[str]
+) -> None:
+    ran: list[list[str]] = []
+    monkeypatch.setattr(local_neo4j.sys, "platform", platform)
+    monkeypatch.setattr(local_neo4j.processes, "run", lambda args, **k: ran.append(args) or
+                        subprocess.CompletedProcess(args, 0, "", ""))
+    local_neo4j.stop_docker_desktop()
+    assert ran == [said]

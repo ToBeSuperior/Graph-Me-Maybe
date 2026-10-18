@@ -39,7 +39,7 @@ docker rm -f graphme-neo4j; docker volume rm graphme-neo4j-data graphme-neo4j-lo
   회사는 무료, 큰 회사는 유료 구독. 처음 한 번 관리자 권한, Windows는 WSL 2와 재시작이 필요할 수
   있음). 설치하지 않아도 앱은 열리고, Docker가 생기면 그래프를 만들 수 있습니다. 그래프가 필요할 때
   Docker Desktop이 꺼져 있으면 앱이 켜고, 준비될 때까지 "Docker를 켜는 중"을 보여 줍니다(Windows·macOS).
-  끄려면 앱 폴더의 `.env`에 `GRAPHME_DOCKER_AUTOSTART=0`. 처음 켤 때 뜨는 Docker의 약관 동의는 직접 해야 합니다.
+  앱이 켠 Docker Desktop은 앱 창을 닫을 때 같이 끕니다(원래 켜 두었던 Docker는 그대로 둠). 자동으로 켜지 않으려면 앱 폴더의 `.env`에 `GRAPHME_DOCKER_AUTOSTART=0`. 처음 켤 때 뜨는 Docker의 약관 동의는 직접 해야 합니다.
 - Chrome이 없으면 Playwright의 Chromium을 받아 씁니다(관리자 권한 없음).
 - 앱 폴더: macOS `~/Library/Application Support/Graph-Me-Maybe`, Windows
   `%LOCALAPPDATA%\Graph-Me-Maybe` — `.env`(키), 그래프 데이터, 웹 앱, 뷰어. 터미널의 `graphme` 명령도

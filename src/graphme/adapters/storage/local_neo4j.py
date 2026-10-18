@@ -48,13 +48,14 @@ class DockerOff:
         self.seen = -math.inf
         self.error: RuntimeError | None = None
         self.started: float | None = None
+        self.ours = False  # started by this app, at any time: stopped when it closes
 
     def recent(self, now: float) -> RuntimeError | None:
         return self.error if now - self.seen < OFF_SECONDS else None
 
     def said(self, now: float, start_docker: Callable[[], bool] | None) -> RuntimeError:
         if self.started is None and start_docker is not None and start_docker():
-            self.started = now
+            self.started, self.ours = now, True
         error: RuntimeError
         if self.started is not None and now - self.started < DOCKER_START_SECONDS:
             error = DockerStarting(
@@ -75,6 +76,26 @@ class DockerOff:
 
 
 _off = DockerOff()
+
+
+def started_docker() -> bool:
+    """Whether this app started Docker Desktop: the one it stops when it closes. A Docker the
+    user had running is never the app's to stop."""
+    return _off.ours
+
+
+def stop_docker_desktop() -> None:
+    """Docker Desktop stopped: left running, Windows' runs its CLI plugins every few seconds
+    and the whole PC stutters, the app long closed."""
+    try:
+        if sys.platform == "win32":
+            processes.run(["docker", "desktop", "stop"], capture_output=True, text=True,
+                          timeout=120)
+        elif sys.platform == "darwin":
+            processes.run(["osascript", "-e", 'quit app "Docker"'], capture_output=True,
+                          timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def start_docker_desktop() -> bool:
