@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -75,6 +76,20 @@ TABLE_FOOT_ROWS = 20
 """A table longer than `LONG_TABLE_ROWS` keeps only its head, which carries the headings,
 and its foot, where a log is summed up; what stands between is said, not kept. A checklist
 or an item list of a few hundred rows is read whole -- every row of it is content."""
+
+
+
+HANGUL_FONT = Path(__file__).resolve().parents[2] / "fonts" / "Pretendard-Regular.otf"
+
+
+@functools.cache
+def _use_hangul_font() -> None:
+    """Previews are drawn in Pretendard, shipped with the package: matplotlib's own font has
+    no Hangul, and every Korean label came out as boxes -- in the picture the model sees too."""
+    from matplotlib import font_manager, rcParams
+
+    font_manager.fontManager.addfont(str(HANGUL_FONT))
+    rcParams["font.family"] = ["Pretendard", "DejaVu Sans"]
 
 
 class _Reader(ExcelReader):  # type: ignore[misc]
@@ -1229,6 +1244,8 @@ class ExcelExtractor:
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
+        _use_hangul_font()
+
         min_col, min_row, max_col, max_row = range_boundaries(ref)
         rows = [
             [
@@ -1347,6 +1364,8 @@ class ExcelExtractor:
 
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
+        _use_hangul_font()
 
         numeric_series = [
             s for s in series if any(isinstance(v, (int, float)) for v in s["values"])
