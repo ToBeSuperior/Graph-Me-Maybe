@@ -99,7 +99,7 @@ def show_window(url: str, storage: Path) -> bool:
     """The page in a window of its own -- Edge WebView2 on Windows, WebKit on macOS -- until it
     is closed. False when there is none to show it in (Linux and WSL install no webview)."""
     try:
-        import webview
+        import webview  # type: ignore[import-not-found,unused-ignore]  # not on Linux
     except ImportError:
         return False
     try:
