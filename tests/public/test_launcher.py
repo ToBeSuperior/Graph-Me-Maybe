@@ -235,3 +235,25 @@ def test_the_window_app_is_a_program_without_a_console() -> None:
     assert project["project"]["gui-scripts"]["graphme-app"] == "graphme.launcher:main"
     pywebview = [d for d in project["project"]["dependencies"] if d.startswith("pywebview")]
     assert pywebview and "sys_platform" in pywebview[0]  # Linux and WSL keep the browser
+
+
+@pytest.mark.parametrize("argument", ["app", "elsewhere"])
+def test_the_window_app_takes_only_a_full_path_for_its_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argument: str
+) -> None:
+    # A shortcut made for `graphme.exe app` kept its `app` when the installer pointed it at
+    # graphme-app.exe, which then took `app` for a home under its working folder: no web app,
+    # no keys, and one folder deeper each time it opened.
+    seen: list[str] = []
+    exits: list[int] = []
+    monkeypatch.setenv("GRAPHME_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(launcher, "launch",
+                        lambda **kw: seen.append(kw["environ"]["GRAPHME_HOME"]))
+    monkeypatch.setattr(launcher.os, "_exit", exits.append)
+    monkeypatch.setattr(launcher.sys, "argv", ["graphme-app", argument])
+    launcher.main()
+    monkeypatch.setattr(launcher.sys, "argv", ["graphme-app", str(tmp_path / "custom")])
+    launcher.main()
+    assert seen == [str(tmp_path / "home"), str(tmp_path / "custom")]
+    # Closed, the process ends, whatever threads are left: the window is the app.
+    assert exits == [0, 0]

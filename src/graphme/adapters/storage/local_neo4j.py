@@ -82,19 +82,19 @@ def start_docker_desktop() -> bool:
     app does not start."""
     try:
         if sys.platform == "win32":
-            try:
-                done = processes.run(["docker", "desktop", "start", "--detach"],
-                                     capture_output=True, text=True, timeout=30)
-                if done.returncode == 0:
-                    return True
-            except subprocess.TimeoutExpired:
-                return True
+            # The program itself: `docker desktop start` can answer "already running" with exit
+            # 0 while it is stopped, and start nothing.
             programs = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files"))
             desktop = programs / "Docker" / "Docker" / "Docker Desktop.exe"
             if desktop.is_file():
                 os.startfile(desktop)  # a window program: no console either
                 return True
-            return False
+            try:
+                done = processes.run(["docker", "desktop", "start", "--detach"],
+                                     capture_output=True, text=True, timeout=30)
+            except subprocess.TimeoutExpired:
+                return True
+            return done.returncode == 0
         if sys.platform == "darwin":
             return processes.run(["open", "-a", "Docker"], capture_output=True).returncode == 0
     except OSError:

@@ -165,12 +165,13 @@ def launch(
 
 def main() -> None:
     """`graphme-app`: what the shortcut starts, with no console. A Windows shortcut cannot set
-    GRAPHME_HOME, so a home other than the default comes as the one argument."""
+    GRAPHME_HOME, so a home other than the default comes as the one argument -- a full path
+    only: a shortcut made for `graphme.exe app` still says `app`."""
     # The webview finds its own files from the program's path, which the move into the home
     # below would leave pointing nowhere when it was given relative.
     sys.argv[0] = os.path.abspath(sys.argv[0])
     environ = dict(os.environ)
-    if len(sys.argv) > 1:
+    if len(sys.argv) > 1 and Path(sys.argv[1]).is_absolute():
         environ["GRAPHME_HOME"] = sys.argv[1]
     where = home(environ)
     if sys.stdout is None or sys.stderr is None:  # started without a console: say it in a file
@@ -179,3 +180,5 @@ def main() -> None:
         sys.stdout = sys.stderr = log
     launch(port=None, browser=True, environ=environ,
            window=lambda url: show_window(url, where / "webview"))
+    # The window is closed: the app ends with it, whatever threads a build or a driver left.
+    os._exit(0)

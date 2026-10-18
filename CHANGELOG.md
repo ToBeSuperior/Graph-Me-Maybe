@@ -3,6 +3,14 @@
 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고, 버전은
 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.1.9] - 2026-10-18
+
+### 고침
+
+- 0.1.5 이전에 만든 Windows 바로가기가 `app` 인수를 그대로 가진 채 `graphme-app.exe`를 가리켜, 앱 폴더를 `…\Graph-Me-Maybe\app`으로 잡던 것(화면 대신 API 문서, 키·그래프·뷰어 없음, 열 때마다 한 단계씩 깊어짐). 설치 프로그램이 바로가기 인수를 비우고, `graphme-app`은 전체 경로만 앱 폴더로 받습니다.
+- Windows에서 Docker Desktop 자동 켜기가 동작하지 않던 것. `docker desktop start`는 꺼져 있어도 "already running"으로 성공을 알릴 수 있어, `Docker Desktop.exe`를 직접 실행합니다.
+- 앱 창을 닫아도 남은 스레드 때문에 프로세스가 끝나지 않을 수 있던 것. 창이 닫히면 앱이 바로 끝납니다.
+
 ## [0.1.8] - 2026-10-18
 
 ### 추가

@@ -149,6 +149,8 @@ def test_the_windows_shortcut_carries_a_custom_home() -> None:
     # The window app takes the home as its argument: no console, not even cmd's.
     assert "graphme-app.exe" in text and "$env:ComSpec" not in shortcut
     assert "$link.Arguments = \"`\"$AppHome`\"\"" in shortcut
+    # An existing shortcut keeps what it had unless set: the old `app` argument went along.
+    assert "$link.Arguments = ''" in shortcut
 
 
 @posix

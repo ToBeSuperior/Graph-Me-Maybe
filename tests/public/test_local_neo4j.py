@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -79,3 +80,21 @@ def test_docker_desktop_is_started_once_and_the_wait_is_said() -> None:
     late = _ask(run, at=local_neo4j.DOCKER_START_SECONDS + 1, start_docker=start)
     assert not isinstance(late, local_neo4j.DockerStarting) and "약관" in str(late)
     assert started == [1]
+
+
+def test_on_windows_docker_desktop_itself_is_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `docker desktop start --detach` answered "already running" with exit 0 while Docker
+    # Desktop was stopped, and nothing ever started it.
+    desktop = tmp_path / "Docker" / "Docker" / "Docker Desktop.exe"
+    desktop.parent.mkdir(parents=True)
+    desktop.write_bytes(b"")
+    started: list[object] = []
+    monkeypatch.setenv("PROGRAMFILES", str(tmp_path))
+    monkeypatch.setattr(local_neo4j.sys, "platform", "win32")
+    monkeypatch.setattr(local_neo4j.os, "startfile", started.append, raising=False)
+    monkeypatch.setattr(local_neo4j.processes, "run", lambda *a, **k: subprocess.CompletedProcess(
+        a, 0, "Docker Desktop is already running", ""))
+    assert local_neo4j.start_docker_desktop() is True
+    assert started == [desktop]

@@ -96,7 +96,9 @@ function Make-Shortcut([string]$Graphme) {
     $link = (New-Object -ComObject WScript.Shell).CreateShortcut($Shortcut)
     # The window app, which has no console. A shortcut cannot set GRAPHME_HOME: another home
     # is its argument.
+    # An existing shortcut keeps what it had unless set: an old one said `app`.
     $link.TargetPath = $Graphme
+    $link.Arguments = ''
     if ($AppHome -ne $DefaultHome) { $link.Arguments = "`"$AppHome`"" }
     $link.WorkingDirectory = $AppHome
     $link.Save()
