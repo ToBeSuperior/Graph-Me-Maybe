@@ -163,8 +163,10 @@ def create_app(
 
     @app.get("/health", response_model=api.Health)
     def health() -> dict[str, str]:
-        """That the server answers. Asks nothing of Neo4j or a model, and needs no key."""
-        return {"status": "ok", "version": __version__}
+        """That the server answers, and from which folder: another install on this machine
+        (WSL's, seen from Windows) answers on the same port. Asks nothing of Neo4j or a model,
+        and needs no key."""
+        return {"status": "ok", "version": __version__, "home": str(Path.cwd())}
 
     # Settings -------------------------------------------------------------------------------
 

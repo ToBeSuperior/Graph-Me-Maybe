@@ -114,6 +114,7 @@ def test_the_shortcut_opens_the_installed_home(tmp_path: Path) -> None:
     assert done.returncode == 0, done.stderr
     launcher = tmp_path / "Applications/Graph-Me-Maybe.app/Contents/MacOS/Graph-Me-Maybe"
     assert f'GRAPHME_HOME="{custom}"' in launcher.read_text()
+    assert "/graphme-app" in launcher.read_text()  # a window, not a terminal command
     assert subprocess.run(["sh", "-n", str(launcher)]).returncode == 0
 
 
@@ -145,7 +146,9 @@ def test_the_windows_installer_leaves_path_alone_when_asked() -> None:
 def test_the_windows_shortcut_carries_a_custom_home() -> None:
     text = (ROOT / "install.ps1").read_text()
     shortcut = text[text.index("function Make-Shortcut"):text.index("function Register-Uninstall")]
-    assert "$env:ComSpec" in shortcut and "/c set `\"GRAPHME_HOME=$AppHome`\"" in shortcut
+    # The window app takes the home as its argument: no console, not even cmd's.
+    assert "graphme-app.exe" in text and "$env:ComSpec" not in shortcut
+    assert "$link.Arguments = \"`\"$AppHome`\"\"" in shortcut
 
 
 @posix
@@ -189,8 +192,8 @@ def _scratch_env(tmp_path: Path) -> dict[str, str]:
 def test_the_mac_shortcut_finds_docker_where_finder_does_not_look(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "graphme").write_text('#!/bin/sh\necho "PATH=$PATH"\n')
-    (bin_dir / "graphme").chmod(0o755)
+    (bin_dir / "graphme-app").write_text('#!/bin/sh\necho "PATH=$PATH"\n')
+    (bin_dir / "graphme-app").chmod(0o755)
     data = tmp_path / "data"
     data.mkdir()
     script = (f'GRAPHME_INSTALL_LIB=1 . "{ROOT / "install.sh"}"; uname() {{ echo Darwin; }};'
@@ -209,7 +212,7 @@ def test_the_mac_shortcut_finds_docker_where_finder_does_not_look(tmp_path: Path
 
 
 APP_FILES = (".env", ".graphme/graph.sqlite3", "web/index.html", "viewer/dist/x.js", "app.log",
-             "install.ps1")
+             "install.ps1", "webview/Local Storage/x")
 
 
 def _app_home(tmp_path: Path, *, mine: bool) -> Path:
@@ -240,20 +243,26 @@ def test_a_purge_removes_only_what_the_app_made(tmp_path: Path, mine: bool) -> N
 def test_the_windows_purge_removes_only_what_the_app_made() -> None:
     uninstall = _windows_uninstall()
     purge = uninstall[uninstall.index("Remove-Item $UninstallKey"):]
-    for name in (".env", ".graphme", "web", "viewer", "app.log", "install.ps1"):
+    for name in (".env", ".graphme", "web", "viewer", "app.log", "install.ps1", "webview"):
         assert f"'{name}'" in uninstall, name
     assert "-Recurse -Force -ErrorAction SilentlyContinue; Say" not in purge
     assert "GetFileSystemInfos" in purge
 
 
 @posix
-def test_an_install_stops_while_the_app_runs(tmp_path: Path) -> None:
+@pytest.mark.parametrize("home", [None, "data", "/elsewhere/graph-me-maybe"])
+def test_an_install_stops_while_the_app_runs(tmp_path: Path, home: str | None) -> None:
+    # Another install's app on this port -- WSL's, seen from Windows -- is not this one.
     import http.server
+    import json
     import threading
+
+    said = {"status": "ok"} | ({} if home is None else {
+        "home": str(tmp_path / "data") if home == "data" else home})
 
     class Health(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802 -- the base's name
-            body = b'{"status":"ok"}'
+            body = json.dumps(said, separators=(",", ":")).encode()
             self.send_response(200 if self.path == "/health" else 404)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -272,6 +281,9 @@ def test_an_install_stops_while_the_app_runs(tmp_path: Path) -> None:
         done = subprocess.run(["sh", str(ROOT / "install.sh")], env=env, capture_output=True,
                               text=True, stdin=subprocess.DEVNULL, timeout=60)
         server.shutdown()
+    if home == "/elsewhere/graph-me-maybe":
+        assert "quit it first" not in done.stderr, done.stderr
+        return
     assert done.returncode != 0 and "quit it first" in done.stderr, done.stderr
     assert not data.exists() and not (tmp_path / "tools").exists()
 
@@ -282,6 +294,7 @@ def test_the_windows_install_stops_while_the_app_runs() -> None:
     assert install.index("Verify $name") < install.index("/health") < install.index(
         "uv tool install")
     assert "GRAPHME_PORT" in install and "quit it first" in install
+    assert "$health.home -eq $AppHome" in install  # WSL's app on the same port is not this one
     assert "close Graph-Me-Maybe if it is running" in install
 
 

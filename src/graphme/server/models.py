@@ -295,6 +295,7 @@ class ServerSettings(_Model):
 class Health(_Model):
     status: str
     version: str
+    home: str
 
 
 class SettingsChange(_Model):

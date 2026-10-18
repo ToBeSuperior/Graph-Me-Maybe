@@ -1,15 +1,19 @@
-"""`graphme app`: the installed app -- its folder, its settings file, the assets the installer
-put there, a free port, and the browser opened once the server answers."""
+"""`graphme app` and `graphme-app`: the installed app -- its folder, its settings file, the
+assets the installer put there, a free port, and the page opened once the server answers: in
+a window of its own (`graphme-app`, the shortcut's) or the browser."""
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import socket
 import subprocess
 import sys
+import threading
 import webbrowser
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -59,12 +63,19 @@ def free_port(start: int = FIRST_PORT) -> int:
     raise RuntimeError(f"no free port from {start}")
 
 
-def running(port: int) -> bool:
-    """A Graph-Me-Maybe server already answering there."""
+def running(port: int, home: Path, *, get: Callable[..., Any] = httpx.get) -> bool:
+    """This home's Graph-Me-Maybe already answering there. One from before the home was said
+    is taken for it."""
     try:
-        answer = httpx.get(f"http://127.0.0.1:{port}/health", timeout=1.0)
-        return answer.status_code == 200 and answer.json().get("status") == "ok"
+        answer = get(f"http://127.0.0.1:{port}/health", timeout=1.0)
+        said = answer.json()
+        if answer.status_code != 200 or said.get("status") != "ok":
+            return False
     except (httpx.HTTPError, ValueError):
+        return False
+    try:
+        return "home" not in said or os.path.samefile(said["home"], home)
+    except OSError:  # a folder of another system, or none
         return False
 
 
@@ -84,17 +95,39 @@ def open_in_browser(
     fallback(url)
 
 
+def show_window(url: str, storage: Path) -> bool:
+    """The page in a window of its own -- Edge WebView2 on Windows, WebKit on macOS -- until it
+    is closed. False when there is none to show it in (Linux and WSL install no webview)."""
+    try:
+        import webview
+    except ImportError:
+        return False
+    try:
+        webview.settings["ALLOW_DOWNLOADS"] = True  # an export's .dump and bundle
+        webview.create_window("Graph-Me-Maybe", url, width=1280, height=860,
+                              min_size=(900, 600), text_select=True)
+        # Kept between runs, as a browser keeps them: the theme, the language, an API key.
+        webview.start(private_mode=False, storage_path=str(storage))
+    except Exception:  # noqa: BLE001 -- no WebView2 runtime, no GUI session
+        logging.getLogger(__name__).exception("no app window; opening the browser instead")
+        return False
+    return True
+
+
 def launch(
     *, port: int | None, browser: bool, environ: Mapping[str, str] = os.environ,
     open_url: Callable[[str], object] = open_in_browser,
     serve: Callable[..., None] | None = None,
+    window: Callable[[str], bool] | None = None,
 ) -> None:
-    """Open the app: the running one if there is, else a server started from its home."""
-    if port is None and running(FIRST_PORT):
-        if browser:
-            open_url(f"http://127.0.0.1:{FIRST_PORT}")
-        return
+    """Open the app: the running one if there is, else a server started from its home. With a
+    `window`, the server runs behind it and ends when it is closed."""
     where = home(environ)
+    if port is None and running(FIRST_PORT, where):
+        url = f"http://127.0.0.1:{FIRST_PORT}"
+        if (window is None or not window(url)) and browser:
+            open_url(url)
+        return
     prepare(where)
     os.chdir(where)  # settings and data are read relative to the working directory
     chosen = port or free_port()
@@ -110,4 +143,40 @@ def launch(
     def show() -> None:
         open_url(url)
 
-    serve_demo(chosen, web_directory(where), on_ready=show if browser else None)
+    if window is None:
+        serve_demo(chosen, web_directory(where), on_ready=show if browser else None)
+        return
+    ready = threading.Event()
+
+    def serving() -> None:
+        try:
+            serve_demo(chosen, web_directory(where), on_ready=ready.set)
+        except Exception:  # noqa: BLE001 -- said in the log; the wait below gives up
+            logging.getLogger(__name__).exception("the server stopped")
+
+    server = threading.Thread(target=serving, daemon=True)
+    server.start()
+    while not ready.wait(0.2):
+        if not server.is_alive():
+            raise SystemExit(f"Graph-Me-Maybe did not start -- see {where / 'app.log'}")
+    if not window(url):
+        open_url(url)
+        server.join()
+
+
+def main() -> None:
+    """`graphme-app`: what the shortcut starts, with no console. A Windows shortcut cannot set
+    GRAPHME_HOME, so a home other than the default comes as the one argument."""
+    # The webview finds its own files from the program's path, which the move into the home
+    # below would leave pointing nowhere when it was given relative.
+    sys.argv[0] = os.path.abspath(sys.argv[0])
+    environ = dict(os.environ)
+    if len(sys.argv) > 1:
+        environ["GRAPHME_HOME"] = sys.argv[1]
+    where = home(environ)
+    if sys.stdout is None or sys.stderr is None:  # started without a console: say it in a file
+        prepare(where)
+        log = open(where / "app.log", "a", encoding="utf-8", buffering=1)  # noqa: SIM115
+        sys.stdout = sys.stderr = log
+    launch(port=None, browser=True, environ=environ,
+           window=lambda url: show_window(url, where / "webview"))

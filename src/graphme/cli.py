@@ -317,3 +317,12 @@ app = create_app(
     corpus_service=_RuntimeCorpusService(),
     rag_service=_RuntimeRagService(),
 )
+
+
+def main() -> None:
+    """The installed command: what keeps a command from running is one line, not a traceback."""
+    try:
+        app()
+    except (ValueError, RuntimeError, OSError) as error:
+        typer.echo(f"오류: {error}", err=True)
+        raise SystemExit(1) from None

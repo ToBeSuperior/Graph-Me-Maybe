@@ -94,15 +94,10 @@ function Offer-Docker {
 function Make-Shortcut([string]$Graphme) {
     if ($env:GRAPHME_NO_SHORTCUT) { return }
     $link = (New-Object -ComObject WScript.Shell).CreateShortcut($Shortcut)
-    if ($AppHome -eq $DefaultHome) {
-        $link.TargetPath = $Graphme
-        $link.Arguments = 'app'
-    } else {
-        # A shortcut cannot set an environment variable; cmd sets GRAPHME_HOME, then starts the app.
-        $link.TargetPath = $env:ComSpec
-        $link.Arguments = "/c set `"GRAPHME_HOME=$AppHome`" && `"$Graphme`" app"
-        $link.WindowStyle = 7
-    }
+    # The window app, which has no console. A shortcut cannot set GRAPHME_HOME: another home
+    # is its argument.
+    $link.TargetPath = $Graphme
+    if ($AppHome -ne $DefaultHome) { $link.Arguments = "`"$AppHome`"" }
     $link.WorkingDirectory = $AppHome
     $link.Save()
     Say "shortcut: Start menu > Graph-Me-Maybe"
@@ -144,7 +139,8 @@ function Uninstall {
     }
     Ensure-Uv
     Quiet { uv tool uninstall $Tool }
-    if (Test-Path -LiteralPath (Join-Path (uv tool dir --bin).Trim() 'graphme.exe')) {
+    $bin = (uv tool dir --bin).Trim()
+    if ((Test-Path -LiteralPath (Join-Path $bin 'graphme.exe')) -or (Test-Path -LiteralPath (Join-Path $bin 'graphme-app.exe'))) {
         Fail 'close Graph-Me-Maybe first (it is still running), then uninstall again'
     }
     foreach ($path in @((Join-Path $AppHome 'web'), (Join-Path $AppHome 'viewer'), $Shortcut)) {
@@ -153,7 +149,7 @@ function Uninstall {
     if (Test-Path $UninstallKey) { Remove-Item $UninstallKey -Force }
     if ($env:GRAPHME_PURGE -and (Test-Path -LiteralPath $AppHome)) {
         # Only what the app made; the folder goes only if nothing else is left in it.
-        foreach ($part in @('.env', '.graphme', 'app.log', 'install.ps1')) {
+        foreach ($part in @('.env', '.graphme', 'app.log', 'install.ps1', 'webview')) {
             $path = Join-Path $AppHome $part
             if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
         }
@@ -180,8 +176,9 @@ function Install {
         # A Graph-Me-Maybe already answering holds its files open; updating under it fails.
         $port = if ($env:GRAPHME_PORT) { $env:GRAPHME_PORT } else { '8765' }
         try { $health = Invoke-RestMethod -UseBasicParsing -TimeoutSec 2 "http://127.0.0.1:$port/health" } catch { $health = $null }
-        if ($health -and $health.status -eq 'ok') {
-            Fail 'Graph-Me-Maybe is running -- quit it first (close its console window, or end graphme.exe in Task Manager), then run the installer again'
+        # One that names another home -- WSL's app, reached by its localhost forwarding -- is not this one.
+        if ($health -and $health.status -eq 'ok' -and (-not $health.home -or $health.home -eq $AppHome)) {
+            Fail 'Graph-Me-Maybe is running -- quit it first (close its window, or end graphme-app.exe in Task Manager), then run the installer again'
         }
 
         Say "installing Graph-Me-Maybe $tag"
@@ -190,7 +187,7 @@ function Install {
         if (-not $env:UV_NO_MODIFY_PATH) { Quiet { uv tool update-shell } }
         $bin = (uv tool dir --bin).Trim()
         $python = Join-Path (uv tool dir).Trim() "$Tool\Scripts\python.exe"
-        $graphme = Join-Path $bin 'graphme.exe'
+        $graphme = Join-Path $bin 'graphme-app.exe'
 
         New-Item -ItemType Directory -Force $AppHome | Out-Null
         foreach ($part in @('web', 'viewer')) {
@@ -212,8 +209,9 @@ function Install {
     $open = if ($env:GRAPHME_HOME) { "`$env:GRAPHME_HOME='$($AppHome.Replace("'", "''"))'; graphme app" } else { 'graphme app' }
     Say "installed. Open it from the Start menu, or: $open   (a new terminal finds the command)"
     if (-not $env:GRAPHME_NO_LAUNCH) {
-        Start-Process -FilePath $graphme -ArgumentList 'app' -WorkingDirectory $AppHome
-        Say 'starting -- the browser opens in a moment'
+        if ($AppHome -eq $DefaultHome) { Start-Process -FilePath $graphme -WorkingDirectory $AppHome }
+        else { Start-Process -FilePath $graphme -ArgumentList "`"$AppHome`"" -WorkingDirectory $AppHome }
+        Say 'starting -- the app opens in a moment'
     }
 }
 

@@ -18,7 +18,7 @@ def test_health_answers_without_the_graph_space(demo: Demo) -> None:
     said = TestClient(create_app(demo)).get("/health")
 
     assert said.status_code == 200
-    assert said.json() == {"status": "ok", "version": __version__}
+    assert said.json() == {"status": "ok", "version": __version__, "home": str(Path.cwd())}
 
 
 def test_the_contract_names_only_the_api(demo: Demo) -> None:

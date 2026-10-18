@@ -75,6 +75,12 @@ def ensure_local_neo4j(
                 "로컬 그래프 DB(Neo4j)를 띄우려면 Docker가 필요합니다. Docker를 설치·실행하거나 "
                 "GRAPHME_NEO4J_URI로 직접 띄운 Neo4j를 가리키세요."
             ) from error
+        if known.returncode != 0 and _daemon_down(known.stderr):
+            # What answers cannot be told for ours -- WSL's, reached from Windows by its
+            # localhost forwarding, looks the same -- and nothing can be started.
+            raise RuntimeError(
+                "Docker가 실행 중이 아닙니다. Docker Desktop(또는 colima)을 켠 뒤 다시 "
+                "실행하세요. 직접 띄운 Neo4j라면 GRAPHME_NEO4J_PASSWORD를 설정하세요.")
         # Memory and authentication are fixed when a container is made: ours, made otherwise, is
         # made again on the same volume -- even while it is what answers. When something else
         # answers, ours is not running and is left as it is.
@@ -89,6 +95,13 @@ def ensure_local_neo4j(
                 f"{port}번에 띄울 수 없습니다. GRAPHME_NEO4J_URI를 {published}번 포트로 "
                 "두거나, 다른 Docker(예: colima 프로필)를 쓰세요."
             )
+        if up and known.returncode == 0 and not running:
+            # Ours is stopped, so what answers on its port is another install's (an app under
+            # WSL on the same PC) or someone's own Neo4j: never used as this app's graph.
+            raise RuntimeError(
+                f"{port}번 포트에서 이 앱의 것이 아닌 Neo4j가 답합니다 (같은 PC의 WSL이나 다른 "
+                "설치의 앱일 수 있습니다). 그쪽을 끄거나 GRAPHME_NEO4J_URI를 다른 포트로 "
+                "두세요.")
         stale = known.returncode == 0 and not set(wanted) <= env
         if up and not (stale and running):
             return False
@@ -128,6 +141,13 @@ def ensure_local_neo4j(
             f"{port}번 포트로 답이 없으면 Docker의 포트 전달 문제입니다 -- colima라면 "
             "`colima stop && colima start --port-forwarder grpc` 후 다시 실행하세요."
         )
+
+
+def _daemon_down(said: str) -> bool:
+    """`docker` is there but its engine is not: Linux and macOS say "daemon", Windows
+    "error during connect"."""
+    said = said.lower()
+    return "daemon" in said or "error during connect" in said or "docker api" in said
 
 
 def own_port(

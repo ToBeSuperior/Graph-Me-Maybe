@@ -54,7 +54,7 @@ def test_opened_again_it_only_shows_the_running_app(
 ) -> None:
     opened: list[str] = []
     served: list[int] = []
-    monkeypatch.setattr(launcher, "running", lambda port: port == 8765)
+    monkeypatch.setattr(launcher, "running", lambda port, home: port == 8765)
     launcher.launch(port=None, browser=True, environ={"GRAPHME_HOME": str(tmp_path)},
                     open_url=opened.append,
                     serve=lambda port, web, on_ready=None: served.append(port))
@@ -65,7 +65,7 @@ def test_started_it_serves_from_its_home_and_opens_when_ready(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     opened: list[str] = []
-    monkeypatch.setattr(launcher, "running", lambda port: False)
+    monkeypatch.setattr(launcher, "running", lambda port, home: False)
     monkeypatch.chdir(tmp_path)
 
     def serve(port: int, web: Path | None, on_ready=None) -> None:
@@ -149,3 +149,89 @@ def test_a_port_something_listens_on_is_skipped() -> None:
         port = server.getsockname()[1]
 
         assert launcher.free_port(port) != port
+
+
+@pytest.mark.parametrize(("said", "ours"), [
+    ({"status": "ok", "home": "/elsewhere/graph-me-maybe"}, False),  # WSL's app, seen from Windows
+    ({"status": "ok"}, True),  # an app from before the home was said
+])
+def test_an_app_answering_from_another_home_is_not_this_one(
+    tmp_path: Path, said: dict[str, str], ours: bool
+) -> None:
+    class Answer:
+        status_code = 200
+
+        @staticmethod
+        def json() -> dict[str, str]:
+            return said
+
+    assert launcher.running(8765, tmp_path, get=lambda url, timeout: Answer()) is ours
+    mine = {**said, "home": str(tmp_path)}
+    assert launcher.running(8765, tmp_path, get=lambda url, timeout: type(
+        "A", (), {"status_code": 200, "json": staticmethod(lambda: mine)})()) is True
+
+
+def test_in_a_window_the_server_runs_behind_it_and_goes_with_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    monkeypatch.setattr(launcher, "running", lambda port, home: False)
+    monkeypatch.chdir(tmp_path)
+    stopped = threading.Event()
+    shown: list[str] = []
+
+    def serve(port: int, web: Path | None, on_ready=None) -> None:
+        on_ready()
+        stopped.wait(5)  # serves until the process ends
+
+    def window(url: str) -> bool:
+        shown.append(url)
+        return True
+
+    launcher.launch(port=8799, browser=True, environ={"GRAPHME_HOME": str(tmp_path / "home")},
+                    open_url=lambda url: pytest.fail("no browser when a window shows it"),
+                    serve=serve, window=window)
+    stopped.set()
+    assert shown == ["http://127.0.0.1:8799"]
+
+
+def test_without_a_window_the_browser_shows_it_and_the_server_keeps_serving(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(launcher, "running", lambda port, home: False)
+    monkeypatch.chdir(tmp_path)
+    opened: list[str] = []
+    served: list[str] = []
+
+    def serve(port: int, web: Path | None, on_ready=None) -> None:
+        on_ready()
+        served.append("until stopped")
+
+    launcher.launch(port=8799, browser=True, environ={"GRAPHME_HOME": str(tmp_path / "home")},
+                    open_url=opened.append, serve=serve, window=lambda url: False)
+    assert opened == ["http://127.0.0.1:8799"] and served == ["until stopped"]
+
+
+def test_a_server_that_never_comes_up_does_not_leave_the_window_waiting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(launcher, "running", lambda port, home: False)
+    monkeypatch.chdir(tmp_path)
+
+    def serve(port: int, web: Path | None, on_ready=None) -> None:
+        raise OSError("address in use")
+
+    with pytest.raises(SystemExit, match="app.log"):
+        launcher.launch(port=8799, browser=True,
+                        environ={"GRAPHME_HOME": str(tmp_path / "home")},
+                        open_url=lambda url: None, serve=serve, window=lambda url: True)
+
+
+def test_the_window_app_is_a_program_without_a_console() -> None:
+    import tomllib
+
+    project = tomllib.loads((Path(__file__).resolve().parents[2] / "pyproject.toml").read_text())
+    assert project["project"]["gui-scripts"]["graphme-app"] == "graphme.launcher:main"
+    pywebview = [d for d in project["project"]["dependencies"] if d.startswith("pywebview")]
+    assert pywebview and "sys_platform" in pywebview[0]  # Linux and WSL keep the browser

@@ -49,7 +49,9 @@ def _require_chat_key(settings: Settings) -> None:
     """A hosted provider refuses every call without its key: said before the first one."""
     if model_endpoint.KEY_REQUIRED and settings.api_key is None:
         key_env = model_endpoint.PROVIDERS[settings.provider].key_env
-        raise ValueError(f"{key_env} is required (GRAPHME_PROVIDER={settings.provider})")
+        raise ValueError(
+            f"{key_env} is required (GRAPHME_PROVIDER={settings.provider}) -- "
+            "앱의 관리 › 키와 모델에서 넣으세요")
 
 
 def create_embedder(settings: Settings) -> OpenAIBatchEmbeddings:
@@ -69,7 +71,8 @@ def create_embedder(settings: Settings) -> OpenAIBatchEmbeddings:
         )
         raise ValueError(
             f"{row.key_env} is required to embed or search "
-            f"(GRAPHME_EMBEDDING_PROVIDER={settings.embedding_provider}{hint})"
+            f"(GRAPHME_EMBEDDING_PROVIDER={settings.embedding_provider}{hint}) -- "
+            "앱의 관리 › 키와 모델에서 넣으세요"
         )
     return OpenAIBatchEmbeddings(
         model=settings.embedding_model,
@@ -150,7 +153,8 @@ def create_graph_space(settings: Settings) -> Neo4jGraphSpace:
     """The one graph every document of a corpus is put in -- on this machine, a Neo4j
     started for it when none answers there."""
     memory = (settings.neo4j_heap, settings.neo4j_pagecache)
-    ensure_local_neo4j(settings.neo4j_uri, settings.neo4j_admin_image, memory)
+    if not settings.neo4j_password:  # with a password it is one pointed at on purpose
+        ensure_local_neo4j(settings.neo4j_uri, settings.neo4j_admin_image, memory)
     try:
         return Neo4jGraphSpace.from_settings(settings)
     except PasswordWanted:

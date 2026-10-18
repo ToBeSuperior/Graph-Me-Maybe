@@ -13,7 +13,9 @@ export interface paths {
         };
         /**
          * Health
-         * @description That the server answers. Asks nothing of Neo4j or a model, and needs no key.
+         * @description That the server answers, and from which folder: another install on this machine
+         *     (WSL's, seen from Windows) answers on the same port. Asks nothing of Neo4j or a model,
+         *     and needs no key.
          */
         get: operations["health_health_get"];
         put?: never;
@@ -838,6 +840,8 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+            /** Home */
+            home: string;
         };
         /** Library */
         Library: {

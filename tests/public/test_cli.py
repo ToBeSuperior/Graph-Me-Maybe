@@ -219,3 +219,20 @@ def test_xlsx_bundle_renders_with_the_configured_viewer_and_browser(
     assert built["renderer"] is not None
     assert built["viewer_directory"] == tmp_path / "viewer"
     assert built["chrome_executable"] == "/opt/invented/chrome"
+
+
+def test_a_command_that_cannot_run_says_why_in_one_line(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from graphme import cli
+
+    def refuse() -> None:
+        raise ValueError("OPENAI_API_KEY is required (GRAPHME_PROVIDER=openai)")
+
+    monkeypatch.setattr(cli, "app", refuse)
+    with pytest.raises(SystemExit) as stopped:
+        cli.main()
+    assert stopped.value.code == 1
+    said = capsys.readouterr().err
+    assert said.strip().splitlines() == [
+        "오류: OPENAI_API_KEY is required (GRAPHME_PROVIDER=openai)"]

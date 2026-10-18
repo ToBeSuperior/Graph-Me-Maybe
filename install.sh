@@ -66,10 +66,15 @@ fetch() {  # fetch NAME DIR
   fi
 }
 
-# A Graph-Me-Maybe already answering: updating under it swaps its files while it runs.
+# This install's Graph-Me-Maybe already answering: updating under it swaps its files while
+# it runs. One that names another home (WSL's, on Windows' port) is not this one.
 app_running() {
-  curl -fsS --max-time 2 "http://127.0.0.1:${GRAPHME_PORT:-8765}/health" 2>/dev/null \
-    | grep -q '"status" *: *"ok"'
+  health=$(curl -fsS --max-time 2 "http://127.0.0.1:${GRAPHME_PORT:-8765}/health" 2>/dev/null) \
+    || return 1
+  printf '%s' "$health" | grep -q '"status" *: *"ok"' || return 1
+  case $health in
+    *'"home"'*) case $health in *"\"home\":\"$HOME_DIR\""*) ;; *) return 1 ;; esac ;;
+  esac
 }
 
 open_hint() {
@@ -126,7 +131,7 @@ make_shortcut() {  # make_shortcut BIN_DIR
 </dict></plist>
 EOF
   # Finder starts an app with a bare PATH; docker lives in Homebrew's or Docker's own folder.
-  printf '#!/bin/sh\nPATH="/usr/local/bin:/opt/homebrew/bin:$HOME/.docker/bin:$PATH"; export PATH\nGRAPHME_HOME="%s" exec "%s/graphme" app >>"%s/app.log" 2>&1\n' \
+  printf '#!/bin/sh\nPATH="/usr/local/bin:/opt/homebrew/bin:$HOME/.docker/bin:$PATH"; export PATH\nGRAPHME_HOME="%s" exec "%s/graphme-app" >>"%s/app.log" 2>&1\n' \
     "$HOME_DIR" "$1" "$HOME_DIR" \
     >"$app/Contents/MacOS/Graph-Me-Maybe"
   chmod +x "$app/Contents/MacOS/Graph-Me-Maybe"
@@ -152,7 +157,7 @@ uninstall() {
   rm -rf "$HOME_DIR/web" "$HOME_DIR/viewer" "$HOME/Applications/Graph-Me-Maybe.app"
   if [ -n "${GRAPHME_PURGE:-}" ]; then
     # Only what the app made; the folder goes only if nothing else is left in it.
-    for part in .env .graphme app.log install.ps1; do rm -rf "${HOME_DIR:?}/$part"; done
+    for part in .env .graphme app.log install.ps1 webview; do rm -rf "${HOME_DIR:?}/$part"; done
     if rmdir "$HOME_DIR" 2>/dev/null; then say "removed $HOME_DIR"
     else say "removed the app's files; kept $HOME_DIR, which holds files it did not make"; fi
   fi
@@ -171,7 +176,7 @@ install() {
   [ -n "$wheel" ] || die "no graph_me_maybe-*.whl in SHA256SUMS"
   for name in "$wheel" web.zip viewer.zip; do fetch "$name" "$work"; verify "$name" "$work"; done
   if app_running; then
-    die "Graph-Me-Maybe is running -- quit it first (pkill -f \"graphme app\"), then run the installer again"
+    die "Graph-Me-Maybe is running -- quit it first (close its window, or pkill -f graphme), then run the installer again"
   fi
 
   say "installing Graph-Me-Maybe $tag"
@@ -193,8 +198,8 @@ install() {
   make_shortcut "$bin"
   say "installed. Open it with: $(open_hint)   (a new terminal finds the command)"
   if [ -z "${GRAPHME_NO_LAUNCH:-}" ]; then
-    nohup "$bin/graphme" app >>"$HOME_DIR/app.log" 2>&1 &
-    say "starting -- the browser opens in a moment (log: $HOME_DIR/app.log)"
+    nohup "$bin/graphme-app" >>"$HOME_DIR/app.log" 2>&1 &
+    say "starting -- the app opens in a moment (log: $HOME_DIR/app.log)"
   fi
 }
 

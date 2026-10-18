@@ -268,8 +268,19 @@ def app_home(environ: Mapping[str, str] = os.environ, platform: str = sys.platfo
 
 
 def load_settings(environ: dict[str, str] | None = None) -> Settings:
+    base: Path | None = None
     if environ is None:
-        env = read_dotenv(Path.cwd() / ".env")
+        # A checkout's `.env` is in the working folder; anywhere else a command uses the
+        # installed app's settings and data, as `graphme app` does.
+        base = Path.cwd()
+        if not (base / ".env").is_file():
+            try:
+                app = app_home(os.environ)
+            except KeyError:  # no home directory named in this environment
+                app = base
+            if (app / ".env").is_file():
+                base = app
+        env = read_dotenv(base / ".env")
         env.update(os.environ)
     else:
         env = dict(environ)
@@ -301,6 +312,8 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         values["api_key"] = env[chat.key_env]
     if (row := model_endpoint.EMBEDDERS.get(embedder)) and env.get(row.key_env):
         values["embedding_key"] = env[row.key_env]
+    if base is not None and base != Path.cwd() and "data_dir" not in values:
+        values["data_dir"] = base / ".graphme"
     if "viewer_directory" not in values:
         # The viewer the installer put in the app's home: every command draws with it, not
         # only `graphme app`.

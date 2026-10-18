@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph-me-maybe"
-version = "0.1.5"
+version = "0.1.6"
 description = "Graph-Me-Maybe: local-first multimodal graph RAG over documents"
 readme = "README.md"
 license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
@@ -30,6 +30,7 @@ dependencies = [
   "neo4j-graphrag[openai]>=1.22.0",
   "olefile>=0.47",
   "playwright>=1.55,<2",
+  "pywebview>=5.4,<7 ; sys_platform == 'darwin' or sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
@@ -42,7 +43,10 @@ dev = [
 ]
 
 [project.scripts]
-graphme = "graphme.cli:app"
+graphme = "graphme.cli:main"
+
+[project.gui-scripts]
+graphme-app = "graphme.launcher:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/graphme"]

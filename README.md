@@ -23,14 +23,22 @@ powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/ToB
 Linux와 WSL(Windows의 Ubuntu)은 macOS와 같은 `install.sh` 한 줄을 씁니다. 한글은 앱에 든 글꼴(Pretendard)로 그리므로
 글꼴을 따로 설치하지 않아도 됩니다. WSL에서 `graphme app`은 Windows 기본 브라우저로 화면을 엽니다.
 
-- 그 뒤로는 응용 프로그램 폴더(macOS) 또는 시작 메뉴(Windows)의 **Graph-Me-Maybe**, 또는
-  `graphme app`으로 엽니다. 키는 앱의 **관리 › 키와 모델**에서 넣습니다.
+- 그 뒤로는 응용 프로그램 폴더(macOS) 또는 시작 메뉴(Windows)의 **Graph-Me-Maybe**로 엽니다. 주소창 없는
+  앱 창으로 열리고(Windows는 Edge WebView2, macOS는 WebKit), 창을 닫으면 앱도 꺼집니다. 터미널에서
+  `graphme app`으로 열면 브라우저 탭으로 열리고, 그 터미널을 닫아야 꺼집니다. Linux와 WSL은 늘 브라우저로 엽니다.
+  키는 앱의 **관리 › 키와 모델**에서 넣습니다.
 - 그래프 DB(Neo4j)는 Docker로 뜹니다. Docker Desktop이 없으면 설치할지 묻습니다(개인·소규모
   회사는 무료, 큰 회사는 유료 구독. 처음 한 번 관리자 권한, Windows는 WSL 2와 재시작이 필요할 수
   있음). 설치하지 않아도 앱은 열리고, Docker가 생기면 그래프를 만들 수 있습니다.
 - Chrome이 없으면 Playwright의 Chromium을 받아 씁니다(관리자 권한 없음).
 - 앱 폴더: macOS `~/Library/Application Support/Graph-Me-Maybe`, Windows
-  `%LOCALAPPDATA%\Graph-Me-Maybe` — `.env`(키), 그래프 데이터, 웹 앱, 뷰어.
+  `%LOCALAPPDATA%\Graph-Me-Maybe` — `.env`(키), 그래프 데이터, 웹 앱, 뷰어. 터미널의 `graphme` 명령도
+  어느 폴더에서 실행하든 이 폴더의 키·데이터·뷰어를 씁니다(지금 폴더에 `.env`가 있으면 그것을 씀).
+- 한 PC에 WSL 앱과 Windows 앱을 같이 두면 하나만 켜서 씁니다. WSL에서 연 포트(앱 8765, 그래프 DB 7687)는
+  Windows의 `127.0.0.1`로도 열리기 때문입니다. 두 앱은 서로를 자기 것으로 여기지 않습니다. 다른 쪽 앱이
+  켜져 있으면 이쪽 앱은 다음 포트(8766…)에 뜨고, 이쪽 Docker가 꺼져 있을 때 답하는 다른 쪽 그래프 DB는 쓰지
+  않고 멈춥니다. 다만 Docker Desktop의 WSL 통합을 켜 두면 두 쪽이 Docker를 함께 써서 그래프도 하나가 됩니다.
+  그러면 한쪽에서 올린 문서를 다른 쪽에서 열 때 파일 경로가 맞지 않아 페이지를 그리지 못합니다.
 - 옵션(환경변수): `GRAPHME_VERSION`(버전 고정), `GRAPHME_YES=1`(묻지 않고 설치),
   `GRAPHME_NO_DOCKER=1`, `GRAPHME_HOME`(앱 폴더). 환경변수는 파이프 뒤의 `sh`에 붙어야 스크립트에
   닿습니다(`GRAPHME_YES=1 curl … | sh`는 `curl`에만 붙어 효과가 없음):
@@ -43,12 +51,12 @@ Linux와 WSL(Windows의 Ubuntu)은 macOS와 같은 `install.sh` 한 줄을 씁�
   ```powershell
   $env:GRAPHME_YES='1'; irm https://raw.githubusercontent.com/ToBeSuperior/Graph-Me-Maybe/main/install.ps1 | iex
   ```
-- 업데이트는 앱을 닫고 실행합니다. 앱이 열려 있으면 설치가 아무것도 바꾸지 않고 멈춥니다. 닫기:
-  macOS `pkill -f "graphme app"`, Windows는 앱의 콘솔 창을 닫거나 작업 관리자에서 `graphme.exe` 종료.
+- 업데이트는 앱을 닫고 실행합니다. 앱이 열려 있으면 설치가 아무것도 바꾸지 않고 멈춥니다. 앱 창을 닫으면
+  됩니다. 창이 보이지 않으면 macOS는 `pkill -f graphme`, Windows는 작업 관리자에서 `graphme-app.exe`를 끝냅니다.
 - 지우기: macOS `curl -fsSL …/install.sh | sh -s -- --uninstall`, Windows는 설정 › 앱에서
   Graph-Me-Maybe 제거(또는 `$env:GRAPHME_UNINSTALL=1` 뒤 같은 한 줄). 키와 그래프까지 지우려면
   `GRAPHME_PURGE=1`: 앱 폴더에서 앱이 만든 것(`.env`, `.graphme`, `web`, `viewer`, `app.log`,
-  Windows의 `install.ps1`)만 지우고, 폴더는 그 뒤 비어 있을 때만 지웁니다. Docker 안의 그래프는 아래
+  `webview`(앱 창의 저장소), Windows의 `install.ps1`)만 지우고, 폴더는 그 뒤 비어 있을 때만 지웁니다. Docker 안의 그래프는 아래
   "그래프 DB(Neo4j)는 어떻게 뜨나"의 명령으로. 앱 폴더가 사용자의 홈 폴더이거나 그것을 품고 있으면
   `GRAPHME_PURGE`는 지우지 않고 거절합니다. Windows는 앱을 먼저 닫아야 지워집니다.
 - 지우기가 남기는 것: Playwright가 받은 Chromium(macOS `~/Library/Caches/ms-playwright`, Windows
@@ -303,6 +311,8 @@ Neo4j 컨테이너(`graphme-neo4j`)를 그 포트에 띄웁니다. 처음에는 
 
 - 비밀번호 없이 뜨고, 이 컴퓨터에서만 접속할 수 있습니다.
 - 데이터는 `graphme-neo4j-data` 볼륨에 남아서, 다시 띄워도 그대로입니다.
+- Docker가 꺼져 있으면 그 주소에서 무엇이 답하든 쓰지 않고 멈춥니다. 앱의 것인지 알 수 없기 때문입니다
+  (같은 PC의 WSL 앱의 Neo4j일 수 있음). 앱의 컨테이너가 꺼져 있는데 그 포트에서 다른 Neo4j가 답할 때도 멈춥니다.
 - 이미 그 주소에 Neo4j가 떠 있으면 아무것도 띄우지 않고 그것을 씁니다. 그 Neo4j가 비밀번호를 요구하는데(Neo4j Desktop,
   brew 등) `GRAPHME_NEO4J_PASSWORD`를 적지 않았다면, 그것은 건드리지 않고 앱의 Neo4j를 빈 포트(7688부터)에 띄워 씁니다.
   Neo4j 아이디·비밀번호는 직접 띄운 Neo4j를 일부러 쓸 때와 Aura로 내보낼 때만 필요합니다.
@@ -357,7 +367,9 @@ docker volume rm graphme-neo4j-data graphme-neo4j-logs
 | 증상 | 원인 → 해결 |
 |---|---|
 | `로컬 그래프 DB(Neo4j)를 띄우려면 Docker가 필요합니다` | Docker가 설치돼 있지 않음 → 0단계의 Docker 설치(macOS는 `brew install colima docker && colima start --memory 4 --port-forwarder grpc`) 후 데모 재시작. Docker 없이 쓰려면 이미 설치된 Neo4j(brew 등)를 켜고 `.env`에 `GRAPHME_NEO4J_PASSWORD` |
-| `로컬 Neo4j를 띄우지 못했습니다: Cannot connect to the Docker daemon` | Docker가 꺼져 있음 → Docker Desktop을 켜거나 `colima start` |
+| `Docker가 실행 중이 아닙니다` | Docker가 꺼져 있음 → Docker Desktop을 켜거나 `colima start`. 직접 띄운 Neo4j를 쓰려면 `.env`에 `GRAPHME_NEO4J_PASSWORD` |
+| `7687번 포트에서 이 앱의 것이 아닌 Neo4j가 답합니다` | 같은 PC의 다른 앱(대개 WSL 쪽)의 Neo4j가 그 포트를 쓰고 있음 → 그쪽 앱과 Docker를 끄거나, `.env`의 `GRAPHME_NEO4J_URI`를 다른 포트(예: `bolt://127.0.0.1:7688`)로 |
+| `OPENAI_API_KEY is required` | 키가 없음 → 앱의 관리 › 키와 모델에서 넣기. 터미널의 `graphme`는 앱 폴더의 `.env`를 읽음 |
 | `로컬 Neo4j가 120초 안에 응답하지 않았습니다` | 컨테이너는 떠 있는데 포트 전달이 안 됨. colima의 기본 포트 전달(ssh)은 새로 연 포트로 응답을 넘기지 못할 때가 있음 → `colima stop && colima start --port-forwarder grpc`(한 번 바꾸면 유지됨) 후 다시 실행. 급하면 `colima restart` |
 | 화면 대신 "The web app is not built" | 웹 앱을 빌드하지 않음 → `(cd frontend && npm ci && npm run build)` |
 | DOCX·PPTX·XLSX 페이지가 안 그려짐 | 뷰어 번들 미설치(`~/.cache/graphme/ooxml-viewer/dist`가 없음) → 1단계의 `setup.sh`. Chrome이 기본 위치에 없으면 `.env`에 `GRAPHME_CHROME_EXECUTABLE` |
@@ -437,7 +449,8 @@ curl -s -o bundle.zip $B/v1/export/bundle                           # neo4j-admi
 
 ## CLI
 
-웹 앱과 같은 그래프 공간을 씁니다. 전체 목록은 `uv run graphme --help`.
+웹 앱과 같은 그래프 공간을 씁니다. 지금 폴더에 `.env`가 있으면(저장소) 그것을, 없으면 설치한 앱 폴더의
+`.env`·그래프 데이터·뷰어를 씁니다. 전체 목록은 `uv run graphme --help`.
 
 ```text
 graphme build-graph FOLDER          # 폴더의 문서를 읽어 그래프 공간에 넣고 잇기 (--again: 다시 읽기)

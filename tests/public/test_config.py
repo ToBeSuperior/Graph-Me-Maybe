@@ -180,3 +180,32 @@ def test_every_command_draws_with_the_viewer_the_installer_put_in_the_app_home(
     empty = tmp_path / "empty"
     empty.mkdir()
     assert load_settings({"GRAPHME_HOME": str(empty)}).viewer_directory != empty / "viewer"
+
+
+def test_a_command_run_outside_a_checkout_uses_the_installed_app_s_settings_and_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `graphme build-graph` from a new terminal read only the working folder's `.env`: no key,
+    # and the graph data in a `.graphme` of whatever folder the terminal was in.
+    from graphme import model_endpoint
+
+    provider = model_endpoint.DEFAULT_PROVIDER
+    key_env = model_endpoint.PROVIDERS[provider].key_env
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text(f"GRAPHME_PROVIDER={provider}\n{key_env}=invented\n",
+                               encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv("GRAPHME_HOME", str(home))
+    monkeypatch.delenv(key_env, raising=False)
+    monkeypatch.delenv("GRAPHME_DATA_DIR", raising=False)
+
+    settings = load_settings()
+
+    assert settings.api_key == "invented"
+    assert settings.data_dir == home / ".graphme"
+
+    (elsewhere / ".env").write_text(f"GRAPHME_PROVIDER={provider}\n", encoding="utf-8")
+    assert load_settings().api_key is None  # a checkout's own `.env` is still its own
