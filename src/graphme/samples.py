@@ -475,5 +475,8 @@ def write_samples(folder: Path) -> list[Path]:
 
 
 if __name__ == "__main__":
+    # A Windows pipe writes in the ANSI code page, which has no Hangul for the file names.
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     for path in write_samples(Path(sys.argv[1])):
         print(path)
