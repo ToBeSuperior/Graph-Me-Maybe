@@ -167,13 +167,16 @@ def write_import_bundle(rows: CorpusRows, folder: Path) -> list[Path]:
                 _cell(properties.get(name), column) for name, column in typed[kind])])
 
     schema = folder / "schema.cypher"
-    schema.write_text("\n".join(_schema(rows.indexes)) + "\n", encoding="utf-8")
+    # LF on every system: `import.sh` runs in a Linux container, where Windows' CRLF made
+    # `set -e` into `set -e\r` and every .dump made on Windows failed.
+    schema.write_text("\n".join(_schema(rows.indexes)) + "\n", encoding="utf-8", newline="\n")
     command = folder / "import.sh"
     command.write_text(
-        _command(list(node_files.values()), list(relationship_files.values())), encoding="utf-8")
+        _command(list(node_files.values()), list(relationship_files.values())),
+        encoding="utf-8", newline="\n")
     command.chmod(0o755)
     guide = folder / "README.md"
-    guide.write_text(_GUIDE, encoding="utf-8")
+    guide.write_text(_GUIDE, encoding="utf-8", newline="\n")
     return [*node_files.values(), *relationship_files.values(), schema, command, guide]
 
 

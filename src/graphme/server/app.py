@@ -52,6 +52,7 @@ from graphme.server.settings import changed, described, from_here, preflight
 from graphme.server.state import (
     BUILDING,
     IN_LOG,
+    SPACE_WAIT,
     Busy,
     CorpusBuild,
     Demo,
@@ -198,7 +199,7 @@ def create_app(
     def opened() -> Neo4jGraphSpace:
         """The graph space; one that cannot be reached is said (503), not a crash."""
         try:
-            return demo.space()
+            return demo.space(wait=SPACE_WAIT)
         except DockerStarting as error:  # the page asks again on its own
             raise HTTPException(503, str(error), headers={"Retry-After": "3"}) from error
         except Exception as error:  # noqa: BLE001 -- said to the caller
@@ -236,7 +237,7 @@ def create_app(
             return session.state if session else "idle"
 
         try:
-            documents, _ = demo.space().document_map()
+            documents, _ = demo.space(wait=SPACE_WAIT).document_map()
             space_ok = True
         except Exception:  # noqa: BLE001 -- the list still shows what the server holds
             documents, space_ok = [], False

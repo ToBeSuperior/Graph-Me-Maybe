@@ -27,7 +27,7 @@ Also gitignored and absent from a clone: `/test_dataset/`, `/reports/`, `/data/`
 ```bash
 uv sync --extra dev                    # install
 uv run graphme --help              # every command; xlsx-bundle renders one workbook to pages
-uv run graphme build-graph <folder> # every document into the Neo4j graph space, then linked
+uv run graphme build-graph <folder> # every document into the Neo4j graph space, linked, embedded (--no-embed)
 uv run graphme embed-graph          # cut the space into passages, embed them (embedder's key)
 uv run graphme ask "<question>"     # GraphRAG over the space (neo4j-graphrag)
 uv run graphme export-corpus <dir>  # neo4j-admin import bundle: graph, passages, vectors, schema

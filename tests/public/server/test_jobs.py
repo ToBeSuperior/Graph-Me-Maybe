@@ -200,3 +200,22 @@ def test_a_build_stopped_passes_over_what_is_not_read_yet(
     said = _settled(client, job["id"])
 
     assert said["state"] == "cancelled" and said["failed"] == [] and said["skipped"] == 2
+
+
+def test_a_failed_export_says_why_and_never_the_password(demo, monkeypatch) -> None:
+    # The page said only "could not export (see the server log)", twice over.
+    def fails(*args, **kwargs):
+        raise RuntimeError("docker start failed: /bin/sh: set: illegal option -\n"
+                           "uploading with s3cret")
+
+    monkeypatch.setattr(demo.graph, "export", fails)
+    job = demo.start_export("upload", None, {"uri": "neo4j+s://x.databases.neo4j.io",
+                                             "user": "neo4j", "password": "s3cret"})
+    import time
+    for _ in range(50):
+        if job.state == "error":
+            break
+        time.sleep(0.05)
+    assert job.state == "error"
+    assert "illegal option" in job.message
+    assert "s3cret" not in job.message

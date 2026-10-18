@@ -27,6 +27,7 @@ from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import GraphRag
+from graphme.adapters.storage.local_neo4j import DockerStarting
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
 from graphme.api import GraphMe
 from graphme.application.corpus_build import BuildReport, BuildStep, build_graph, content_hash
@@ -104,6 +105,7 @@ def _since(started: float) -> float:
 # What failed is said on the page plainly; what it was -- with this machine's paths in it --
 # is in the server's log, printed where it happened.
 IN_LOG = "(자세한 내용은 서버 로그)"
+SPACE_WAIT = 2.0
 UNREAD = f"읽지 못했습니다 -- 손상됐거나 읽을 수 없는 내용의 파일일 수 있습니다 {IN_LOG}"
 PAGE_UNREAD = f"이 페이지를 읽지 못했습니다 {IN_LOG}"
 UNDRAWN = f"페이지를 그리지 못했습니다 {IN_LOG}"
@@ -288,11 +290,18 @@ class Demo:
         with self.opening_space:
             self.graph._rag = None  # made again, with the new keys, on the next question
 
-    def space(self) -> Neo4jGraphSpace:
-        """The graph space every built document is put in, opened on first use."""
+    def space(self, *, wait: float = -1) -> Neo4jGraphSpace:
+        """The graph space every built document is put in, opened on first use. A build waits
+        for it however long; a page's request (`wait`) only so long."""
         # The first use may start the local Neo4j; the page asks for the list and the map at once.
-        with self.opening_space:
+        # Pulling and starting it takes minutes: a request arriving meanwhile is told to wait
+        # (503, Retry-After) rather than held past the page's own timeout.
+        if not self.opening_space.acquire(timeout=wait):
+            raise DockerStarting("그래프 DB를 준비하는 중입니다 -- 준비되면 저절로 이어집니다.")
+        try:
             return self.graph.graph_space()
+        finally:
+            self.opening_space.release()
 
     def admin(self) -> DockerNeo4jAdmin:
         """`neo4j-admin`, in a throwaway container of the configured Neo4j image."""
@@ -335,10 +344,13 @@ class Demo:
                 job.message = f"{self.dump_path.stat().st_size // 1024} KB"
             job.finished_at = time.time()
             job.state = "done"
-        except Exception:  # noqa: BLE001 -- the job's state says what happened
-            # The log has what went wrong; the page, that it did -- never the password.
+        except Exception as error:  # noqa: BLE001 -- the job's state says what happened
+            # The log has all of it; the page, its first line -- never the password.
             traceback.print_exc(file=sys.stderr)
-            job.state, job.message = "error", f"내보내지 못했습니다 {IN_LOG}"
+            said = (str(error).strip().splitlines() or [type(error).__name__])[0][:300]
+            if aura and aura.get("password"):
+                said = said.replace(aura["password"], "***")
+            job.state, job.message = "error", f"{said} {IN_LOG}"
 
     def rag(self) -> GraphRag:
         """Questions over the graph space, opened on first use."""

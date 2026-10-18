@@ -11,7 +11,7 @@ from graphme.server.state import Demo
 
 
 def test_health_answers_without_the_graph_space(demo: Demo) -> None:
-    def unreachable() -> None:
+    def unreachable(**_: object) -> None:
         raise AssertionError("health never opens the graph space")
 
     demo.space = unreachable  # type: ignore[assignment,method-assign]
@@ -92,7 +92,7 @@ def test_routes_of_the_callers_own_sit_under_v1_behind_the_key(demo: Demo) -> No
 def test_while_docker_starts_the_page_is_told_to_ask_again(demo: Demo) -> None:
     from graphme.adapters.storage.local_neo4j import DockerStarting
 
-    def starting() -> None:
+    def starting(**_: object) -> None:
         raise DockerStarting("Docker를 켜는 중입니다")
 
     demo.space = starting  # type: ignore[assignment,method-assign]

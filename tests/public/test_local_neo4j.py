@@ -98,3 +98,14 @@ def test_on_windows_docker_desktop_itself_is_started(
         a, 0, "Docker Desktop is already running", ""))
     assert local_neo4j.start_docker_desktop() is True
     assert started == [desktop]
+
+
+def test_on_macos_docker_desktop_starts_without_its_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ran: list[list[str]] = []
+    monkeypatch.setattr(local_neo4j.sys, "platform", "darwin")
+    monkeypatch.setattr(local_neo4j.processes, "run", lambda args, **k: ran.append(args) or
+                        subprocess.CompletedProcess(args, 0, "", ""))
+    assert local_neo4j.start_docker_desktop() is True
+    assert ran == [["open", "-g", "-j", "-a", "Docker"]]  # not brought forward, hidden

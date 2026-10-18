@@ -29,6 +29,14 @@ const client = new QueryClient({
   defaultOptions: { queries: { staleTime: Infinity, retry: retrying, retryDelay, refetchOnWindowFocus: false } },
 });
 
+// The app's own window (WebView2, WebKit) has no reload of its own: F5 and Ctrl/Cmd+R do it.
+addEventListener('keydown', (event) => {
+  if (event.key === 'F5' || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'r')) {
+    event.preventDefault();
+    location.reload();
+  }
+});
+
 /** The old pages' links: `/?doc=<id>` opened a document, `/qfolder` the folders. */
 function OldDocLink() {
   const doc = new URLSearchParams(location.search).get('doc');

@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { api, call, isBuilding } from '../../api/client';
 import { Button, Input } from '../../components/ui';
 import { useT } from '../../lib/i18n';
-import { graphChanged, keys, useBuild, useCorpusMap } from '../../lib/queries';
+import { graphReset, useBuild, useCorpusMap } from '../../lib/queries';
 import { PageHeader } from './ManageLayout';
 
 export function DangerPage() {
@@ -27,8 +27,7 @@ export function DangerPage() {
       const got = await call(api.POST('/v1/graph/reset', { body: { confirm: true } }));
       toast.success(t('resetDone', got.deleted));
       setTyped('');
-      client.removeQueries({ queryKey: keys.build });
-      graphChanged(client);
+      graphReset(client);
     } catch (error) {
       toast.error(t('resetFailed'), { description: (error as Error).message });
     } finally {

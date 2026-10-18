@@ -231,8 +231,8 @@ xlsx·pptx·docx·pdf가 아닌 파일과 숨김·잠금(`~$`) 파일은 건너�
 같은 일을 CLI로도 할 수 있습니다(같은 그래프 공간을 씁니다).
 
 ```bash
-uv run graphme build-graph <폴더>     # 읽고, 그래프 공간에 넣고, 문서끼리 잇기
-uv run graphme embed-graph            # 질문용 청크 임베딩, 중요도, 내용 유사 연결
+uv run graphme build-graph <폴더>     # 읽고, 그래프 공간에 넣고, 문서끼리 잇고, 질문용으로 임베딩
+uv run graphme embed-graph            # 임베딩만 다시(--no-embed로 만든 뒤, 임베딩 모델을 바꾼 뒤)
 uv run graphme ask "질문"              # 답과 근거
 ```
 
@@ -463,7 +463,7 @@ curl -s -o bundle.zip $B/v1/export/bundle                           # neo4j-admi
 `.env`·그래프 데이터·뷰어를 씁니다. 전체 목록은 `uv run graphme --help`.
 
 ```text
-graphme build-graph FOLDER          # 폴더의 문서를 읽어 그래프 공간에 넣고 잇기 (--again: 다시 읽기)
+graphme build-graph FOLDER          # 폴더의 문서를 읽어 그래프 공간에 넣고 잇고 임베딩 (--again: 다시 읽기, --no-embed)
 graphme embed-graph                 # 질문용 구절 임베딩, 중요도, 내용 유사 연결
 graphme ask QUESTION                # 답과 근거
 graphme delete-document ID...       # 문서 삭제

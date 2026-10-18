@@ -96,7 +96,9 @@ def start_docker_desktop() -> bool:
                 return True
             return done.returncode == 0
         if sys.platform == "darwin":
-            return processes.run(["open", "-a", "Docker"], capture_output=True).returncode == 0
+            # Not brought forward, and hidden: only its engine is wanted, not its window.
+            return processes.run(["open", "-g", "-j", "-a", "Docker"],
+                                 capture_output=True).returncode == 0
     except OSError:
         return False
     return False

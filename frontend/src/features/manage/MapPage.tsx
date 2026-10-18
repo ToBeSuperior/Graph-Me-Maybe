@@ -37,7 +37,7 @@ export function MapPage() {
     const nodes: Node[] = map.documents.map((d) => neoNode(d.id, 'Document', stem(d.label), {
       fill: fills.get(d.id) ?? OTHER_FILL,
       title: tip(`${shownName(d.label)}${d.title ? `\n${d.title}` : ''}\n${t('mentions', d.mentions ?? 0)}`) as unknown as string,
-      widthConstraint: { minimum: 96, maximum: 96 }, font: { size: 10, color: '#1F2125', face: 'Pretendard Variable' },
+      widthConstraint: { minimum: 120, maximum: 120 }, font: { size: 14, color: '#1F2125', face: 'Pretendard Variable' },
     }));
     const edges: Edge[] = [
       ...map.links.map((l) => neoEdge({ from: l.from, to: l.to, title: tip(t('matchedBy', l.matched_by.join(', '))) as unknown as string },

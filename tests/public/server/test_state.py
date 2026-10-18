@@ -356,3 +356,27 @@ def test_two_first_questions_at_once_make_one_rag(
         ask.join()
 
     assert len(made) == 1
+
+
+def test_while_the_graph_is_being_opened_another_request_is_told_to_wait(
+    demo, monkeypatch
+) -> None:
+    # Docker's Neo4j being pulled and started held every request past the page's own timeout.
+    import threading
+
+    from graphme.adapters.storage.local_neo4j import DockerStarting
+    held = threading.Event()
+    release = threading.Event()
+
+    def opening() -> None:
+        with demo.opening_space:
+            held.set()
+            release.wait(5)
+
+    threading.Thread(target=opening, daemon=True).start()
+    held.wait(5)
+    try:
+        with pytest.raises(DockerStarting):
+            demo.space(wait=0.1)
+    finally:
+        release.set()

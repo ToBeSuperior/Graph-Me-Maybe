@@ -120,10 +120,13 @@ def create_app(
         again: bool = typer.Option(
             False, "--again", help="read again files whose content is in the space already"
         ),
+        no_embed: bool = typer.Option(
+            False, "--no-embed", help="leave the passages unembedded (embed-graph does it later)"
+        ),
     ) -> None:
         """Every document in a folder into one graph: each read and put in the graph space,
-        then the documents they name joined to the ones there. A file already in the space
-        is passed over unless --again."""
+        then the documents they name joined to the ones there, then embedded for questions as
+        the app does. A file already in the space is passed over unless --again."""
         if corpus_service is None:
             raise typer.BadParameter("no graph space is configured")
         steps = {BuildStep.READ: "read", BuildStep.PUT: "put", BuildStep.LINK: "link"}
@@ -137,6 +140,10 @@ def create_app(
             f"processed={report.processed} known={report.known} failed={len(report.failed)} "
             f"links_judged={report.links}"
         )
+        if rag_service is not None and not no_embed:
+            embedded = rag_service.embed(
+                lambda done, total: typer.echo(f"embedded {done}/{total}"))
+            typer.echo(f"embedded={embedded}")
         if report.failed:
             raise typer.Exit(1)
 

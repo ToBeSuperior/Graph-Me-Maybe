@@ -236,3 +236,28 @@ def test_a_command_that_cannot_run_says_why_in_one_line(
     said = capsys.readouterr().err
     assert said.strip().splitlines() == [
         "오류: OPENAI_API_KEY is required (GRAPHME_PROVIDER=openai)"]
+
+
+def test_build_graph_embeds_what_it_read_so_questions_work_at_once(tmp_path: Path) -> None:
+    # Built from the command line, a question was refused (409) until `embed-graph` ran.
+    from graphme.application.corpus_build import BuildReport
+    from graphme.cli import create_app
+
+    embedded: list[str] = []
+
+    class _Corpus:
+        def build(self, folder: Path, on_step, again=False) -> BuildReport:
+            return BuildReport(processed=1, failed=(), links=0)
+
+    class _Rag:
+        def embed(self, on_progress) -> int:
+            embedded.append("all")
+            on_progress(3, 3)
+            return 3
+
+    app = create_app(corpus_service=_Corpus(), rag_service=_Rag())
+    done = CliRunner().invoke(app, ["build-graph", str(tmp_path)])
+    assert done.exit_code == 0, done.output
+    assert embedded == ["all"] and "embedded=3" in done.output
+    skipped = CliRunner().invoke(app, ["build-graph", str(tmp_path), "--no-embed"])
+    assert skipped.exit_code == 0 and embedded == ["all"]

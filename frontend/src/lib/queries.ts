@@ -30,6 +30,14 @@ export function graphChanged(client: QueryClient) {
   }
 }
 
+/** The graph emptied: no build to show, and everything drawn from the graph asked again. The
+ * build's answer is emptied, not removed: removed, the app-wide follower lost it, and the next
+ * build ended unseen -- the map stayed at zero. */
+export function graphReset(client: QueryClient) {
+  client.setQueryData(keys.build, null);
+  graphChanged(client);
+}
+
 export const useLibrary = () =>
   useQuery({ queryKey: keys.library, queryFn: () => call(api.GET('/v1/documents')) });
 

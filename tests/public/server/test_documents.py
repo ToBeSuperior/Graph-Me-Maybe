@@ -73,7 +73,7 @@ def test_one_content_reached_by_two_paths_is_one_entry(
 def test_the_list_still_shows_the_servers_files_when_the_space_is_down(
     demo: Demo, client: TestClient, tmp_path: Path
 ) -> None:
-    def down() -> None:
+    def down(**_: object) -> None:
         raise ConnectionError("no Neo4j")
 
     demo.space = down  # type: ignore[assignment,method-assign]
@@ -230,7 +230,7 @@ def test_a_bundle_that_fails_after_the_space_opened_is_a_500(
 def test_a_documents_file_with_the_space_down_is_a_503(
     demo: Demo, client: TestClient
 ) -> None:
-    def down() -> None:
+    def down(**_: object) -> None:
         raise ConnectionError("no Neo4j")
 
     demo.space = down  # type: ignore[assignment,method-assign]
