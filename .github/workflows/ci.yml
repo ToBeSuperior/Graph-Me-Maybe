@@ -2,7 +2,10 @@
 name: CI
 
 on:
+  # Branches only: a release tag is the commit main's run already checked, and the Release
+  # workflow builds it -- the same run twice cost five minutes a release.
   push:
+    branches: ["main"]
   pull_request:
 
 jobs:
