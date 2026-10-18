@@ -5,7 +5,7 @@ PDF, XLSX, PPTX, DOCX 문서를 읽어 하나의 Neo4j 그래프로 만들고, �
 
 ---
 
-## 설치 프로그램으로 (macOS · Windows)
+## 설치 프로그램으로 (macOS · Windows · Linux/WSL)
 
 터미널에 한 줄을 붙여 넣으면 앱과 필요한 것(Python, 웹 앱, 문서 뷰어, 페이지를 그릴 브라우저,
 샘플 문서)이 설치되고 앱이 열립니다. 다시 실행하면 업데이트됩니다.
@@ -19,6 +19,10 @@ curl -fsSL https://raw.githubusercontent.com/ToBeSuperior/Graph-Me-Maybe/main/in
 # Windows (PowerShell)
 powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/ToBeSuperior/Graph-Me-Maybe/main/install.ps1 | iex"
 ```
+
+Linux와 WSL(Windows의 Ubuntu)은 macOS와 같은 `install.sh` 한 줄을 씁니다. 페이지를 그리는 Chrome이 Linux 안의 글꼴만
+보므로 한글 글꼴이 있어야 합니다(`sudo apt install -y fonts-noto-cjk`; 없으면 설치 프로그램이 알려 줍니다). WSL에서 `graphme app`은
+Windows 기본 브라우저로 화면을 엽니다.
 
 - 그 뒤로는 응용 프로그램 폴더(macOS) 또는 시작 메뉴(Windows)의 **Graph-Me-Maybe**, 또는
   `graphme app`으로 엽니다. 키는 앱의 **관리 › 키와 모델**에서 넣습니다.
@@ -104,7 +108,7 @@ docker info                                           # 오류 없이 나오면 
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash && nvm install 22   # 새 터미널에서 nvm
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash && nvm install 24   # 새 터미널에서 nvm
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ~/.cargo/bin/rustup target add wasm32-unknown-unknown
 # wasm-pack: 미리 빌드된 릴리스를 ~/.cargo/bin에 (cargo install wasm-pack은 컴파일이 오래 걸림)
@@ -132,8 +136,7 @@ docker info
   쓰므로 지우지 않습니다. Windows에 설치된 Chrome은 서버가 쓸 수 없습니다.
 - 한글 글꼴도 WSL 안에 있어야 합니다(위 `fonts-noto-cjk`). 페이지를 그리는 WSL 안의 Chrome은 Windows의 글꼴(맑은 고딕 등)을
   보지 못해서, 없으면 Office 문서 페이지의 한글이 네모(□)로 깨집니다. 설치 전에 그려진 문서는 데모를 다시 띄운 뒤 다시 그려야 합니다.
-- Ubuntu 20.04의 기본 Node는 너무 오래됐으므로 nvm으로 22를 받습니다. 20.19에서도 빌드는 되지만 `EBADENGINE`
-  경고가 납니다.
+- Ubuntu의 기본 Node는 너무 오래됐으므로 nvm으로 24를 받습니다. Node 22(npm 10)는 뷰어 번들을 설치하다 멈춥니다.
 
 **Docker에 대해**
 - 앱은 `docker` 명령만 부르므로 무엇으로 돌리든 상관없습니다(Docker Desktop, OrbStack, colima, Docker Engine).
@@ -147,7 +150,7 @@ docker info
 
 
 ```bash
-git clone <REPOSITORY_URL>
+git clone https://github.com/ToBeSuperior/Graph-Me-Maybe.git
 cd Graph-Me-Maybe
 uv sync --extra dev                               # Python 3.11과 의존성
 (cd frontend && npm ci && npm run build)          # 웹 앱 (npm의 fsevents 경고는 무시해도 됨)
@@ -498,7 +501,7 @@ cd frontend && npm run typecheck && npm test && npm run e2e && npm run build   #
 
 ## 보안 및 데이터 취급
 
-- `.env`, 실제 문서, API key·OAuth 파일·게이트웨이 키를 commit하지 않습니다.
+- `.env`, 실제 문서, API key·OAuth 파일을 commit하지 않습니다.
 - `graphme serve`를 이 컴퓨터 밖에 열 때는 `GRAPHME_API_KEY`를 둡니다. 키 없는 서버는 127.0.0.1 밖으로 뜨지 않습니다.
 - Source crop과 generated interpretation을 구분합니다.
 - Generated evidence는 citation authority로 사용하지 않습니다.
@@ -514,7 +517,7 @@ cd frontend && npm run typecheck && npm test && npm run e2e && npm run build   #
 - XLSX cell-to-rendered-pixel mapping은 모든 multi-page workbook에서 완전히 결정적이지 않을 수 있습니다.
 - Formula 계산은 Excel calculation engine을 대체하지 않습니다.
 - VLM segmentation 품질은 live provider/model에 따라 달라집니다.
-- `frontend/dist`는 Git과 wheel에 포함되지 않으므로 웹 앱은 source checkout에서 빌드해 씁니다.
+- `frontend/dist`는 Git과 wheel에 포함되지 않습니다. 설치 프로그램은 릴리스의 `web.zip`으로 웹 앱을 함께 깔고, 저장소에서는 직접 빌드합니다.
 - PDF scan-only 문서는 명시적으로 분류하지만 OCR/VLM 결과를 canonical text node로 자동 승격하지 않습니다. 두 단 읽기 순서는 띠·단 규칙으로 처리하지만, 단이 불규칙하게 섞인 레이아웃과 borderless table 해석은 제한적입니다.
 - PPTX grouped shapes/SmartArt/external media의 재귀 해석과 렌더링 효과의 완전한 재현은 지원 범위가 제한적입니다.
 - DOCX body node는 document root의 직접 자식입니다. 제목 스타일을 계층으로 읽지 않으며, header/footer/footnote/comment는 포괄적으로 추출하지 않습니다.

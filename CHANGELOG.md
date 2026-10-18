@@ -3,6 +3,13 @@
 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고, 버전은
 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.1.3] - 2026-10-18
+
+### 고침
+
+- Linux·WSL: 한글 글꼴이 없으면 설치 프로그램이 `fonts-noto-cjk` 설치를 안내합니다(없으면 Office 페이지의 한글이 네모로 그려짐).
+- README: Linux·WSL 설치 경로, Node 24, 공개 저장소 주소, 설치 프로그램이 웹 앱을 함께 까는 것을 반영했습니다.
+
 ## [0.1.2] - 2026-10-18
 
 ### 고침

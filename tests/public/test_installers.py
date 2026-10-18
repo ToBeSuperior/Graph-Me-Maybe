@@ -315,3 +315,14 @@ def test_the_windows_closing_line_names_a_custom_home_and_docker_needs_a_restart
     text = (ROOT / "install.ps1").read_text()
     assert "$env:GRAPHME_HOME='" in text[text.index("function Install"):]
     assert "the app waits for it" not in text and "restart" in text
+
+
+@posix
+@pytest.mark.parametrize(("fonts", "warned"), [("", True), ("NotoSansCJK-Regular.ttc: Noto", False)])
+def test_linux_without_a_hangul_font_is_told_how_to_get_one(fonts: str, warned: bool) -> None:
+    # Chrome there sees only Linux's fonts (under WSL, not Windows'): Korean pages draw as boxes.
+    script = (f'GRAPHME_INSTALL_LIB=1 . "{ROOT / "install.sh"}"; uname() {{ echo Linux; }};'
+              f' fc_list() {{ printf "%s" "{fonts}"; }}; check_hangul_font')
+    done = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=10)
+    assert done.returncode == 0, done.stderr
+    assert ("fonts-noto-cjk" in done.stdout + done.stderr) is warned

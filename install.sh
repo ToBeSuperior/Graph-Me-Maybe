@@ -91,6 +91,16 @@ has_chrome() {
   esac
 }
 
+fc_list() { fc-list :lang=ko 2>/dev/null; }
+
+# Chrome on Linux sees only Linux's fonts -- under WSL, not Windows' -- so Korean pages draw as boxes.
+check_hangul_font() {
+  [ "$(uname -s)" = Linux ] || return 0
+  [ -n "$(fc_list)" ] && return 0
+  say "no Korean font: Korean text in DOCX, PPTX and XLSX pages draws as boxes. Install one:"
+  say "  sudo apt install -y fonts-noto-cjk && fc-cache -f"
+}
+
 offer_docker() {
   [ -n "${GRAPHME_NO_DOCKER:-}" ] && return
   if command -v docker >/dev/null 2>&1; then
@@ -184,6 +194,7 @@ install() {
     say "no Google Chrome: fetching Playwright's Chromium to draw pages with"
     "$python" -m playwright install chromium --only-shell || say "warning: Playwright's Chromium did not download; install Google Chrome, or run: $python -m playwright install chromium --only-shell"
   fi
+  check_hangul_font
   offer_docker
   make_shortcut "$bin"
   say "installed. Open it with: $(open_hint)   (a new terminal finds the command)"
