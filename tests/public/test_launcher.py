@@ -139,6 +139,8 @@ def test_a_port_the_app_just_closed_is_free_again() -> None:
     # A server that closed a connection first leaves it in TIME_WAIT for a minute. The server
     # binds over it (SO_REUSEADDR); the probe did not, and the app came up on the next port.
     with socket.socket() as server:
+        # As uvicorn binds; Linux reuses a TIME_WAIT port only when both sides asked to.
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(("127.0.0.1", 0))
         server.listen()
         port = server.getsockname()[1]
