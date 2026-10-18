@@ -94,3 +94,40 @@ def test_the_settings_file_written_on_a_fresh_home_loads(tmp_path: Path) -> None
         e.key_env for e in model_endpoint.EMBEDDERS.values()}
     assert {name for name in written if name.endswith("_KEY")} <= known
     assert load_settings(written).provider == model_endpoint.DEFAULT_PROVIDER
+
+
+def test_under_wsl_the_page_opens_in_the_windows_browser() -> None:
+    # The Linux Chrome there is the renderer's; a window of it is not where anyone looks.
+    ran: list[list[str]] = []
+    fallback: list[str] = []
+
+    launcher.open_in_browser(
+        "http://127.0.0.1:8765", environ={"WSL_DISTRO_NAME": "Ubuntu"},
+        which=lambda name: f"/usr/bin/{name}" if name == "wslview" else None,
+        run=lambda args, **_: ran.append(args), fallback=fallback.append)
+
+    assert ran == [["/usr/bin/wslview", "http://127.0.0.1:8765"]]
+    assert fallback == []
+
+
+def test_under_wsl_without_wslview_explorer_opens_it() -> None:
+    ran: list[list[str]] = []
+
+    launcher.open_in_browser(
+        "http://127.0.0.1:8765", environ={"WSL_DISTRO_NAME": "Ubuntu"},
+        which=lambda name: None, run=lambda args, **_: ran.append(args),
+        fallback=lambda url: None)
+
+    assert ran == [["explorer.exe", "http://127.0.0.1:8765"]]
+
+
+def test_a_browser_named_by_the_user_is_kept_even_under_wsl() -> None:
+    fallback: list[str] = []
+    ran: list[object] = []
+
+    launcher.open_in_browser(
+        "http://127.0.0.1:8765", environ={"WSL_DISTRO_NAME": "Ubuntu", "BROWSER": "firefox"},
+        which=lambda name: "/usr/bin/x", run=lambda args, **_: ran.append(args),
+        fallback=fallback.append)
+
+    assert (ran, fallback) == ([], ["http://127.0.0.1:8765"])

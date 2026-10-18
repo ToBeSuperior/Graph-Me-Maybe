@@ -3,6 +3,12 @@
 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고, 버전은
 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.1.2] - 2026-10-18
+
+### 고침
+
+- WSL: `graphme app`이 화면을 WSL 안의 리눅스 Chrome이 아니라 Windows 기본 브라우저로 엽니다(`BROWSER`로 바꿀 수 있음).
+
 ## [0.1.1] - 2026-10-18
 
 ### 고침

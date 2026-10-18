@@ -126,9 +126,10 @@ docker info
 - 명령은 모두 WSL 터미널에서 실행합니다. `sudo`는 비밀번호를 물으므로 일반 터미널(VS Code 터미널, WSL 창)에서 칩니다 —
   비밀번호를 입력할 수 없는 곳(에이전트의 셸 등)에서는 `sudo: a terminal is required`로 멈춥니다.
 - Docker는 Docker Desktop의 WSL 통합을 켜거나 WSL 안에 Docker Engine을 설치합니다. WSL 안에서 `docker info`가 sudo 없이 되면 됩니다.
-- WSL 안에서 띄운 데모(`127.0.0.1:8765`)는 Windows 브라우저에서 같은 주소로 열립니다.
-- macOS 경로(`/Applications/Google Chrome.app/...`)가 아니라 WSL 안의 `google-chrome`이 필요합니다. Windows에 설치된
-  Chrome은 쓰지 않습니다.
+- WSL 안에서 띄운 데모(`127.0.0.1:8765`)는 Windows 브라우저에서 같은 주소로 열립니다. `graphme app`은 WSL에서 Windows 기본
+  브라우저로 화면을 엽니다(`wslview`, 없으면 `explorer.exe`). 다른 브라우저를 쓰려면 `BROWSER`에 적습니다.
+- macOS 경로(`/Applications/Google Chrome.app/...`)가 아니라 WSL 안의 `google-chrome`이 필요합니다 — 페이지를 그리는 데
+  쓰므로 지우지 않습니다. Windows에 설치된 Chrome은 서버가 쓸 수 없습니다.
 - 한글 글꼴도 WSL 안에 있어야 합니다(위 `fonts-noto-cjk`). 페이지를 그리는 WSL 안의 Chrome은 Windows의 글꼴(맑은 고딕 등)을
   보지 못해서, 없으면 Office 문서 페이지의 한글이 네모(□)로 깨집니다. 설치 전에 그려진 문서는 데모를 다시 띄운 뒤 다시 그려야 합니다.
 - Ubuntu 20.04의 기본 Node는 너무 오래됐으므로 nvm으로 22를 받습니다. 20.19에서도 빌드는 되지만 `EBADENGINE`

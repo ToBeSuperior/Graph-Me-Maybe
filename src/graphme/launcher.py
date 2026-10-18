@@ -3,7 +3,9 @@ put there, a free port, and the browser opened once the server answers."""
 from __future__ import annotations
 
 import os
+import shutil
 import socket
+import subprocess
 import sys
 import webbrowser
 from collections.abc import Callable, Mapping
@@ -82,9 +84,25 @@ def running(port: int) -> bool:
         return False
 
 
+def open_in_browser(
+    url: str, *, environ: Mapping[str, str] = os.environ,
+    which: Callable[[str], str | None] = shutil.which,
+    run: Callable[..., object] = subprocess.run,
+    fallback: Callable[[str], object] = webbrowser.open,
+) -> None:
+    """The page in the user's browser. Under WSL that is Windows' default one: Python picks
+    the Linux Chrome there first, which is the renderer's, in a window of its own. A browser
+    the user names in BROWSER is always kept."""
+    if ("WSL_DISTRO_NAME" in environ or "WSL_INTEROP" in environ) and "BROWSER" not in environ:
+        opener = which("wslview")
+        run([opener, url] if opener else ["explorer.exe", url], check=False)
+        return
+    fallback(url)
+
+
 def launch(
     *, port: int | None, browser: bool, environ: Mapping[str, str] = os.environ,
-    open_url: Callable[[str], object] = webbrowser.open,
+    open_url: Callable[[str], object] = open_in_browser,
     serve: Callable[..., None] | None = None,
 ) -> None:
     """Open the app: the running one if there is, else a server started from its home."""
