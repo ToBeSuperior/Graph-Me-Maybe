@@ -20,7 +20,9 @@ curl -fsSL https://raw.githubusercontent.com/ToBeSuperior/Graph-Me-Maybe/main/in
 powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/ToBeSuperior/Graph-Me-Maybe/main/install.ps1 | iex"
 ```
 
-Linux와 WSL(Windows의 Ubuntu)은 macOS와 같은 `install.sh` 한 줄을 씁니다. 한글은 앱에 든 글꼴(Pretendard)로 그리므로
+Linux는 macOS와 같은 `install.sh` 한 줄을 씁니다. Windows에서는 WSL 안이 아니라 PowerShell에서 설치합니다.
+WSL에서 `install.sh`를 실행하면 Windows 설치 한 줄을 알려 주고 멈춥니다(그래도 WSL에 설치하려면
+`curl … | GRAPHME_WSL=1 sh`). 한글은 앱에 든 글꼴(Pretendard)로 그리므로
 글꼴을 따로 설치하지 않아도 됩니다. WSL에서 `graphme app`은 Windows 기본 브라우저로 화면을 엽니다.
 
 - 그 뒤로는 응용 프로그램 폴더(macOS) 또는 시작 메뉴(Windows)의 **Graph-Me-Maybe**로 엽니다. 주소창 없는
@@ -34,7 +36,7 @@ Linux와 WSL(Windows의 Ubuntu)은 macOS와 같은 `install.sh` 한 줄을 씁�
 - 앱 폴더: macOS `~/Library/Application Support/Graph-Me-Maybe`, Windows
   `%LOCALAPPDATA%\Graph-Me-Maybe` — `.env`(키), 그래프 데이터, 웹 앱, 뷰어. 터미널의 `graphme` 명령도
   어느 폴더에서 실행하든 이 폴더의 키·데이터·뷰어를 씁니다(지금 폴더에 `.env`가 있으면 그것을 씀).
-- 한 PC에 WSL 앱과 Windows 앱을 같이 두면 하나만 켜서 씁니다. WSL에서 연 포트(앱 8765, 그래프 DB 7687)는
+- `GRAPHME_WSL=1`로 한 PC에 WSL 앱과 Windows 앱을 같이 두었다면 하나만 켜서 씁니다. WSL에서 연 포트(앱 8765, 그래프 DB 7687)는
   Windows의 `127.0.0.1`로도 열리기 때문입니다. 두 앱은 서로를 자기 것으로 여기지 않습니다. 다른 쪽 앱이
   켜져 있으면 이쪽 앱은 다음 포트(8766…)에 뜨고, 이쪽 Docker가 꺼져 있을 때 답하는 다른 쪽 그래프 DB는 쓰지
   않고 멈춥니다. 다만 Docker Desktop의 WSL 통합을 켜 두면 두 쪽이 Docker를 함께 써서 그래프도 하나가 됩니다.

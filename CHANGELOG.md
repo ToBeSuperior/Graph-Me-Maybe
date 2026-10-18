@@ -3,6 +3,16 @@
 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고, 버전은
 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.1.7] - 2026-10-18
+
+### 고침
+
+- Windows 앱 창에서 Docker·페이지 그리기·내보내기를 실행할 때마다 검은 콘솔 창이 잠깐 뜨던 것. 앱이 실행하는 프로그램은 모두 창 없이 실행됩니다(`graphme/processes.py` 한 곳).
+
+### 바뀜
+
+- WSL에서 `install.sh`를 실행하면 설치하지 않고 Windows 설치(PowerShell의 `install.ps1`)를 안내합니다. 한 PC에 앱이 두 벌 생기지 않게 하려는 것입니다. 그래도 WSL에 설치하려면 `GRAPHME_WSL=1`. 이미 깔린 WSL 앱 제거(`--uninstall`)는 그대로 됩니다.
+
 ## [0.1.6] - 2026-10-18
 
 ### 추가

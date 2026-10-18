@@ -7,7 +7,6 @@ import logging
 import os
 import shutil
 import socket
-import subprocess
 import sys
 import threading
 import webbrowser
@@ -17,7 +16,7 @@ from typing import Any
 
 import httpx
 
-from graphme import model_endpoint
+from graphme import model_endpoint, processes
 from graphme.config import app_home as home
 
 FIRST_PORT = 8765
@@ -82,7 +81,7 @@ def running(port: int, home: Path, *, get: Callable[..., Any] = httpx.get) -> bo
 def open_in_browser(
     url: str, *, environ: Mapping[str, str] = os.environ,
     which: Callable[[str], str | None] = shutil.which,
-    run: Callable[..., object] = subprocess.run,
+    run: Callable[..., object] = processes.run,
     fallback: Callable[[str], object] = webbrowser.open,
 ) -> None:
     """The page in the user's browser. Under WSL that is Windows' default one: Python picks

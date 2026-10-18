@@ -215,7 +215,15 @@ main() {
   [ "$(id -u)" -ne 0 ] || die "run this as yourself, not root: everything goes under your home"
   case $(uname -s) in Darwin|Linux) ;; *) die "on Windows use install.ps1" ;; esac
   HOME_DIR=$(app_home)
-  if [ -n "${GRAPHME_UNINSTALL:-}" ]; then uninstall; else install; fi
+  if [ -n "${GRAPHME_UNINSTALL:-}" ]; then uninstall; exit; fi
+  # Under WSL the app wanted is almost always Windows' own, in its own window: a second one
+  # here would open beside it in the Windows browser, with a graph of its own.
+  if [ -n "${WSL_DISTRO_NAME:-}${WSL_INTEROP:-}" ] && [ -z "${GRAPHME_WSL:-}" ]; then
+    die "this is WSL: install the Windows app instead, from PowerShell:
+  powershell -ExecutionPolicy ByPass -c \"irm https://raw.githubusercontent.com/$REPO/main/install.ps1 | iex\"
+(to install inside WSL anyway: curl ... | GRAPHME_WSL=1 sh)"
+  fi
+  install
 }
 
 [ -n "${GRAPHME_INSTALL_LIB:-}" ] || main "$@"

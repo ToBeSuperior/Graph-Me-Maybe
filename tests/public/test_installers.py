@@ -351,3 +351,19 @@ def test_without_the_api_the_redirect_still_finds_a_release() -> None:
               ' esac; }; release_tag')
     done = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=10)
     assert (done.returncode, done.stdout) == (0, "v9.9.2"), done.stderr
+
+
+@posix
+@pytest.mark.parametrize("asked", [False, True])
+def test_under_wsl_the_windows_installer_is_named_unless_asked(
+    tmp_path: Path, asked: bool
+) -> None:
+    # Installed in WSL too, the PC had two apps -- one in the Windows browser beside the
+    # Windows app's own window -- when only Windows' was wanted.
+    env = {**_scratch_env(tmp_path), "WSL_DISTRO_NAME": "Ubuntu",
+           "GRAPHME_INSTALL_SOURCE": str(tmp_path / "missing")} | (
+        {"GRAPHME_WSL": "1"} if asked else {})
+    done = subprocess.run(["sh", str(ROOT / "install.sh")], env=env, capture_output=True,
+                          text=True, stdin=subprocess.DEVNULL, timeout=60)
+    assert done.returncode != 0
+    assert ("install.ps1" in done.stderr) is not asked, done.stderr

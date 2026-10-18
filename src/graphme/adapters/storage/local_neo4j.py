@@ -18,6 +18,7 @@ import time
 from collections.abc import Callable
 from urllib.parse import urlsplit
 
+from graphme import processes
 from graphme.config import LOOPBACK
 
 _log = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ def _answers(host: str, port: int) -> bool:
 
 def ensure_local_neo4j(
     uri: str, image: str, memory: tuple[str, str], *,
-    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    run: Callable[..., subprocess.CompletedProcess[str]] = processes.run,
     answers: Callable[[str, int], bool] = _answers,
     sleep: Callable[[float], None] = time.sleep,
 ) -> bool:
@@ -151,7 +152,7 @@ def _daemon_down(said: str) -> bool:
 
 
 def own_port(
-    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    run: Callable[..., subprocess.CompletedProcess[str]] = processes.run,
     free: Callable[[int], bool] | None = None,
 ) -> int:
     """Where ours is when this machine's usual port is someone else's Neo4j: the port it is

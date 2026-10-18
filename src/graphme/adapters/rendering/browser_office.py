@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import tempfile
 import zipfile
 from collections.abc import Callable, Mapping
@@ -19,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from graphme import processes
 from graphme.application.xlsx_crop_regions import PixelBox, SheetPixelGrid
 from graphme.application.xlsx_measurement import CellRange, measure_workbook
 from graphme.domain.enums import DocumentFormat
@@ -218,7 +218,7 @@ def _run_capture(
                        "PYTHONIOENCODING": "utf-8"}
         if chrome_executable:
             environment["BROWSER_PATH"] = chrome_executable
-        completed = subprocess.run(
+        completed = processes.run(
             [
                 sys.executable, "-m", "graphme.adapters.rendering.browser_capture",
                 kind, str(source), str(workspace), str(width), str(device_pixel_ratio),

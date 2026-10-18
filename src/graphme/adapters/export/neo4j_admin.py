@@ -23,6 +23,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from graphme import processes
+
 AURA_URI = re.compile(r"^neo4j\+s://[A-Za-z0-9-]+\.databases\.neo4j\.io(:\d{1,5})?$")
 """What `neo4j-admin database upload` takes; anything else it turns away as an invalid URI."""
 DATABASE = "neo4j"
@@ -52,7 +54,7 @@ Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 
 
 class DockerNeo4jAdmin:
-    def __init__(self, image: str, *, run: Runner = subprocess.run) -> None:
+    def __init__(self, image: str, *, run: Runner = processes.run) -> None:
         self._image = image
         self._run = run
 
