@@ -1,5 +1,5 @@
 """The import bundle's scripts end their lines with LF wherever they are written: `import.sh`
-runs in a Linux container. Invented records only."""
+is a POSIX shell script. Invented records only."""
 from __future__ import annotations
 
 import pathlib
@@ -14,7 +14,7 @@ from tests.fakes.corpus import rows_of
 def test_written_on_windows_the_scripts_still_end_lines_with_lf(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Windows' text mode wrote `set -e\r`, and the container's sh refused it
+    # Windows' text mode wrote `set -e\r`, and sh refused it
     # ("set: illegal option -"): every .dump made on Windows failed.
     written = pathlib.Path.write_text
 

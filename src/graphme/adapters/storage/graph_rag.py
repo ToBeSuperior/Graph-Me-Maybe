@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field
 from graphme.adapters.chat import Endpoint, complete, image_part, is_transient
 from graphme.adapters.embedding import BatchEmbedder
 from graphme.adapters.export.neo4j import CHUNK_LABEL, NODE_LABEL
-from graphme.adapters.storage.neo4j_space import CHUNK_TEXT_INDEX, Neo4jGraphSpace, checked_name
+from graphme.adapters.storage.neo4j_space import CHUNK_TEXT_INDEX, Neo4jGraphSpace
 from graphme.adapters.storage.similar_documents import SimilarDocuments
 from graphme.adapters.strict_schema import strict_response_schema
 from graphme.application.corpus_links import document_numbers
@@ -46,6 +46,10 @@ from graphme.application.graph_chunks import CHUNK_RULE, chunks
 from graphme.application.passage_scores import IMPORTANCE_RULE, centroid, importance
 from graphme.application.xlsx_visual_binding import CROP_ASSET_KEY, read_crop
 from graphme.ports.storage import AssetStore
+
+VECTOR_INDEX = "chunk_embedding"
+VECTOR_PROPERTY = "embedding"
+"""Where each passage keeps its vector; `_model` and `_centroid` beside it."""
 
 _log = logging.getLogger(__name__)
 
@@ -192,9 +196,6 @@ class GraphRag:
         client: httpx.Client,
         model: str,
         dimensions: int,
-        index: str = "chunk_embedding",
-        vector_property: str = "embedding",
-        text_index: str = CHUNK_TEXT_INDEX,
         relevance_floor: float,
         dense_weight: float,
         rrf_k: int,
@@ -215,17 +216,17 @@ class GraphRag:
         self._client = client
         self._model = model
         self._dimensions = dimensions
-        self._index = checked_name(index)
-        self._text_index = checked_name(text_index)
+        self._index = VECTOR_INDEX
+        self._text_index = CHUNK_TEXT_INDEX
         self._floor = relevance_floor
         self._dense_weight = dense_weight
         self._rrf_k = rrf_k
-        self._vector = checked_name(vector_property)
-        self._model_property = checked_name(f"{vector_property}_model")
-        self._centroid = checked_name(f"{vector_property}_centroid")
+        self._vector = VECTOR_PROPERTY
+        self._model_property = f"{VECTOR_PROPERTY}_model"
+        self._centroid = f"{VECTOR_PROPERTY}_centroid"
         """On each document: the mean of its passages' vectors, what it is mostly about."""
-        self._similar = SimilarDocuments(space.driver, index=index,
-                                         vector_property=vector_property)
+        self._similar = SimilarDocuments(space.driver, index=VECTOR_INDEX,
+                                         vector_property=VECTOR_PROPERTY)
         self._rag: _OnceRetriever | None = None
         """Made on the first question: building a retriever asks the database twice."""
 

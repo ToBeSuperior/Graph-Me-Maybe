@@ -295,3 +295,22 @@ def test_the_files_a_question_found_leave_in_one_zip_by_its_folders(
 
 def test_a_zip_of_nothing_chosen_is_refused(client: TestClient) -> None:
     assert client.get("/v1/documents/files.zip").status_code in (400, 422)
+
+
+def test_a_zips_folder_and_name_carry_no_control_or_turning_marks(
+    space: FakeSpace, client: TestClient, tmp_path: Path
+) -> None:
+    # A folder word or a question can hold what turns text around on screen ("txt.exe" read as
+    # "exe.txt") or a control character; a name written into a zip holds neither.
+    found = tmp_path / "spec.docx"
+    found.write_bytes(b"first")
+    space.paths, space.held = {"d1": str(found)}, {"d1": "spec.docx"}
+
+    got = client.get("/v1/documents/files.zip", params=[
+        ("doc", "d1"), ("folder", "‮1 found\x07"), ("name", "why‮?\x01")])
+
+    assert got.status_code == 200, got.text
+    assert "‮" not in got.headers["content-disposition"]
+    assert "%E2%80%AE" not in got.headers["content-disposition"].upper()
+    with zipfile.ZipFile(io.BytesIO(got.content)) as archive:
+        assert archive.namelist() == ["1 found/spec.docx"]

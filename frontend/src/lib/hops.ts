@@ -4,7 +4,7 @@ import type { Source } from '../api/client';
 
 export type Direction = 'cites' | 'cited_by' | 'similar';
 
-export interface Passage { id: string; score: number; members: string[]; text: string }
+interface Passage { id: string; score: number; members: string[]; text: string }
 
 export interface TrailDoc {
   id: string;

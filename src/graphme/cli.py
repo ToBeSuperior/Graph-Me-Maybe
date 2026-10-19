@@ -5,12 +5,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any, Protocol
 
-import httpx
 import typer
 
 from graphme.adapters.export.neo4j import records_cypher
 from graphme.adapters.storage.graph_rag import GraphAnswer
-from graphme.api import MODEL_WAIT, GraphMe
+from graphme.api import GraphMe
 from graphme.application.corpus_build import (
     BuildReport,
     BuildStep,
@@ -271,10 +270,6 @@ def create_app(
         typer.echo(f"nodes={result.node_count}")
 
     return app
-
-
-def _client() -> httpx.Client:
-    return httpx.Client(timeout=MODEL_WAIT)
 
 
 class _RuntimeCorpusService:

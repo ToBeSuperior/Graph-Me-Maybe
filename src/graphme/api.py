@@ -128,8 +128,9 @@ class GraphMe:
         self, target: str | Path, *, dump: bool = False, documents: Sequence[str] | None = None
     ) -> int:
         """The space as Neo4j loads it: a `neo4j-admin database import` folder, or with
-        `dump` one `.dump` file (needs Docker). `documents` limits it to those, linked only
-        among themselves. How many documents were written."""
+        `dump` one `.dump` file (the app's own `neo4j-admin`, fetched on first use).
+        `documents` limits it to those, linked only among themselves. How many documents were
+        written."""
         target = Path(target)
         rows = self.graph_space().corpus_rows(list(documents) if documents is not None else None)
         if not dump:

@@ -28,6 +28,21 @@ from graphme.domain.models import ExtractedDocument, GraphEdge, GraphNode, Sourc
 NODE_LABEL = "DocNode"
 CHUNK_LABEL = "Chunk"
 """A passage a question is searched by: beside the graph, never a `DocNode` of it."""
+SCHEMA = (
+    f"CREATE CONSTRAINT doc_node_id IF NOT EXISTS FOR (n:{NODE_LABEL}) REQUIRE n.id IS UNIQUE",
+    # A document is replaced, deleted and cut by its id; without these every one of those
+    # reads every node in the space.
+    f"CREATE INDEX doc_node_document IF NOT EXISTS FOR (n:{NODE_LABEL}) ON (n.document_id)",
+    f"CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:{CHUNK_LABEL}) REQUIRE c.id IS UNIQUE",
+    f"CREATE INDEX chunk_document IF NOT EXISTS FOR (c:{CHUNK_LABEL}) ON (c.document_id)",
+    # A document reached by its id -- a link followed, a likeness written -- found by it, not
+    # by reading every document.
+    "CREATE INDEX document_id IF NOT EXISTS FOR (d:Document) ON (d.id)",
+    # A file already in the space is known by its content before it is read again.
+    "CREATE INDEX document_content IF NOT EXISTS FOR (d:Document) ON (d.content_hash)",
+)
+"""The constraints and indexes every graph space has, live or exported; the vector and fulltext
+indexes are added beside them at the size and analyzer they were made with."""
 
 
 def node_label(node_type: str) -> str:
@@ -150,8 +165,7 @@ def records_cypher(records: dict[str, list[dict[str, Any]]], heading: str) -> st
     loaded twice leaves what loading it once did."""
     lines = [
         heading,
-        f"CREATE CONSTRAINT doc_node_id IF NOT EXISTS FOR (n:{NODE_LABEL}) "
-        "REQUIRE n.id IS UNIQUE;",
+        f"{SCHEMA[0]};",
     ]
     by_labels: dict[str, list[str]] = {}
     for node in records["nodes"]:

@@ -655,13 +655,8 @@ class ChatCompletionsVLMAdapter:
         wait: Callable[[float], None] = time.sleep,
     ) -> None:
         self._endpoint = Endpoint(wire, base_url, model, api_key)
-        self._model = model
         self._client = client
         self._wait = wait
-
-    @property
-    def model(self) -> str:
-        return self._model
 
     def group_page_figures(
         self,
@@ -1008,6 +1003,11 @@ class ChatCompletionsVLMAdapter:
                     ) from error
                 self._wait(TRANSIENT_RETRY_DELAYS[turned_away])
                 turned_away += 1
+                continue
+            except RuntimeError as error:  # an answer that is not JSON at all: malformed too
+                attempt += 1
+                if last:
+                    raise RuntimeError(failure) from error
                 continue
             attempt += 1
             try:

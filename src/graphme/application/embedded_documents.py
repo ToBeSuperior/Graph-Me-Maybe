@@ -92,6 +92,12 @@ class Embedded:
         return self.kept and PurePosixPath(self.name).suffix.lower() in SUFFIX_FORMATS
 
 
+def name_part(text: str, fallback: str) -> str:
+    """One part of a path, from words someone typed: nothing that leaves it or misleads the eye
+    (`_UNSAFE`), no leading or trailing dot or space, `fallback` when nothing is left."""
+    return " ".join(_UNSAFE.sub("", text).split()).strip(". ") or fallback
+
+
 def safe_name(name: str) -> str:
     """A file name fit to write on any system: its last path part, without what a file system
     or a reader's eye trips on, and no longer than NAME_BYTES."""

@@ -43,6 +43,7 @@ from graphme.adapters.rendering.visual_binding import placed_units
 from graphme.adapters.storage.graph_rag import MAX_TOP_K, GraphNotEmbedded, GraphRag
 from graphme.adapters.storage.local_neo4j import GraphStarting
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, modified_at
+from graphme.application.embedded_documents import name_part
 from graphme.application.ingest import documents_in
 from graphme.application.xlsx_visual_binding import CROP_ASSET_KEY, read_node_crop
 from graphme.config import Settings, load_settings
@@ -239,6 +240,8 @@ def create_app(
         try:
             documents, _ = demo.space(wait=SPACE_WAIT).document_map()
             space_ok = True
+        except GraphStarting as error:  # asked again, like the map, until it is up
+            raise HTTPException(503, str(error), headers={"Retry-After": "3"}) from error
         except Exception:  # noqa: BLE001 -- the list still shows what the server holds
             documents, space_ok = [], False
         items: list[dict[str, Any]] = []
@@ -372,7 +375,7 @@ def create_app(
             raise HTTPException(400, "each document needs one folder name")
         opened()
         archive = demo.files_zip(list(zip(doc, folder, strict=True)))
-        shown = "".join(c for c in name if c not in '/\\:*?"<>|').strip(". ")[:80] or "documents"
+        shown = name_part(name[:80], "documents")
         return FileResponse(archive, filename=f"{shown}.zip", media_type="application/zip",
                             background=BackgroundTask(shutil.rmtree, archive.parent, True))
 

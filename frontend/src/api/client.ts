@@ -20,7 +20,7 @@ export type Job = BuildState | ExportJob;
 
 export const api = createClient<paths>({ baseUrl: '' });
 
-/** An answer the server says to wait for (Docker starting, `Retry-After`) is asked again until
+/** An answer the server says to wait for (the graph DB starting, `Retry-After`) is asked again until
  * it comes; any other failure once. */
 export const isWaiting = (error: unknown) => error instanceof ApiError && error.waiting;
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Mapping, Sequence
 from io import BytesIO
 
 import numpy as np
@@ -9,32 +8,18 @@ from PIL import Image, UnidentifiedImageError
 
 from graphme.domain.enums import SemanticUnitKind
 from graphme.domain.models import (
-    DocumentReferenceRequest,
-    DocumentReferenceResult,
-    FigureGroupingResult,
-    HierarchyChoice,
-    HierarchyScopeRequest,
-    HierarchyScopeResult,
     JsonValue,
     NormalizedBBox,
     PageSegmentationRequest,
     PageSegmentationResult,
     SegmentedUnit,
-    UnitGroupingRequest,
-    UnitGroupingResult,
-    VisualCaptionRequest,
-    VisualCaptionResult,
 )
 
 
-class DeterministicVisionProvider:
+class PixelSegmenter:
     """Deterministic rendered-pixel segmentation without semantic inference."""
 
     _MAX_REGIONS = 80
-
-    @property
-    def model(self) -> str:
-        return "deterministic-local-pixel-segmentation-v1"
 
     def segment_page(
         self,
@@ -231,70 +216,3 @@ class DeterministicVisionProvider:
             structured_data=structured_data,
             confidence=0.75,
         )
-
-    def resolve_hierarchy_scope(
-        self,
-        *,
-        request: HierarchyScopeRequest,
-        image: bytes,
-        unit_images: Mapping[str, bytes] | None = None,
-        preceding: bytes | None = None,
-    ) -> HierarchyScopeResult:
-        """Offline mode requires explicit replay; it never invents hierarchy."""
-        del request, image, preceding
-        raise RuntimeError("offline hierarchy requires a replay result")
-
-    def find_references(
-        self,
-        *,
-        request: DocumentReferenceRequest,
-        image: bytes,
-        unit_images: Mapping[str, bytes] | None = None,
-    ) -> DocumentReferenceResult:
-        """Reading a page for what it names is a reading, and offline makes none."""
-        del request, image, unit_images
-        return DocumentReferenceResult(references=())
-
-    def group_page_figures(
-        self,
-        *,
-        request: HierarchyScopeRequest,
-        image: bytes,
-        unit_images: Mapping[str, bytes] | None = None,
-    ) -> FigureGroupingResult:
-        """Which units are one figure is read off the page, and offline reads no page."""
-        del request, image, unit_images
-        return FigureGroupingResult()
-
-    def group_page_units(
-        self,
-        *,
-        request: UnitGroupingRequest,
-        images: Sequence[bytes],
-    ) -> UnitGroupingResult:
-        """Which pieces are one unit is read off the page, and offline reads no page."""
-        del request, images
-        return UnitGroupingResult()
-
-    def caption_visuals(
-        self,
-        *,
-        request: VisualCaptionRequest,
-        image: bytes,
-        unit_images: Mapping[str, bytes] | None = None,
-    ) -> VisualCaptionResult:
-        """A caption is a description of a picture, and offline describes nothing."""
-        del request, image, unit_images
-        return VisualCaptionResult(captions=())
-
-    def choose_hierarchy_scope(
-        self,
-        *,
-        request: HierarchyScopeRequest,
-        image: bytes,
-        candidates: Sequence[HierarchyScopeResult],
-        unit_images: Mapping[str, bytes] | None = None,
-    ) -> HierarchyChoice:
-        """Choosing between readings is a judgement, and offline makes none."""
-        del request, image, candidates, unit_images
-        raise RuntimeError("offline hierarchy requires a replay result")

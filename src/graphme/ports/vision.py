@@ -16,9 +16,6 @@ from graphme.domain.models import (
 
 
 class VisionProvider(Protocol):
-    @property
-    def model(self) -> str: ...
-
     def resolve_hierarchy_scope(
         self,
         *,

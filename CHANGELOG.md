@@ -16,9 +16,24 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
   documentation is in English.
 - The contributor kit: a new `CONTRIBUTING.md` with a map of the code, issue forms for bugs and
   feature requests, an English pull request template, `CODE_OF_CONDUCT.md` and `SECURITY.md`.
+- Reading a workbook no longer draws a preview of every table and chart that nothing used, and
+  matplotlib is no longer a dependency.
+- `import.sh` and the app's own `.dump` build the `neo4j-admin import` command and the graph's
+  constraints and indexes from one place, so a new index reaches the export too.
 - Reopened documents are redrawn only when the code that draws, reads or binds them changes, or the
   browser does: a release changing only the server, the CLI or the wording no longer redraws every
   document once.
+
+### Fixed
+
+- A page whose model answer is not JSON at all is asked again, like one that misses a field,
+  instead of being left unread on the first try.
+- Manage › Library keeps asking while the graph DB starts, as the map does, instead of saying it
+  cannot reach the graph DB until the page is opened again.
+- When the graph DB fails to start, every page waiting for it is told; none starts it again inside
+  its own request.
+- A downloaded zip's folder and file names hold no control characters or marks that turn text
+  around on screen.
 
 ## [0.1.17] - 2026-10-19
 

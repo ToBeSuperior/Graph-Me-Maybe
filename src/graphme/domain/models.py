@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -300,7 +299,6 @@ class HierarchyScopeRequest(DomainModel):
     outline_omitted: dict[str, int] = Field(default_factory=dict)
     """How many of a carried unit's own subtrees were dropped to fit, by its id. Without
     it a section whose earlier items did not fit reads as a section that began here."""
-    evidence_ids: tuple[str, ...] = Field(default=(), max_length=500)
     image: HierarchyImageDescriptor
 
     @model_validator(mode="after")
@@ -575,7 +573,6 @@ class DocumentRecord(DomainModel):
     format: DocumentFormat
     source_path: Path
     size_bytes: int = Field(ge=0)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
 

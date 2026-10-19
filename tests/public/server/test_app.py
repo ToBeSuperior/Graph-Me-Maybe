@@ -100,3 +100,16 @@ def test_while_the_graph_db_starts_the_page_is_told_to_ask_again(demo: Demo) -> 
 
     assert said.status_code == 503 and said.headers.get("Retry-After")
     assert "그래프 DB를 준비하는 중" in said.json()["detail"]
+
+
+def test_while_the_graph_db_starts_the_library_is_asked_again_too(demo: Demo) -> None:
+    # The library said "cannot reach the graph DB" through a start and never asked again.
+    from graphme.adapters.storage.local_neo4j import GraphStarting
+
+    def starting(**_: object) -> None:
+        raise GraphStarting("the graph DB is starting")
+
+    demo.space = starting  # type: ignore[assignment,method-assign]
+    said = TestClient(create_app(demo), base_url="http://127.0.0.1:8765").get("/v1/documents")
+
+    assert said.status_code == 503 and said.headers.get("Retry-After")

@@ -34,7 +34,12 @@ from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
 from graphme.api import GraphMe
 from graphme.application.corpus_build import BuildReport, BuildStep, build_graph, content_hash
 from graphme.application.document_graph import DocumentGraphBuilder
-from graphme.application.embedded_documents import embedded_in, safe_name, shown_name
+from graphme.application.embedded_documents import (
+    embedded_in,
+    name_part,
+    safe_name,
+    shown_name,
+)
 from graphme.application.hierarchy_decisions import apply_hierarchy_decisions
 from graphme.application.ingest import SUFFIX_FORMATS, format_of
 from graphme.application.page_units import flow_pages
@@ -108,6 +113,7 @@ def _since(started: float) -> float:
 # is in the server's log, printed where it happened.
 IN_LOG = "(details in the server log)"
 SPACE_WAIT = 2.0
+STARTING = "the graph DB is starting -- this carries on by itself once it is ready."
 UNREAD = f"could not be read -- the file may be damaged or hold nothing readable {IN_LOG}"
 PAGE_UNREAD = f"this page could not be read {IN_LOG}"
 UNDRAWN = f"the pages could not be drawn {IN_LOG}"
@@ -130,8 +136,6 @@ class Session:
     """idle | rendering | grouping | reading | captioning | referencing | done | error"""
     error: str | None = None
     extracted: ExtractedDocument | None = None
-    bound: ExtractedDocument | None = None
-    """The graph as binding left it, before any outline: what every reading starts from."""
     store: LocalAssetStore | None = None
     pages: tuple[RenderedPage, ...] = ()
     page_of: dict[str, int] = field(default_factory=dict)
@@ -152,6 +156,9 @@ class Session:
     # Every replacement of the graph goes through it: pages are read at once and each
     # answer is applied to whatever the others left.
     lock: threading.Lock = field(default_factory=threading.Lock)
+    preparing: threading.Lock = field(default_factory=threading.Lock)
+    """Its pages are drawn by one request; another asking meanwhile waits for those pages
+    instead of drawing its own. Another document's pages are not held up by them."""
 
     def read(self) -> ExtractedDocument:
         """The graph as it stands; a step that needs one runs only after `_prepare` made it."""
@@ -279,9 +286,6 @@ class Demo:
         self.build_stop = threading.Event()
         """Set to stop the build under way -- a new one each build, so a cancel never outlives
         it: documents not yet read are passed over, what is in the graph stays searchable."""
-        # A document's pages are drawn by one request; another asking meanwhile waits for
-        # those pages instead of drawing its own.
-        self.preparing = threading.Lock()
         self.opening_space = threading.Lock()
         self._opener: threading.Thread | None = None
         self._starting_opener = threading.Lock()
@@ -304,7 +308,7 @@ class Demo:
                 return self.graph.graph_space()
         if self.graph._space is not None:
             return self.graph._space
-        # Pulling and starting Neo4j takes minutes, so a page's request never does it: it is done
+        # Fetching and starting Neo4j takes minutes, so a page's request never does it: it is done
         # behind, and the request told to wait (503, Retry-After) while it goes on.
         with self._starting_opener:  # the list and the map ask at once: one opening
             opener = self._opener
@@ -316,12 +320,13 @@ class Demo:
                 opener.start()
         opener.join(wait)
         if opener.is_alive():
-            raise GraphStarting(
-                "the graph DB is starting -- this carries on by itself once it is ready.")
+            raise GraphStarting(STARTING)
+        # Every request that joined a failed opening is told; a later one starts another.
         if (failed := self._open_failed) is not None:
-            self._open_failed = None
             raise failed
-        return self.graph.graph_space()
+        if (space := self.graph._space) is None:
+            raise GraphStarting(STARTING)
+        return space
 
     def _open_behind(self) -> None:
         try:
@@ -331,7 +336,7 @@ class Demo:
             self._open_failed = error
 
     def admin(self) -> LocalNeo4jAdmin:
-        """`neo4j-admin`, in a throwaway container of the configured Neo4j image."""
+        """`neo4j-admin` from the app's own Neo4j (`neo4j_admin.py`)."""
         return create_neo4j_admin(self.settings)
 
     def bundle_zip(self, docs: list[str] | None) -> Path:
@@ -357,7 +362,7 @@ class Demo:
             for document_id, folder in picked:
                 path = space.source_path(document_id)
                 # A folder name is one folder: no separator, no way out of the zip.
-                where = "".join(c for c in folder if c not in '/\\:*?"<>|').strip(". ") or "files"
+                where = name_part(folder, "files")
                 if not path:
                     missing.append(f"{document_id}\tnot in the graph")
                     continue
@@ -441,7 +446,7 @@ class Demo:
             # Being read already: its own reading draws the pages, which the page waits for.
             if session.state not in ("idle", "error", "cancelled"):
                 return doc
-        with self.preparing:
+        with session.preparing:
             if session.pages:
                 return doc
             with session.lock:
@@ -822,8 +827,8 @@ class Demo:
             # Give tables their crop and let each own the pictures it encloses.
             bound = builder.bind(builder.extract(session.source, session.format), session.source)
             page_cache.save_bound(session.workspace, bound, kept_under)
-        session.bound = session.extracted = bound
-        session.page_of = pages_of(session.bound, session.pages, session.format)
+        session.extracted = bound
+        session.page_of = pages_of(bound, session.pages, session.format)
         if kept is None:
             for page in session.pages:
                 (session.workspace / f"page-{page.index:02d}.png").write_bytes(page.png)

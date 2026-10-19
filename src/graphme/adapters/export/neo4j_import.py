@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from graphme.adapters.export.neo4j import CHUNK_LABEL, NODE_LABEL
+from graphme.adapters.export.neo4j import SCHEMA
 
 ARRAY_DELIMITER = ";"
 
@@ -167,8 +167,8 @@ def write_import_bundle(rows: CorpusRows, folder: Path) -> list[Path]:
                 _cell(properties.get(name), column) for name, column in typed[kind])])
 
     schema = folder / "schema.cypher"
-    # LF on every system: `import.sh` runs in a Linux container, where Windows' CRLF made
-    # `set -e` into `set -e\r` and every .dump made on Windows failed.
+    # LF on every system: these are read by POSIX tools, where Windows' CRLF made `set -e`
+    # into `set -e\r` and every .dump made on Windows failed.
     schema.write_text("\n".join(_schema(rows.indexes)) + "\n", encoding="utf-8", newline="\n")
     command = folder / "import.sh"
     command.write_text(
@@ -221,14 +221,7 @@ def _typed(columns: dict[str, ColumnKind]) -> list[tuple[str, str]]:
 
 
 def _schema(indexes: Sequence[dict[str, Any]]) -> list[str]:
-    lines = [
-        f"CREATE CONSTRAINT doc_node_id IF NOT EXISTS FOR (n:{NODE_LABEL}) REQUIRE n.id IS UNIQUE;",
-        f"CREATE INDEX doc_node_document IF NOT EXISTS FOR (n:{NODE_LABEL}) ON (n.document_id);",
-        f"CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:{CHUNK_LABEL}) REQUIRE c.id IS UNIQUE;",
-        f"CREATE INDEX chunk_document IF NOT EXISTS FOR (c:{CHUNK_LABEL}) ON (c.document_id);",
-        "CREATE INDEX document_id IF NOT EXISTS FOR (d:Document) ON (d.id);",
-        "CREATE INDEX document_content IF NOT EXISTS FOR (d:Document) ON (d.content_hash);",
-    ]
+    lines = [f"{statement};" for statement in SCHEMA]
     for index in indexes:
         target = f"FOR (c:{index['label']})"
         if index["kind"] == "VECTOR":
@@ -247,10 +240,26 @@ def _schema(indexes: Sequence[dict[str, Any]]) -> list[str]:
     return lines
 
 
-def _command(node_files: Sequence[Path], relationship_files: Sequence[Path]) -> str:
-    files = [f"  --nodes={path.name} \\" for path in node_files] + [
-        f"  --relationships={path.name} \\" for path in relationship_files
+def import_arguments(
+    node_files: Iterable[Path | str], relationship_files: Iterable[Path | str], report: str
+) -> list[str]:
+    """What `neo4j-admin database import full <database>` is given for this bundle -- by
+    `import.sh` and by the app's own `.dump` alike, so the two cannot drift."""
+    return [
+        "--overwrite-destination",
+        f"--array-delimiter={ARRAY_DELIMITER}",
+        "--multiline-fields=true",
+        f"--report-file={report}",
+        *(f"--nodes={path}" for path in node_files),
+        *(f"--relationships={path}" for path in relationship_files),
     ]
+
+
+def _command(node_files: Sequence[Path], relationship_files: Sequence[Path]) -> str:
+    # The bundle may be on a read-only folder; the report is not part of it.
+    arguments = import_arguments([path.name for path in node_files],
+                                 [path.name for path in relationship_files],
+                                 "${TMPDIR:-/tmp}/graphme-import.report")
     return "\n".join(
         [
             "#!/bin/sh",
@@ -258,13 +267,10 @@ def _command(node_files: Sequence[Path], relationship_files: Sequence[Path]) -> 
             "# Then start the database and run schema.cypher once:",
             "#   cypher-shell -u neo4j -p <password> -f schema.cypher",
             "# Usage: ./import.sh [database]   (default: neo4j)",
-            'set -e',
+            "set -e",
             'cd "$(dirname "$0")"',
-            'neo4j-admin database import full "${1:-neo4j}" --overwrite-destination \\',
-            f"  --array-delimiter='{ARRAY_DELIMITER}' --multiline-fields=true \\",
-            # The folder may be read-only where it is mounted; the report is not part of it.
-            '  --report-file="${TMPDIR:-/tmp}/graphme-import.report" \\',
-            *files,
+            'neo4j-admin database import full "${1:-neo4j}" \\',
+            *(f'  "{argument}" \\' for argument in arguments),
             "  --verbose",
             "",
         ]

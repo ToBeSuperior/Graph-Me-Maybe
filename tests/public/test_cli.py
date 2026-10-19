@@ -192,7 +192,6 @@ def test_xlsx_bundle_renders_with_the_configured_viewer_and_browser(
     from openpyxl import Workbook
 
     from graphme.adapters.rendering.browser_office import BrowserOfficeRenderer
-    from graphme.adapters.rendering.page_image import PageImageRenderer
     from graphme.cli import app
 
     built: dict[str, object] = {}
@@ -200,12 +199,12 @@ def test_xlsx_bundle_renders_with_the_configured_viewer_and_browser(
     def recording_init(self: object, **kwargs: object) -> None:
         built.update(kwargs)
 
-    def stop(self: PageImageRenderer, *args: object) -> None:
-        built["renderer"] = self._browser_renderer
+    def stop(self: BrowserOfficeRenderer, *args: object) -> None:
+        built["renderer"] = self
         raise RuntimeError("stop here")
 
     monkeypatch.setattr(BrowserOfficeRenderer, "__init__", recording_init)
-    monkeypatch.setattr(PageImageRenderer, "render_with_optional_mapping", stop)
+    monkeypatch.setattr(BrowserOfficeRenderer, "render_with_mapping", stop)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GRAPHME_VIEWER_DIR", str(tmp_path / "viewer"))
     monkeypatch.setenv("GRAPHME_CHROME_EXECUTABLE", "/opt/invented/chrome")

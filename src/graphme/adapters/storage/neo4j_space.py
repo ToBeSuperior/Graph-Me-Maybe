@@ -23,6 +23,7 @@ from neo4j.exceptions import AuthError
 from graphme.adapters.export.neo4j import (
     CHUNK_LABEL,
     NODE_LABEL,
+    SCHEMA,
     graph_records,
     relationship_record,
 )
@@ -74,21 +75,7 @@ class Neo4jGraphSpace:
         """Shared with what reads the space beside it (`graph_rag.py`), so one pool serves both."""
         recut = self._recut_text_index()
         for statement in (
-            f"CREATE CONSTRAINT doc_node_id IF NOT EXISTS FOR (n:{NODE_LABEL}) "
-            "REQUIRE n.id IS UNIQUE",
-            # A document is replaced, deleted and cut by its id; without these every one of
-            # those reads every node in the space.
-            f"CREATE INDEX doc_node_document IF NOT EXISTS FOR (n:{NODE_LABEL}) "
-            "ON (n.document_id)",
-            f"CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:{CHUNK_LABEL}) "
-            "REQUIRE c.id IS UNIQUE",
-            f"CREATE INDEX chunk_document IF NOT EXISTS FOR (c:{CHUNK_LABEL}) "
-            "ON (c.document_id)",
-            # A document reached by its id -- a link followed, a likeness written -- found by
-            # it, not by reading every document.
-            "CREATE INDEX document_id IF NOT EXISTS FOR (d:Document) ON (d.id)",
-            # A file already in the space is known by its content before it is read again.
-            "CREATE INDEX document_content IF NOT EXISTS FOR (d:Document) ON (d.content_hash)",
+            *SCHEMA,
             # Words a question names exactly -- a document number, a file name -- which a
             # vector alone does not rank: what Neo4j's hybrid retrievers search beside it.
             f"CREATE FULLTEXT INDEX {CHUNK_TEXT_INDEX} IF NOT EXISTS "

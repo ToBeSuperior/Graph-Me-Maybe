@@ -3,7 +3,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/ToBeSuperior/Graph-Me-Maybe/main/install.sh | sh
 #
-# Run again to update. Options, in the environment (or -y / --uninstall):
+# Run again to update. Options, in the environment (or --uninstall):
 #   GRAPHME_VERSION=v0.1.0      a release tag (default: the latest)
 #   GRAPHME_INSTALL_SOURCE=DIR  take the release files from a folder or URL instead
 #   GRAPHME_HOME=DIR            the app's folder (settings, graph data, web app, viewer)
@@ -19,7 +19,6 @@ TOOL="graph-me-maybe"
 say() { printf 'graph-me-maybe: %s\n' "$*"; }
 die() { printf 'graph-me-maybe: %s\n' "$*" >&2; exit 1; }
 
-# Questions go to the terminal: under `curl | sh` standard input is this script.
 app_home() {
   if [ -n "${GRAPHME_HOME:-}" ]; then printf '%s' "$GRAPHME_HOME"; return; fi
   case $(uname -s) in
@@ -194,7 +193,7 @@ install() {
 main() {
   for arg in "$@"; do
     case $arg in
-      -y|--yes) ;;  # nothing is asked any more
+      -y|--yes) ;;  # once asked; old command lines still pass it
       --uninstall) GRAPHME_UNINSTALL=1 ;;
       -h|--help) sed -n '2,13p' "$0" 2>/dev/null; exit 0 ;;
       *) die "unknown option: $arg" ;;

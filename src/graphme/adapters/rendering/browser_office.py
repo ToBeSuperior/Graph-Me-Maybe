@@ -189,11 +189,11 @@ class RenderedPage:
 @dataclass(frozen=True, slots=True)
 class BrowserRenderResult:
     pages: tuple[RenderedPage, ...]
-    mappings: tuple[SourcePageMappingLike, ...]
+    mappings: tuple[SourcePageMapping, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class SourcePageMappingLike:
+class SourcePageMapping:
     locator: SourceLocator
     page_start: int
     page_end: int
@@ -336,7 +336,7 @@ class BrowserOfficeRenderer:
     @staticmethod
     def _map(
         source: Path, document_format: DocumentFormat, pages: tuple[RenderedPage, ...]
-    ) -> list[SourcePageMappingLike]:
+    ) -> list[SourcePageMapping]:
         mappings = []
         for page in pages:
             locator = SourceLocator(
@@ -347,7 +347,7 @@ class BrowserOfficeRenderer:
                 slide=page.index if document_format is DocumentFormat.PPTX else None,
             )
             # One page per sheet or slide, so a span is always a single page.
-            mappings.append(SourcePageMappingLike(locator, page.index, page.index))
+            mappings.append(SourcePageMapping(locator, page.index, page.index))
         return mappings
 
 

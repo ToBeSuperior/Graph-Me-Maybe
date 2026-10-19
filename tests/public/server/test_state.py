@@ -408,3 +408,66 @@ def test_a_page_request_never_does_the_slow_opening_itself(demo, monkeypatch) ->
     assert time.monotonic() - started < 0.3
     assert opened.wait(5)  # the opening went on behind it
     assert demo.space(wait=0.05) is space
+
+
+def test_when_the_opening_fails_no_waiting_request_opens_the_graph_itself(
+    demo, monkeypatch
+) -> None:
+    # Two pages joined one opening; it failed, the first was told, and the second opened the
+    # graph inside its own request -- the slow start `wait` exists to keep out of a request.
+    import threading
+    import time
+
+    from graphme.adapters.storage.local_neo4j import GraphStarting
+
+    demo.graph._space = None
+    calls: list[str] = []
+
+    def failing() -> object:
+        calls.append(threading.current_thread().name)
+        time.sleep(0.2)
+        raise RuntimeError("the graph DB could not start")
+
+    monkeypatch.setattr(demo.graph, "graph_space", failing)
+    told: list[BaseException] = []
+
+    def page() -> None:
+        try:
+            demo.space(wait=2)
+        except (RuntimeError, GraphStarting) as error:
+            told.append(error)
+
+    pages = [threading.Thread(target=page) for _ in range(3)]
+    for p in pages:
+        p.start()
+    for p in pages:
+        p.join(5)
+
+    assert len(calls) == 1
+    assert len(told) == 3
+
+
+def test_one_documents_drawing_does_not_hold_up_anothers_pages(
+    demo: Demo, space: FakeSpace, tmp_path: Path
+) -> None:
+    # Every document's pages waited behind whichever one was being drawn, a page-cache hit too.
+    slow, quick = tmp_path / "long.pdf", tmp_path / "short.pdf"
+    for source in (slow, quick):
+        source.write_bytes(b"%PDF-1.4")
+    space.paths.update({"doc-slow": str(slow), "doc-quick": str(quick)})
+
+    def prepare(session: Any) -> None:
+        if session.source.name == "long.pdf":
+            time.sleep(1.0)
+        session.pages = ()
+
+    demo._prepare = prepare  # type: ignore[method-assign]
+    drawing = threading.Thread(target=demo.pages_of_document, args=("doc-slow",))
+    drawing.start()
+    time.sleep(0.1)
+    started = time.monotonic()
+    demo.pages_of_document("doc-quick")
+    took = time.monotonic() - started
+    drawing.join()
+
+    assert took < 0.5

@@ -39,7 +39,6 @@ uv run mypy src                        # strict = true
 
 uv run pytest tests/public -q          # what a clone has; `uv run pytest -q` adds the local suite
 uv run pytest tests/path/test_x.py::test_name -q     # one test
-uv run pytest -m offline               # markers: offline, e2e
 ```
 
 The web app (`frontend/`: React, Vite, Tailwind, Radix, TanStack Query, vis-network), served

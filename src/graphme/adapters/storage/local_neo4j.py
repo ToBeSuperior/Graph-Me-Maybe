@@ -266,9 +266,7 @@ def start(
     log = (data / "logs" / "console.log").open("ab")
     options: dict[str, Any] = {"env": home.environment(data / "conf"), "stdout": log,
                                "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL}
-    if platform == "win32":
-        options["creationflags"] = processes.CREATE_NO_WINDOW
-    else:
+    if platform != "win32":  # Windows' windowless start is `processes.popen`'s
         options["start_new_session"] = True  # one group: the launcher and the server it starts
     try:
         child = popen([*home.command("neo4j", platform), "console"], **options)
@@ -292,6 +290,21 @@ def stop(child: subprocess.Popen[bytes], *, platform: str = sys.platform) -> Non
         child.wait(timeout=60)  # the launcher ends once its server has
     except (OSError, subprocess.TimeoutExpired):
         pass
+
+
+def came_up(
+    port: int, child: subprocess.Popen[bytes], *, seconds: int = WAIT_SECONDS,
+    answers: Callable[[int], bool] = _answers, sleep: Callable[[float], None] = time.sleep,
+) -> bool:
+    """Whether the Neo4j started as `child` answers on `port` within `seconds`; not once it
+    has exited."""
+    for _ in range(seconds):
+        if answers(port):
+            return True
+        if child.poll() is not None:
+            return False
+        sleep(1)
+    return False
 
 
 def stop_started() -> None:
@@ -326,12 +339,8 @@ def ensure_local_neo4j(
         if not _started:
             atexit.register(stop_started)
         _started.append((home, child))
-        for _ in range(WAIT_SECONDS):
-            if answers(port):
-                return f"bolt://127.0.0.1:{port}"
-            if child.poll() is not None:
-                break
-            sleep(1)
+        if came_up(port, child, answers=answers, sleep=sleep):
+            return f"bolt://127.0.0.1:{port}"
         said = (home.data / "logs" / "console.log")
         tail = said.read_text(encoding="utf-8", errors="replace")[-600:] if said.is_file() else ""
         raise RuntimeError(f"the graph DB (Neo4j) did not start: {tail.strip()}")

@@ -11,6 +11,7 @@ for all three.
 """
 from __future__ import annotations
 
+import functools
 import io
 from collections.abc import Sequence
 from pathlib import Path
@@ -73,7 +74,7 @@ class RenderedVisualBinder:
         home = home_pages_of(extracted, pages, fmt)
         placers: dict[int, UnitPlacer] = {}
         page_of: dict[str, int] = {}
-        images: dict[int, Image.Image] = {}
+        png_of = {page.index: page.png for page in pages}
         for page in pages:
             placed = page_members(extracted, page, fmt, drawings, home)
             if placed is None:
@@ -82,12 +83,17 @@ class RenderedVisualBinder:
             placers[page.index] = placer
             for node in members:
                 page_of.setdefault(node.id, page.index)
-            with Image.open(io.BytesIO(page.png)) as opened:
-                images[page.index] = opened.convert("RGB")
+
+        # One page decoded at a time: every page of a long document at once was hundreds of
+        # megabytes, held for figures on a few of them.
+        @functools.lru_cache(maxsize=1)
+        def decoded(index: int) -> Image.Image:
+            with Image.open(io.BytesIO(png_of[index])) as opened:
+                return opened.convert("RGB")
 
         def crop(index: int, box: tuple[int, int, int, int]) -> bytes:
             buffer = io.BytesIO()
-            images[index].crop(box).save(buffer, format="PNG")
+            decoded(index).crop(box).save(buffer, format="PNG")
             return buffer.getvalue()
 
         return widen_figures(

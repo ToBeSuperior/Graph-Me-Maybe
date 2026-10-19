@@ -18,13 +18,12 @@ import shutil
 import socket
 import subprocess
 import tempfile
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from graphme import processes
-from graphme.adapters.export.neo4j_import import ARRAY_DELIMITER
+from graphme.adapters.export.neo4j_import import import_arguments
 from graphme.adapters.storage import local_neo4j
 from graphme.adapters.storage.local_neo4j import Neo4jHome
 
@@ -70,12 +69,10 @@ class LocalNeo4jAdmin:
         with tempfile.TemporaryDirectory(prefix="graphme-dump-") as folder:
             data = Path(folder)
             files = sorted(bundle.glob("*.csv"))
-            self._admin(data, "database", "import", "full", DATABASE, "--overwrite-destination",
-                        f"--array-delimiter={ARRAY_DELIMITER}", "--multiline-fields=true",
-                        f"--report-file={data / 'import.report'}",
-                        *(f"--nodes={f}" for f in files if f.name.startswith("nodes_")),
-                        *(f"--relationships={f}" for f in files
-                          if f.name.startswith("relationships_")))
+            self._admin(data, "database", "import", "full", DATABASE, *import_arguments(
+                [f for f in files if f.name.startswith("nodes_")],
+                [f for f in files if f.name.startswith("relationships_")],
+                str(data / "import.report")))
             self._index(self._home, data, bundle / "schema.cypher")
             (data / "out").mkdir()
             self._admin(data, "database", "dump", DATABASE, f"--to-path={data / 'out'}")
@@ -99,12 +96,8 @@ class LocalNeo4jAdmin:
         port = _free_port()
         child = local_neo4j.start(home, data, port, SMALL)
         try:
-            for _ in range(local_neo4j.WAIT_SECONDS):
-                if local_neo4j._answers(port):
-                    break
-                if child.poll() is not None:
-                    raise RuntimeError("the scratch Neo4j did not start")
-                time.sleep(1)
+            if not local_neo4j.came_up(port, child):
+                raise RuntimeError("the scratch Neo4j did not start")
             _indexed(port, schema)
         finally:
             local_neo4j.stop(child)

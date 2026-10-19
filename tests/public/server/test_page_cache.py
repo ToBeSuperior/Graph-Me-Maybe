@@ -84,10 +84,10 @@ def test_after_a_restart_its_graph_as_bound_is_kept_too(tmp_path: Path) -> None:
     source = _pdf(tmp_path / "invented.pdf", "An invented page")
     first, second = [], []
     demo, _, _ = _opened(tmp_path / "server", source, first)
-    bound = next(iter(demo.sessions.values())).bound
+    bound = next(iter(demo.sessions.values())).extracted
     again, _, _ = _opened(tmp_path / "server", source, second)
     assert (len(first), len(second)) == (1, 0)
-    assert next(iter(again.sessions.values())).bound == bound
+    assert next(iter(again.sessions.values())).extracted == bound
 
 
 def test_a_kept_graph_whose_pictures_are_gone_is_built_again(tmp_path: Path) -> None:

@@ -22,13 +22,9 @@ from graphme.adapters.extractors.xlsx_drawings import (
     DrawingObject,
     parse_xlsx_drawings,
 )
-from graphme.adapters.offline import DeterministicVisionProvider
-from graphme.adapters.rendering.browser_office import BrowserOfficeRenderer
-from graphme.adapters.rendering.page_image import (
-    PageImage,
-    PageImageRenderer,
-    SourcePageMapping,
-)
+from graphme.adapters.offline import PixelSegmenter
+from graphme.adapters.rendering.browser_office import BrowserOfficeRenderer, SourcePageMapping
+from graphme.adapters.rendering.page_image import PageImage, store_pages
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.domain.enums import DocumentFormat, EdgeType
 from graphme.domain.ids import canonical_json, sha256_file
@@ -121,12 +117,11 @@ class XlsxBundleOrchestrator:
         sheet_areas = self._prepare_copy(prepared_source)
 
         asset_store = LocalAssetStore(asset_directory)
-        renderer = PageImageRenderer(
-            asset_store=asset_store,
-            browser_renderer=self._browser_renderer,
-        )
-        render_result, mapping_error = renderer.render_with_optional_mapping(
-            prepared_source, DocumentFormat.XLSX
+        if self._browser_renderer is None:
+            raise RuntimeError("a browser renderer is required to render a workbook")
+        render_result = store_pages(
+            self._browser_renderer.render_with_mapping(prepared_source, DocumentFormat.XLSX),
+            asset_store,
         )
         pages = render_result.pages
         mappings = render_result.mappings
@@ -135,11 +130,11 @@ class XlsxBundleOrchestrator:
             for mapping in mappings
             if mapping.locator.sheet is not None
         }
-        sheets = self._sheet_statuses(sheet_areas, mapping_by_sheet, mapping_error)
+        sheets = self._sheet_statuses(sheet_areas, mapping_by_sheet)
         mapping_status = self._whole_status(sheets)
 
         page_paths = self._materialize_pages(pages, asset_store, page_directory)
-        segmenter = DeterministicVisionProvider()
+        segmenter = PixelSegmenter()
         segmentation: dict[int, list[dict[str, object]]] = {}
         tiles: dict[int, list[dict[str, object]]] = {}
         overlays: dict[int, str] = {}
@@ -184,7 +179,6 @@ class XlsxBundleOrchestrator:
             },
             "mapping": {
                 "status": mapping_status,
-                "error": mapping_error,
                 "entries": [self._mapping_data(mapping) for mapping in mappings],
             },
             "pages": [
@@ -488,7 +482,6 @@ class XlsxBundleOrchestrator:
     def _sheet_statuses(
         areas: dict[str, str | None],
         mapping_by_sheet: dict[str, SourcePageMapping],
-        mapping_error: str | None,
     ) -> tuple[PreparedSheet, ...]:
         result = []
         for name, area in areas.items():
@@ -498,7 +491,7 @@ class XlsxBundleOrchestrator:
                 detail = "blank worksheet excluded from rendering"
             elif mapping is None:
                 status = "unmapped"
-                detail = mapping_error or "no worksheet page mapping"
+                detail = "no worksheet page mapping"
             else:
                 status = "mapped"
                 detail = None

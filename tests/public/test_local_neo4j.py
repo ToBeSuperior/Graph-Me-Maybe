@@ -143,9 +143,7 @@ def test_it_starts_as_a_child_with_no_window_and_its_own_settings(
     assert args[1:] == ["console"]
     assert options["env"]["NEO4J_CONF"] == str(home.data / "conf")
     assert options["env"]["JAVA_HOME"] == str(home.java_home())
-    if platform == "win32":
-        assert options["creationflags"] == 0x08000000  # no console window
-    else:
+    if platform != "win32":
         assert options["start_new_session"] is True  # stopped as one group
     assert json.loads((home.data / "run" / "graphme.json").read_text()) == {
         "pid": 4242, "port": 7688}

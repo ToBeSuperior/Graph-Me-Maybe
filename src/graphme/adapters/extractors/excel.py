@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -86,19 +85,6 @@ TABLE_FOOT_ROWS = 20
 and its foot, where a log is summed up; what stands between is said, not kept. A checklist
 or an item list of a few hundred rows is read whole -- every row of it is content."""
 
-
-
-HANGUL_FONT = Path(__file__).resolve().parents[2] / "fonts" / "Pretendard-Regular.otf"
-
-
-@functools.cache
-def _use_hangul_font() -> None:
-    """Previews are drawn in Pretendard, shipped with the package: matplotlib's own font has
-    no Hangul, and every Korean label came out as boxes -- in the picture the model sees too."""
-    from matplotlib import font_manager, rcParams
-
-    font_manager.fontManager.addfont(str(HANGUL_FONT))
-    rcParams["font.family"] = ["Pretendard", "DejaVu Sans"]
 
 
 class _Reader(ExcelReader):  # type: ignore[misc]
@@ -424,10 +410,8 @@ class ExcelExtractor:
                 sheet=sheet,
                 value_sheet=value_sheet,
                 source=source,
-                content_hash=content_hash,
                 document_id=document_id,
                 nodes=nodes,
-                evidence=evidence,
                 add_evidence=add_evidence,
                 table_id=table_id,
                 label=label,
@@ -543,8 +527,6 @@ class ExcelExtractor:
             sheet_id=sheet_id,
             nodes=nodes,
             edges=edges,
-            evidence=evidence,
-            warnings=warnings,
             node_id=node_id,
             add_evidence=add_evidence,
             chart_sources=chart_sources,
@@ -557,10 +539,8 @@ class ExcelExtractor:
         sheet: Worksheet,
         value_sheet: Worksheet,
         source: Path,
-        content_hash: str,
         document_id: str,
         nodes: list[GraphNode],
-        evidence: list[EvidenceRecord],
         add_evidence: Callable[[str, str, EvidenceKind, str, SourceLocator], None],
         table_id: str,
         label: str,
@@ -593,17 +573,6 @@ class ExcelExtractor:
             EvidenceKind.SOURCE_VALUES,
             text,
             locator,
-        )
-        self._emit_table_preview(
-            table_id=table_id,
-            label=label,
-            sheet=value_sheet,
-            fallback=sheet,
-            ref=ref,
-            content_hash=content_hash,
-            document_id=document_id,
-            locator=locator,
-            evidence=evidence,
         )
         min_col, min_row, max_col, max_row = range_boundaries(ref)
         return _TableRange(
@@ -962,8 +931,6 @@ class ExcelExtractor:
         sheet_id: str,
         nodes: list[GraphNode],
         edges: list[GraphEdge],
-        evidence: list[EvidenceRecord],
-        warnings: list[WarningRecord],
         node_id: Callable[[str, dict[str, str]], str],
         add_evidence: Callable[[str, str, EvidenceKind, str, SourceLocator], None],
         chart_sources: list[tuple[str, list[str]]],
@@ -1066,275 +1033,7 @@ class ExcelExtractor:
                 f"chart {index} on worksheet {sheet.title}",
                 locator,
             )
-            if chart_family not in self._RENDERABLE_FAMILIES:
-                warnings.append(
-                    WarningRecord(
-                        id=stable_id(
-                            content_hash,
-                            f"warn:unsupported_chart:{sheet.title}:{index}",
-                        ),
-                        document_id=document_id,
-                        code="unsupported_chart_family",
-                        message=(
-                            f"preserved unsupported {chart_family} chart metadata "
-                            f"without a rendered preview: {label}"
-                        ),
-                        severity=Severity.WARNING,
-                        locator=locator,
-                    )
-                )
-            self._emit_chart_preview(
-                chart_id=chart_id,
-                label=label,
-                chart_family=chart_family,
-                orientation=orientation,
-                series=series_metadata,
-                axes=axes,
-                content_hash=content_hash,
-                document_id=document_id,
-                locator=locator,
-                evidence=evidence,
-                warnings=warnings,
-            )
             edges.append(self._contains(content_hash, document_id, sheet_id, chart_id))
-
-    def _emit_table_preview(
-        self,
-        *,
-        table_id: str,
-        label: str,
-        sheet: Worksheet,
-        fallback: Worksheet,
-        ref: str,
-        content_hash: str,
-        document_id: str,
-        locator: SourceLocator,
-        evidence: list[EvidenceRecord],
-    ) -> None:
-        if self._asset_store is None:
-            return
-        png, dimensions = self._render_table_png(
-            label=label, sheet=sheet, fallback=fallback, ref=ref
-        )
-        asset_hash = self._asset_store.put(png, suffix=".png")
-        evidence.append(
-            EvidenceRecord(
-                id=stable_id(content_hash, f"preview:{table_id}"),
-                document_id=document_id,
-                node_id=table_id,
-                kind=EvidenceKind.RENDERED_PREVIEW,
-                locator=locator,
-                asset_hash=asset_hash,
-                mime_type="image/png",
-                data=dimensions,
-            )
-        )
-
-    # Preview-only display caps. Source text and SOURCE_VALUES keep a long table's head
-    # and foot (`TABLE_HEAD_ROWS`, `TABLE_FOOT_ROWS`).
-    _PREVIEW_MAX_ROWS = 20
-    _PREVIEW_MAX_COLUMNS = 10
-
-    def _render_table_png(
-        self, *, label: str, sheet: Worksheet, fallback: Worksheet, ref: str
-    ) -> tuple[bytes, dict[str, int]]:
-        import io
-
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
-        _use_hangul_font()
-
-        min_col, min_row, max_col, max_row = range_boundaries(ref)
-        rows = [
-            [
-                str(value)
-                if (
-                    value := cell.value
-                    if cell.value is not None
-                    else fallback.cell(row=cell.row, column=cell.column).value
-                )
-                is not None
-                else ""
-                for cell in row
-            ]
-            for row in sheet.iter_rows(
-                min_row=min_row,
-                max_row=min(max_row, min_row + self._PREVIEW_MAX_ROWS - 1),
-                min_col=min_col,
-                max_col=min(max_col, min_col + self._PREVIEW_MAX_COLUMNS - 1),
-            )
-        ]
-        dimensions = {
-            "displayed_rows": len(rows),
-            "displayed_columns": len(rows[0]) if rows else 0,
-        }
-        fig, ax = plt.subplots(figsize=(6.0, 4.0), dpi=100)
-        try:
-            ax.axis("off")
-            ax.set_title(label)
-            ax.table(cellText=rows, loc="center", cellLoc="left")
-            buffer = io.BytesIO()
-            fig.savefig(
-                buffer,
-                format="png",
-                metadata={"Software": None},
-            )
-            return buffer.getvalue(), dimensions
-        finally:
-            plt.close(fig)
-
-    # Chart families this cycle can re-render deterministically. Others keep
-    # their metadata/warnings but receive no rendered preview.
-    _RENDERABLE_FAMILIES = frozenset({"area", "bar", "line", "pie", "scatter"})
-
-    def _emit_chart_preview(
-        self,
-        *,
-        chart_id: str,
-        label: str,
-        chart_family: str,
-        orientation: str | None,
-        series: list[dict[str, Any]],
-        axes: dict[str, dict[str, str]],
-        content_hash: str,
-        document_id: str,
-        locator: SourceLocator,
-        evidence: list[EvidenceRecord],
-        warnings: list[WarningRecord],
-    ) -> None:
-        if self._asset_store is None:
-            return
-        if chart_family not in self._RENDERABLE_FAMILIES:
-            return
-        try:
-            png = self._render_chart_png(
-                label=label,
-                chart_family=chart_family,
-                orientation=orientation,
-                series=series,
-                axes=axes,
-            )
-        except ValueError:
-            png = None
-        if png is None:
-            warnings.append(
-                WarningRecord(
-                    id=stable_id(
-                        content_hash,
-                        f"warn:chart_preview_unavailable:{chart_id}",
-                    ),
-                    document_id=document_id,
-                    code="chart_preview_unavailable",
-                    message=(
-                        f"preserved supported {chart_family} chart metadata "
-                        f"without a rendered preview: {label}"
-                    ),
-                    severity=Severity.WARNING,
-                    locator=locator,
-                )
-            )
-            return
-        asset_hash = self._asset_store.put(png, suffix=".png")
-        evidence.append(
-            EvidenceRecord(
-                id=stable_id(content_hash, f"preview:{chart_id}"),
-                document_id=document_id,
-                node_id=chart_id,
-                kind=EvidenceKind.RENDERED_PREVIEW,
-                locator=locator,
-                asset_hash=asset_hash,
-                mime_type="image/png",
-            )
-        )
-
-    def _render_chart_png(
-        self,
-        *,
-        label: str,
-        chart_family: str,
-        orientation: str | None,
-        series: list[dict[str, Any]],
-        axes: dict[str, dict[str, str]],
-    ) -> bytes | None:
-        import io
-
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
-        _use_hangul_font()
-
-        numeric_series = [
-            s for s in series if any(isinstance(v, (int, float)) for v in s["values"])
-        ]
-        if not numeric_series:
-            return None
-
-        categories = [str(c) for c in numeric_series[0]["categories"]]
-        positions = list(range(len(categories)))
-        fig, ax = plt.subplots(figsize=(6.0, 4.0), dpi=100)
-        try:
-            width = 0.8 / max(len(numeric_series), 1)
-            if chart_family == "pie":
-                values = [float(v) for v in numeric_series[0]["values"]]
-                ax.pie(values, labels=categories)
-            else:
-                for offset, s in enumerate(numeric_series):
-                    values = [
-                        float(v) if isinstance(v, (int, float)) else float("nan")
-                        for v in s["values"]
-                    ]
-                    shifted = [p + offset * width for p in positions]
-                    if chart_family == "scatter":
-                        x_values = [float(v) for v in s["categories"]]
-                        ax.scatter(x_values, values, label=str(s["title"]))
-                    elif chart_family == "line":
-                        ax.plot(range(len(values)), values, label=str(s["title"]))
-                    elif chart_family == "area":
-                        ax.fill_between(
-                            positions,
-                            values,
-                            label=str(s["title"]),
-                            alpha=0.6,
-                        )
-                    elif orientation == "bar":
-                        ax.barh(
-                            shifted,
-                            values,
-                            height=width,
-                            label=str(s["title"]),
-                        )
-                    else:
-                        ax.bar(
-                            shifted,
-                            values,
-                            width=width,
-                            label=str(s["title"]),
-                        )
-                if chart_family != "scatter":
-                    center = [p + width * (len(numeric_series) - 1) / 2 for p in positions]
-                    if orientation == "bar":
-                        ax.set_yticks(center)
-                        ax.set_yticklabels(categories)
-                    else:
-                        ticks = positions if chart_family in {"area", "line"} else center
-                        ax.set_xticks(ticks)
-                        ax.set_xticklabels(categories)
-            ax.set_title(label)
-            if "x" in axes:
-                ax.set_xlabel(axes["x"]["title"])
-            if "y" in axes:
-                ax.set_ylabel(axes["y"]["title"])
-            buffer = io.BytesIO()
-            # Strip environment metadata for repeatable bytes in the pinned setup.
-            fig.savefig(buffer, format="png", metadata={"Software": None})
-        finally:
-            plt.close(fig)
-        return buffer.getvalue()
 
     def _extract_pivots(
         self,

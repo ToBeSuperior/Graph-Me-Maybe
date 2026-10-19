@@ -20,7 +20,7 @@ describe('the newest job in each slot', () => {
 
 describe('a server that says to wait', () => {
   it('is asked again until it answers; any other failure once', async () => {
-    const waiting = await call(Promise.resolve({ error: { detail: 'Docker를 켜는 중' },
+    const waiting = await call(Promise.resolve({ error: { detail: 'the graph DB is starting' },
       response: new Response(null, { status: 503, headers: { 'Retry-After': '3' } }) })).catch((e) => e);
     const down = await call(Promise.resolve({ error: { detail: 'no' }, response: new Response(null, { status: 503 }) }))
       .catch((e) => e);

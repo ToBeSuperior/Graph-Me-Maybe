@@ -24,7 +24,7 @@ const MapPage = lazy(() => import('./features/manage/MapPage').then((m) => ({ de
 const later = (page: ReactNode) => <Suspense fallback={<div className="skeleton m-6 h-96" />}>{page}</Suspense>;
 
 // Answers are kept until the graph changes (lib/queries.ts says when); a failure is retried
-// once, not three times over a minute -- unless the server says to wait (Docker starting).
+// once, not three times over a minute -- unless the server says to wait (the graph DB starting).
 const client = new QueryClient({ defaultOptions: { queries: queryDefaults } });
 
 // The app's own window (WebView2, WebKit) has no reload of its own: F5 and Ctrl/Cmd+R do it.
