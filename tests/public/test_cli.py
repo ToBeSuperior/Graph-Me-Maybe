@@ -235,7 +235,7 @@ def test_a_command_that_cannot_run_says_why_in_one_line(
     assert stopped.value.code == 1
     said = capsys.readouterr().err
     assert said.strip().splitlines() == [
-        "오류: OPENAI_API_KEY is required (GRAPHME_PROVIDER=openai)"]
+        "error: OPENAI_API_KEY is required (GRAPHME_PROVIDER=openai)"]
 
 
 def test_build_graph_embeds_what_it_read_so_questions_work_at_once(tmp_path: Path) -> None:

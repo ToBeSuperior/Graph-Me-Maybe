@@ -72,7 +72,7 @@ function Ensure-Runtime([string]$Python) {
     # PyMuPDF, numpy and matplotlib are built against the Visual C++ runtime, which a fresh
     # Windows may not have: without it nothing of the app starts, and the first word of it was
     # a warning that the graph DB was not fetched. So the app is opened once, here, first.
-    $probe = { & { $ErrorActionPreference = 'Continue'; & $Python -c 'import graphme, fitz' 2>&1 } | Out-String }
+    $probe = { & { $ErrorActionPreference = 'Continue'; & $Python -c 'import graphme, fitz' 2>&1 } | ForEach-Object { "$_" } | Out-String }
     $said = & $probe
     if ($LASTEXITCODE -eq 0) { return }
     $missing = @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll') |

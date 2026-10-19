@@ -60,7 +60,7 @@ def test_anything_that_drew_it_changed_and_it_is_drawn_again(
 ) -> None:
     source = _pdf(tmp_path / "invented.pdf", "An invented page")
     _opened(tmp_path / "server", source)
-    monkeypatch.setattr(page_cache, "identity", lambda viewer: "other code")
+    monkeypatch.setattr(page_cache, "identity", lambda *made_by: "other code")
     _, again, _ = _opened(tmp_path / "server", source)
     assert again.drawn == 1
     _pdf(source, "The same name, other words")
@@ -98,3 +98,24 @@ def test_a_kept_graph_whose_pictures_are_gone_is_built_again(tmp_path: Path) -> 
     text = f'{{"nodes": [{{"metadata": {{"crop_asset_hash": "{held}"}}}}], "asset_hash": "{held}"}}'
     assert page_cache.assets_present(text, store)
     assert not page_cache.assets_present(text.replace(held, "f" * 64), store)
+
+
+def test_only_the_code_that_draws_reads_and_binds_is_in_the_key() -> None:
+    # Every release redrew every document: the key held the whole package, the server and
+    # the CLI with it, though only drawing, reading and binding make what is kept.
+    files = {str(path).replace("\\", "/") for path in page_cache.code_files()}
+    assert any(f.endswith("adapters/rendering/browser_office.py") for f in files)
+    assert any(f.endswith("adapters/extractors/excel.py") for f in files)
+    assert any(f.endswith("application/xlsx_visual_binding.py") for f in files)
+    assert not any(f.endswith(("server/app.py", "cli.py", "launcher.py")) for f in files)
+
+
+def test_another_browser_is_another_key(tmp_path: Path) -> None:
+    # A browser updated under the same path draws text where the old one did not.
+    chrome = tmp_path / "Chrome" / "chrome.exe"
+    chrome.parent.mkdir()
+    chrome.write_bytes(b"one")
+    first = page_cache.key("content", tmp_path, str(chrome))
+    (chrome.parent / "149.0.1").mkdir()  # Windows' Chrome keeps each version in a folder
+    page_cache.identity.cache_clear()  # asked once a run: this is the next start
+    assert page_cache.key("content", tmp_path, str(chrome)) != first

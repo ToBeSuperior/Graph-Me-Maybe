@@ -14,10 +14,10 @@ const read = (): Lang => {
     const saved = localStorage.getItem('lang');
     if (saved === 'ko' || saved === 'en') return saved;
   } catch { /* storage off */ }
-  return navigator.language.startsWith('ko') ? 'ko' : 'en';
+  return 'en'; // English unless Korean is chosen, whatever the browser's language
 };
 
-const LangContext = createContext<{ lang: Lang; setLang: (l: Lang) => void }>({ lang: 'ko', setLang: () => {} });
+const LangContext = createContext<{ lang: Lang; setLang: (l: Lang) => void }>({ lang: 'en', setLang: () => {} });
 
 export function LangProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(read);

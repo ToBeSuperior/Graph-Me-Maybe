@@ -1,51 +1,124 @@
-# 기여하기
+# Contributing
 
-이 저장소를 고치려는 분을 위한 안내입니다. 키·Neo4j·문서 없이 검사까지 마칠 수 있습니다.
+Thank you for helping. Bug reports, fixes, documentation and new features are all welcome. This guide
+gets you from a fresh clone to a pull request; everything in it runs without an API key, a Neo4j or a
+real document.
 
-## 개발 환경
+- [Ways to contribute](#ways-to-contribute)
+- [Set up](#set-up)
+- [Find your way around](#find-your-way-around)
+- [Tests](#tests)
+- [Rules that keep the project safe](#rules-that-keep-the-project-safe)
+- [Style](#style)
+- [Pull requests](#pull-requests)
 
-[README의 0단계](README.md#0-준비물-설치)를 따릅니다. 검사만 돌리려면 Python 3.11과
-[uv](https://docs.astral.sh/uv/)면 충분합니다. Node·Chrome·뷰어 번들(DOCX·PPTX·XLSX 렌더링),
-Neo4j는 그 기능을 고칠 때 앱 폴더에 받아 씁니다(Docker는 쓰지 않음). 없으면 해당 테스트는 이유를 말하고 건너뜁니다.
+## Ways to contribute
+
+- **Report a bug** with the [bug form](../../issues/new?template=bug_report.yml). Reproduce it with an
+  *invented* document if you can — never attach a real one.
+- **Suggest a feature** with the [feature form](../../issues/new?template=feature_request.yml).
+- **Improve the docs.** Anything unclear in the README or `docs/` is a bug too.
+- **Fix something.** Issues labelled `good first issue` are a good start; comment on one before you
+  begin, so two people do not work on the same thing.
+
+Security problems go to [SECURITY.md](SECURITY.md), not to public issues. Everyone taking part follows
+the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Set up
+
+You need Python 3.11+ and [uv](https://docs.astral.sh/uv/). That is enough for the checks below.
 
 ```bash
+git clone https://github.com/ToBeSuperior/Graph-Me-Maybe.git
+cd Graph-Me-Maybe
 uv sync --extra dev
-uv run pytest tests/public
-uv tool install pre-commit && pre-commit install   # 커밋할 때 ruff check가 돕니다
+uv run pytest tests/public                          # should pass before you change anything
+uv tool install pre-commit && pre-commit install    # runs ruff on every commit
 ```
 
-## 검사
+Working on the web app needs Node.js 24+; drawing DOCX, PPTX and XLSX pages needs Chrome and a
+one-time viewer build; reading real documents needs a model key. The README's
+[Develop from source](README.md#-develop-from-source) section covers all of it. The graph database
+needs nothing: the app fetches and runs its own Neo4j.
 
-PR을 열면 CI(`.github/workflows/ci.yml`)가 같은 세 가지를 돕니다.
+## Find your way around
+
+The code is ports and adapters: `domain/` holds the data model, `ports/` declares interfaces,
+`adapters/` implements them, `application/` orchestrates, and `runtime.py` is the only place that wires
+concrete adapters together. Both the CLI and the server go through it.
+
+| To change… | Look in |
+|---|---|
+| how a format is read (text, tables, pictures, embedded files) | `src/graphme/adapters/extractors/` (`pdf.py`, `docx.py`, `powerpoint.py`, `excel.py`) |
+| how pages are drawn | `src/graphme/adapters/rendering/` (`browser_office.py`, `pdf_pages.py`) and `viewer/` |
+| what the model is asked, page by page | `src/graphme/adapters/vision/` and `src/graphme/application/` (`page_hierarchy_scope.py`, `unit_grouping.py`) |
+| the order of the whole pipeline | `src/graphme/application/document_graph.py` |
+| links between documents | `src/graphme/application/corpus_links.py`, `document_references.py` |
+| passages, search and answers | `src/graphme/application/graph_chunks.py`, `src/graphme/adapters/storage/graph_rag.py` |
+| the graph database and exports | `src/graphme/adapters/storage/neo4j_space.py`, `local_neo4j.py`, `src/graphme/adapters/export/` |
+| model providers | `src/graphme/model_endpoint.py`, `src/graphme/adapters/chat.py` |
+| the HTTP API | `src/graphme/server/` (shapes in `models.py`) |
+| the CLI and the Python API | `src/graphme/cli.py`, `src/graphme/api.py` |
+| the web app | `frontend/src/` (words for both languages in `lib/words.ts`) |
+| the installers | `install.sh`, `install.ps1`, `src/graphme/launcher.py` |
+
+Before changing the pipeline, read [`finalized_source.md`](finalized_source.md) (the rules) and
+[`docs/method.md`](docs/method.md) (why they are what they are). Many rules there exist because the
+obvious approach failed on a real document.
+
+The API contract lives in `src/graphme/server/models.py`. After changing it, run `npm run api` in
+`frontend/` to regenerate `frontend/src/api/schema.d.ts`; the web app compiles against those types.
+
+## Tests
 
 ```bash
-uv run ruff check src tests/public
-uv run mypy src
-uv run pytest tests/public
+uv run ruff check src tests/public && uv run mypy src                # lint and types (strict)
+uv run pytest tests/public                            # the test suite
+uv run pytest tests/public/test_read.py -q            # one file
+cd frontend && npm run typecheck && npm test && npm run e2e && npm run build
 ```
 
-릴리스 묶음: `tools/release/build.sh OUT`(태그 `v*`를 push하면 Release 워크플로가 같은 스크립트로 올림).
+CI runs the same commands on Linux and Windows, plus a real install on macOS and Windows.
 
-Neo4j가 있으면 `GRAPHME_NEO4J_TEST=1 uv run pytest tests/public`으로 그래프 공간 한 바퀴도 확인합니다.
+- `tests/public/` is the suite; `tests/fakes/` holds the invented documents and helpers it uses.
+  Documents are built inside the tests with PyMuPDF, python-docx, openpyxl and python-pptx (see
+  `tests/public/test_read.py`), and the model is answered by `httpx.MockTransport` — nothing calls a
+  real provider.
+- The web app's end-to-end tests run against a fake API (`frontend/e2e/fake-api.ts`) with invented
+  data.
+- **Write the failing test first.** A change in behaviour comes with a test that fails before the
+  change and passes after it — and fails because the behaviour differs, not because a name is missing.
+- A test that needs a running Neo4j runs only with `GRAPHME_NEO4J_TEST=1`.
 
-## 테스트가 있는 곳
+## Rules that keep the project safe
 
-`tests/public/`이 이 저장소의 테스트이고, `tests/fakes/`는 그 테스트가 쓰는 가짜 문서와 코퍼스 도우미입니다.
-모델은 `httpx.MockTransport`가 대신 답하고, 문서는 테스트 안에서 PyMuPDF·python-docx·openpyxl·python-pptx로
-만듭니다(`tests/public/test_read.py`). `tests/` 아래 나머지는 저장소에 올라가지 않습니다.
+- **Invented data only.** Never commit a real document, or anything measured from one — page counts,
+  coordinates, sheet names, cell ranges, file names, people's names — in code, tests, comments, commit
+  messages or pull request descriptions.
+- **No secrets.** Never commit `.env`, API keys or OAuth files. If a model call is needed to check
+  something, use your own key and describe what you checked; do not paste model responses or document
+  content.
+- **The file owns the graph.** What the model or the rendered page says may add evidence to nodes
+  extracted from the file; it never creates nodes of its own.
+- OpenAI is the only provider checked against live calls. If you add or change a provider, say how
+  you checked it.
 
-## 규칙
+## Style
 
-- 테스트에는 지어낸 데이터만 씁니다. 실제 문서, 그 문서에서 잰 값(페이지 수, 좌표, 시트 이름, 셀 범위,
-  파일명, 사람 이름 등), 키를 커밋하지 않습니다. 커밋 메시지와 PR 설명도 마찬가지입니다.
-- 동작을 바꾸면 그 차이로 실패하는 테스트를 먼저 쓰고(RED), 그다음 고칩니다(GREEN).
-- 모델 호출이 드는 확인은 자기 키로 하고, 모델 응답이나 문서 내용은 PR에 붙이지 않습니다. 무엇을 확인했는지
-  요약만 적습니다.
-- 확인된 모델 제공자는 OpenAI뿐입니다. Anthropic·Gemini 경로는 코드와 가짜 응답 테스트
-  (`tests/public/test_chat.py`)는 있으나 실제 호출로 확인하지 않았습니다.
+- Python: ruff (line length 100) and mypy in strict mode must pass. Match the surrounding code: small
+  functions, plain names, and comments that say *why*, not *what*.
+- TypeScript: the existing patterns in `frontend/src` (TanStack Query for server state, words in
+  `lib/words.ts` for both languages — add every new string in English and Korean).
+- Documentation and messages are in English.
+- Keep a change focused. A refactor and a behaviour change are easier to review as two pull requests.
 
-## PR
+## Pull requests
 
-1. 브랜치에서 고치고 위 세 검사를 통과시킵니다.
-2. PR 템플릿의 확인란을 채웁니다. 실행 예시는 `examples/`에 있습니다.
-3. PR은 머지하지 않고 유지보수자가 반영해 닫습니다.
+1. Fork, create a branch, make the change with its test.
+2. Run the checks above.
+3. Open the pull request and fill in the template: what changed, why, and how you checked it.
+4. A maintainer reviews it. Changes are integrated by the maintainers (the public repository is
+   generated from the development one), so your pull request is closed once its change is in, with
+   credit in the changelog.
+
+Add a line under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md) for anything a user would notice.

@@ -195,3 +195,14 @@ test('the files a question found are picked by file, by hop or all, and download
   await dialog.getByRole('button', { name: '모두 선택' }).click();
   expect(await docsIn()).toEqual(['proc', 'spec', 'deck']);
 });
+
+test.describe('on a Korean browser', () => {
+  test.use({ locale: 'ko-KR' });
+
+  test('the app speaks English until Korean is chosen', async ({ page }) => {
+    await page.addInitScript(() => localStorage.removeItem('lang'));
+    await fakeApi(page, { empty: true });
+    await page.goto('/');
+    await expect(page.getByText('Drop a folder of documents')).toBeVisible();
+  });
+});

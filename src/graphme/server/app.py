@@ -107,13 +107,13 @@ def errors(app: FastAPI) -> None:
     @app.exception_handler(SessionExpired)
     async def unreachable(_: Request, error: Exception) -> JSONResponse:
         # Reached once and lost since: `opened()` says it only when the space is first opened.
-        logging.warning("그래프 DB에 닿지 못함: %s", error)
-        return JSONResponse({"detail": f"그래프 DB에 연결할 수 없습니다 {IN_LOG}"}, 503)
+        logging.warning("the graph DB cannot be reached: %s", error)
+        return JSONResponse({"detail": f"cannot connect to the graph DB {IN_LOG}"}, 503)
 
     @app.exception_handler(Exception)
     async def failed(_: Request, error: Exception) -> JSONResponse:
         # Logged again by the server once this answer is sent, with its traceback.
-        return JSONResponse({"detail": f"서버에서 처리하지 못했습니다 {IN_LOG}"}, 500)
+        return JSONResponse({"detail": f"the server could not handle this {IN_LOG}"}, 500)
 
 
 @contextmanager
@@ -150,15 +150,15 @@ def create_app(
         if key is None:
             # Keyless is this machine's only: not a name rebound to it, nor another site's page.
             if not from_here(request):
-                raise HTTPException(403, "이 컴퓨터의 페이지만 쓸 수 있습니다 -- 밖에서 쓰려면 "
-                                         "GRAPHME_API_KEY를 설정하세요")
+                raise HTTPException(403, "only this machine's pages may use it -- to use it"
+                                         " from elsewhere, set GRAPHME_API_KEY")
             return
         scheme, _, token = request.headers.get("authorization", "").partition(" ")
         sent = (token if scheme.lower() == "bearer" else "",  # schemes ignore case (RFC 7235)
                 request.cookies.get(KEY_COOKIE, ""))
         if not any(given and hmac.compare_digest(given.encode(), key.encode())
                    for given in sent):
-            raise HTTPException(401, "API 키가 필요합니다 (GRAPHME_API_KEY)",
+            raise HTTPException(401, "an API key is required (GRAPHME_API_KEY)",
                                 headers={"WWW-Authenticate": "Bearer"})
 
     v1 = APIRouter(prefix="/v1", dependencies=[Depends(keyed)])
@@ -189,7 +189,7 @@ def create_app(
         called). Only from this machine's own page, whatever the key: another site open in the
         browser could otherwise post keys here."""
         if not from_here(request):
-            raise HTTPException(403, "이 컴퓨터의 화면에서만 설정을 바꿀 수 있습니다")
+            raise HTTPException(403, "settings can only be changed from this machine's page")
         with refused():
             new = changed(demo, change.values, Path.cwd() / ".env", load)
         return {**described(new), "samples": has_samples()}
@@ -203,11 +203,11 @@ def create_app(
         except GraphStarting as error:  # the page asks again on its own
             raise HTTPException(503, str(error), headers={"Retry-After": "3"}) from error
         except Exception as error:  # noqa: BLE001 -- said to the caller
-            raise HTTPException(503, f"그래프 DB에 연결할 수 없습니다: {error}") from error
+            raise HTTPException(503, f"cannot connect to the graph DB: {error}") from error
 
     def unbuilt() -> None:
         if demo.build.state in BUILDING:
-            raise HTTPException(409, "그래프를 만드는 중에는 할 수 없습니다")
+            raise HTTPException(409, "not while a graph is being built")
 
     def chosen(docs: list[str] | None) -> list[str] | None:
         """Which documents leave: all when none are named, never when an empty list is -- an
@@ -215,7 +215,7 @@ def create_app(
         if docs is None:
             return None
         if not docs:
-            raise HTTPException(400, "내보낼 문서를 하나 이상 고르세요")
+            raise HTTPException(400, "choose at least one document to export")
         return docs
 
     @v1.get("/documents", response_model=api.Library)
@@ -279,7 +279,7 @@ def create_app(
         space = opened()
         found = space.document_graph(document_id)
         if not found["nodes"]:
-            raise HTTPException(404, "그래프에 없는 문서입니다")
+            raise HTTPException(404, "the document is not in the graph")
         return {**found, "chunks": space.chunk_spans(document_id)}
 
     @v1.post("/documents/{document_id}/file", response_model=api.PagesOf)
@@ -342,7 +342,7 @@ def create_app(
         """The graph space emptied, and what the server read let go with it: a folder put in
         afterwards is read afresh. Only when confirmed, and not while a build runs."""
         if not request.confirm:
-            raise HTTPException(400, "그래프 전체를 지운다는 확인이 필요합니다")
+            raise HTTPException(400, "confirm that the whole graph is to be deleted")
         unbuilt()
         opened()
         deleted = demo.graph.reset()
@@ -369,7 +369,7 @@ def create_app(
         it (the page's folders of what a question found). A link, not a fetch: the app's own
         window saves it as it saves any download."""
         if len(doc) != len(folder):
-            raise HTTPException(400, "문서마다 폴더 이름이 하나씩 필요합니다")
+            raise HTTPException(400, "each document needs one folder name")
         opened()
         archive = demo.files_zip(list(zip(doc, folder, strict=True)))
         shown = "".join(c for c in name if c not in '/\\:*?"<>|').strip(". ")[:80] or "documents"
@@ -382,13 +382,13 @@ def create_app(
         with refused():
             session = demo.session(file_id)
         if session.extracted is None or not session.pages:
-            raise HTTPException(409, "아직 준비되지 않은 파일입니다")
+            raise HTTPException(409, "the file is not ready yet")
         return session
 
     def page_of(session: Session, index: int) -> RenderedPage:
         page = next((p for p in session.pages if p.index == index), None)
         if page is None:
-            raise HTTPException(404, "이 페이지를 찾을 수 없습니다")
+            raise HTTPException(404, "this page cannot be found")
         return page
 
     @v1.post("/files", response_model=api.Uploaded)
@@ -398,12 +398,12 @@ def create_app(
         """A file kept on the server -- nothing is read until a job asks. `modified` is the
         file's last change as the browser reads it, in milliseconds."""
         if modified is not None and not (math.isfinite(modified) and 0 <= modified < 2**53):
-            raise HTTPException(400, "수정 시간이 올바르지 않습니다")
+            raise HTTPException(400, "the modified time is not valid")
         # ponytail: Starlette spools the whole part to a temp file before this runs, so the
         # limit bounds memory, not disk; a Content-Length check before parsing if that matters.
         content = await file.read(MAX_UPLOAD_BYTES + 1)
         if len(content) > MAX_UPLOAD_BYTES:
-            raise HTTPException(413, "파일이 너무 큽니다")
+            raise HTTPException(413, "the file is too large")
         return await run_in_threadpool(
             kept, file.filename or "document", content,
             modified / 1000 if modified is not None else None)
@@ -422,12 +422,12 @@ def create_app(
         off the list. Not while it is being read."""
         unbuilt()
         if file_id not in demo.catalog:
-            raise HTTPException(404, "이 파일을 찾을 수 없습니다")
+            raise HTTPException(404, "this file cannot be found")
         session = demo.sessions.get(file_id)
         if session is not None:
             with session.lock:
                 if session.state not in ("idle", "error", "cancelled", "done", "rendered"):
-                    raise HTTPException(409, "읽는 중인 파일은 목록에서 뺄 수 없습니다")
+                    raise HTTPException(409, "a file being read cannot be removed")
         demo.drop([file_id])
         return {"deleted": file_id}
 
@@ -471,10 +471,10 @@ def create_app(
         session = ready(file_id)
         found = next((n for n in session.read().nodes if n.id == node), None)
         if found is None:
-            raise HTTPException(404, "이 노드를 찾을 수 없습니다")
+            raise HTTPException(404, "this node cannot be found")
         picture = read_node_crop(found, asset_store=session.store)
         if picture is None:
-            raise HTTPException(404, "이 노드에는 저장된 이미지가 없습니다")
+            raise HTTPException(404, "this node has no stored image")
         return Response(picture, media_type="image/png")
 
     @v1.get("/files/{file_id}/graph", response_model=api.DocumentGraph)
@@ -525,14 +525,14 @@ def create_app(
         """A question and its top_k checked, then `run` on the graph space's GraphRAG."""
         question = request.question.strip()
         if not question:
-            raise HTTPException(400, "질문이 비어 있습니다")
+            raise HTTPException(400, "the question is empty")
         if len(question) > MAX_QUESTION_CHARS:
             raise HTTPException(
-                400, f"질문이 너무 깁니다 -- {MAX_QUESTION_CHARS:,}자까지 쓸 수 있습니다"
+                400, f"the question is too long -- at most {MAX_QUESTION_CHARS:,} characters"
             )
         top_k = request.top_k if request.top_k is not None else demo.settings.retrieval_top_k
         if not 1 <= top_k <= MAX_TOP_K:
-            raise HTTPException(400, f"top_k는 1에서 {MAX_TOP_K} 사이여야 합니다")
+            raise HTTPException(400, f"top_k must be between 1 and {MAX_TOP_K}")
         opened()
         try:
             rag = demo.rag()
@@ -545,7 +545,7 @@ def create_app(
         except Exception as error:  # noqa: BLE001 -- said to the caller, not a crash
             traceback.print_exc(file=sys.stderr)
             # What kind of failure it was; the whole of it, paths and all, is in the log.
-            said = f"질문을 처리할 수 없습니다 ({type(error).__name__}) {IN_LOG}"
+            said = f"the question could not be answered ({type(error).__name__}) {IN_LOG}"
             raise HTTPException(502, said) from error
 
     @v1.post("/search", response_model=api.Found)
@@ -566,7 +566,7 @@ def create_app(
     def job_of(job_id: str) -> CorpusBuild | ExportJob:
         job = demo.jobs.get(job_id)
         if job is None:
-            raise HTTPException(404, "이 작업을 찾을 수 없습니다")
+            raise HTTPException(404, "this job cannot be found")
         return job
 
     def dump_ready(job: ExportJob) -> bool:
@@ -586,7 +586,7 @@ def create_app(
     def held(files: list[str]) -> list[str]:
         known = [file for file in files if file in demo.catalog]
         if not known:
-            raise HTTPException(400, "읽을 수 있는 파일이 없습니다 -- 먼저 POST /v1/files")
+            raise HTTPException(400, "no file to read -- POST /v1/files first")
         return known
 
     @v1.post("/jobs/build", status_code=202, response_model=api.BuildState)
@@ -598,15 +598,15 @@ def create_app(
             try:
                 where = Path(folder).expanduser().resolve()
                 if not where.is_dir():
-                    raise HTTPException(400, f"폴더가 아닙니다: {where}")
+                    raise HTTPException(400, f"not a folder: {where}")
                 found = documents_in(where)
             except (ValueError, OSError) as error:  # a NUL in the name, a folder it may not read
-                raise HTTPException(400, f"폴더를 읽을 수 없습니다: {folder}") from error
+                raise HTTPException(400, f"the folder cannot be read: {folder}") from error
             # ponytail: the folder is walked inside the request; a job of its own if folders
             # large enough to keep the 202 waiting are built.
             docs = [demo.open_path(str(path)) for path in found]
             if not docs:
-                raise HTTPException(400, "읽을 수 있는 문서(xlsx·pptx·docx·pdf)가 없습니다")
+                raise HTTPException(400, "no readable document (xlsx, pptx, docx, pdf)")
             source = str(where)
         else:
             docs, source = held(request.files), ""
@@ -636,11 +636,11 @@ def create_app(
         uri = request.uri.strip()
         user = request.user.strip() or "neo4j"
         if not AURA_URI.match(uri):
-            raise HTTPException(400, "Aura 주소는 neo4j+s://<id>.databases.neo4j.io 형식입니다")
+            raise HTTPException(400, "an Aura address looks like neo4j+s://<id>.databases.neo4j.io")
         if not request.password:
-            raise HTTPException(400, "Aura 비밀번호가 필요합니다")
+            raise HTTPException(400, "the Aura password is required")
         if not request.confirm:
-            raise HTTPException(400, "데이터가 Neo4j 클라우드로 나간다는 확인이 필요합니다")
+            raise HTTPException(400, "confirm that the data leaves for Neo4j's cloud")
         aura = {"uri": uri, "user": user, "password": request.password}
         return started(demo.start_export("aura-upload", chosen(request.docs), aura), response)
 
@@ -664,7 +664,7 @@ def create_app(
     def job_file(job_id: str) -> FileResponse:
         found = job_of(job_id)
         if not isinstance(found, ExportJob) or not dump_ready(found):
-            raise HTTPException(404, "이 작업의 dump가 없습니다 -- 아직이거나 지난 것입니다")
+            raise HTTPException(404, "this job has no dump -- not made yet, or an older one")
         return FileResponse(demo.dump_path, filename="neo4j.dump")
 
     if extra is not None:
@@ -678,10 +678,10 @@ def create_app(
     @app.get("/{path:path}", include_in_schema=False)
     def page(path: str) -> Response:
         if path == "v1" or path.startswith("v1/"):
-            raise HTTPException(404, "없는 API 경로입니다")
+            raise HTTPException(404, "no such API path")
         if web is None:
             if path:
-                raise HTTPException(404, "웹 앱 없이 실행 중입니다 -- API는 /docs")
+                raise HTTPException(404, "running without the web app -- the API is at /docs")
             return RedirectResponse("/docs")
         if path and "\x00" not in path:  # a NUL byte is no file name; the page answers it
             served = (web / path).resolve()
@@ -724,7 +724,7 @@ def serve(settings: Settings, *, host: str, port: int, web: Path | None) -> None
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     for problem in preflight(settings):
-        logging.warning("준비 안 됨: %s", problem)
+        logging.warning("not ready: %s", problem)
     demo = make_demo(settings)
     if web is None and WEB.is_dir():
         web = WEB

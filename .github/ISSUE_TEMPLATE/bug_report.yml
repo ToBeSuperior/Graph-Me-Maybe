@@ -1,0 +1,67 @@
+name: Bug report
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please **never attach a real document** or paste its content: reproduce
+        the problem with an invented one if you can, and remove keys and your machine's paths from logs.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, including the full error message.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Install with …
+        2. Add a folder holding an invented DOCX with …
+        3. Ask …
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it is installed
+      options:
+        - One-line installer (app)
+        - From source (uv sync)
+        - pip install
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release tag, or `python -c "import graphme; print(graphme.__version__)"`.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: Windows 11 / macOS 15 / Ubuntu 24.04
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Model provider
+      description: "`GRAPHME_PROVIDER` and the model, if a model was involved."
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The app folder's `app.log`, or the terminal output. Keys and paths removed.
+      render: text

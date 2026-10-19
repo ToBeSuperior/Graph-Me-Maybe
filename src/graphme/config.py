@@ -136,10 +136,11 @@ class Settings(BaseModel):
     one place this is set. A passage below it is kept only if it holds the question's words
     (`graph_rag.every_word`); none kept, and nothing is shown or answered from. The hybrid score
     cannot tell this, since it ranks each hit against the best one of the same search. Set for
-    `text-embedding-3-large` in `RELEVANCE_FLOORS`, lower than the questions about nothing in the
-    invented sample documents (src/graphme/samples.py) reach (0.24 and below): a
-    question about a document as a whole -- its cover, its date, how many charts it has -- comes
-    near no passage, and what slips past the floor is refused by the answer, which says a
+    `text-embedding-3-large` in `RELEVANCE_FLOORS`, measured on the invented sample documents
+    (src/graphme/samples.py): questions about them come to 0.41 and above, questions about
+    nothing in them to 0.16 and below. A question about a document as a whole -- its cover, its
+    date, how many charts it has -- comes near no passage either (0.30 and below), and what slips
+    past the floor is refused by the answer, which says a
     question cannot be answered when the context does not establish what it asks about. This
     default is for an uncalibrated model; another model spreads cosines differently, and its
     own value goes in `RELEVANCE_FLOORS`."""

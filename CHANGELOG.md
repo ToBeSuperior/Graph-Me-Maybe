@@ -1,181 +1,198 @@
-# 변경 기록
+# Changelog
 
-[Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고, 버전은
-[Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
+This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format and uses
+[Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+### Changed
+
+- Everything is in English by default: the app opens in English unless Korean is chosen in the
+  settings menu (it used to follow the browser's language), server, CLI and installer messages are
+  in English, and the sample documents are an English set of the same fictional company. An answer
+  still follows the question's language.
+- The README is rewritten for new users and contributors, with installation, the user guide and
+  retrieval moved to `docs/installation.md`, `docs/user-guide.md` and `docs/retrieval.md`; all
+  documentation is in English.
+- The contributor kit: a new `CONTRIBUTING.md` with a map of the code, issue forms for bugs and
+  feature requests, an English pull request template, `CODE_OF_CONDUCT.md` and `SECURITY.md`.
+- Reopened documents are redrawn only when the code that draws, reads or binds them changes, or the
+  browser does: a release changing only the server, the CLI or the wording no longer redraws every
+  document once.
 
 ## [0.1.17] - 2026-10-19
 
-### 고침
+### Fixed
 
-- Visual C++ 런타임이 없는 Windows에서 설치가 "그래프 DB를 받지 못했다"는 경고만 남기고 끝나, 앱이 시작되지 않는데 원인을 알 수 없던 것. 설치 프로그램이 앱을 한 번 불러 보고, 런타임 DLL(`vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`)이 없으면 그렇다고 말한 뒤 winget으로 Visual C++ 재배포 패키지를 설치합니다(Windows가 권한을 물음). 그래도 안 되면 받을 주소를 알려 주고 설치를 실패로 끝냅니다. DLL이 있는데도 안 되면 Python이 낸 오류를 그대로 보여 줍니다.
-- `missing-files.txt`에 문서 ID만 적히던 것. 그래프에 있는 문서는 넣으려던 폴더, 파일 이름, 찾았던 경로를, 그래프에 없는 ID는 그렇다고 적습니다.
+- On Windows without the Visual C++ runtime, the installer finished with only a warning that the graph DB could not be downloaded. The app then would not start, and the cause was not visible. The installer now loads the app once. If a runtime DLL (`vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`) is missing, it says so and installs the Visual C++ redistributable with winget (Windows asks for permission). If that fails, it prints the download address and ends the installation as failed. If the DLLs are present and the app still fails, it shows the error Python raised, unchanged.
+- `missing-files.txt` listed only document IDs. For a document in the graph, it now lists the folder it was meant to go into, the file name and the path it was looked up at. For an ID that is not in the graph, it says so.
 
 ## [0.1.16] - 2026-10-19
 
-### 바뀜
+### Changed
 
-- 앱을 다시 켠 뒤 문서를 열 때 DOCX·PPTX·XLSX를 다시 그리지 않습니다. 렌더링이 잰 기하 정보(`pages.json`)와 바인딩까지 끝난 문서 그래프(`bound.json`)를 페이지 이미지 옆에 두고, 파일 내용·코드·뷰어 번들이 그대로이고 그래프가 가리키는 그림이 모두 남아 있으면 그것을 씁니다. 다시 열 때 Chrome도 추출도 돌지 않습니다.
+- When a document is opened after the app is restarted, DOCX, PPTX and XLSX files are no longer drawn again. The renderer stores the geometry it measured (`pages.json`) and the document graph after binding (`bound.json`) next to the page images. It uses them when the file content, the code and the viewer bundle are unchanged and every picture the graph points to is still stored. Reopening runs neither Chrome nor extraction.
 
 ## [0.1.15] - 2026-10-19
 
-### 추가
+### Added
 
-- 질문으로 찾은 문서의 원본 파일을 한 번에 받기. 결과 위의 **받기**에서 파일 하나하나, 1·2·3차별, 모두 선택/해제로 고르고 zip 하나로 받습니다. zip 안은 화면처럼 차수별 폴더로 나뉘고, 이름이 같은 파일은 둘 다 담기며, 열 수 없는 파일은 `missing-files.txt`에 적힙니다(`GET /v1/documents/files.zip`).
+- Download the original files of the documents found by a question in one go. Use **Download** above the results to choose files one by one, by hop (1st, 2nd, 3rd), or with select all / clear all, and download them as one zip. Inside the zip, files are split into folders by hop, as on screen. Files with the same name are both included. Files that cannot be opened are listed in `missing-files.txt` (`GET /v1/documents/files.zip`).
 
 ## [0.1.14] - 2026-10-19
 
-### 고침
+### Fixed
 
-- 영문 Windows(콘솔 cp1252)에서 설치 프로그램의 그래프 DB 받기가 한국어 안내 한 줄 때문에 실패하던 것. 안내는 영어로 쓰고, 출력할 수 없는 글자는 바꿔 씁니다.
-- Windows 설치 프로그램이 받기 실패를 경고만 하고도 실패 종료 코드를 남기던 것(Chromium 받기도 같음).
+- On English Windows (console cp1252), the installer's graph DB download failed because of one Korean message line. The message is now written in English, and characters that cannot be printed are replaced.
+- The Windows installer only warned when a download failed but still left a failing exit code (the Chromium download behaved the same way).
 
 ## [0.1.13] - 2026-10-19
 
-### 바뀜
+### Changed
 
-- **Docker를 더는 쓰지 않습니다.** Windows의 Docker Desktop은 컨테이너가 하나라도 돌면 12초마다 CLI 플러그인 수십 개를 실행해 PC 전체를 멈칫하게 했습니다. 이제 그래프 DB(Neo4j Community 5.26)를 앱이 직접 띄웁니다.
-  - 설치 프로그램이 Neo4j와 Java 실행 환경(Temurin 21, 합쳐 약 210MB)을 공식 배포처에서 받아 체크섬을 확인하고 앱 폴더의 `neo4j/`·`jre/`에 둡니다. 받지 못했으면 앱이 처음 열릴 때 받습니다(`GRAPHME_NO_NEO4J=1`로 미룸).
-  - 앱을 열면 Neo4j가 창 없이 하위 프로세스로 뜨고(비밀번호 없음, 127.0.0.1만, 7687부터 빈 포트), 앱을 닫으면 함께 꺼집니다. 터미널의 `graphme`는 앱이 켜져 있으면 그 Neo4j를 쓰고, 아니면 띄웠다가 끝나면 끕니다.
-  - 그래프는 `neo4j-data/`에 있어 업데이트해도 남습니다. 그 포트에서 답하는 Neo4j라도 이 앱 폴더의 데이터를 쓰는 것이 아니면 쓰지 않습니다(같은 PC의 WSL 앱 등).
-  - `.dump`와 Aura 올리기는 함께 받은 `neo4j-admin`으로, 임시 폴더에 따로 만든 그래프에서 합니다.
-  - Docker Desktop 설치 제안, 자동 켜기·끄기, `GRAPHME_DOCKER_AUTOSTART`·`GRAPHME_NEO4J_ADMIN_IMAGE`·`GRAPHME_NO_DOCKER`·`GRAPHME_YES`를 없앴습니다.
-  - 0.1.12까지 Docker에 있던 그래프는 옮기지 않습니다. 문서를 다시 읽고, 남은 컨테이너는 `docker rm -f graphme-neo4j; docker volume rm graphme-neo4j-data graphme-neo4j-logs`로 지웁니다.
-- `.env`에 `GRAPHME_NEO4J_URI`가 있으면 앱이 Neo4j를 띄우지 않고 그것을 씁니다(Neo4j Desktop, 다른 서버, Aura). `.env`의 `GRAPHME_HOME`으로 앱 폴더를 바꿀 수 있습니다.
-- 지우기: 일반 제거는 Neo4j·Java(`neo4j`, `jre`)를 지우고 그래프(`neo4j-data`)는 남깁니다. `GRAPHME_PURGE=1`이면 그래프도 지웁니다.
+- **Docker is no longer used.** On Windows, Docker Desktop ran dozens of CLI plugins every 12 seconds while any container was running, which made the whole PC stall. The app now starts the graph DB (Neo4j Community 5.26) itself.
+  - The installer downloads Neo4j and a Java runtime (Temurin 21, about 210MB together) from the official distribution sites, checks the checksums and places them in `neo4j/` and `jre/` in the app folder. If the download failed, the app downloads them when it first opens (`GRAPHME_NO_NEO4J=1` postpones this).
+  - When the app opens, Neo4j starts as a child process without a window (no password, 127.0.0.1 only, the first free port from 7687). It stops when the app closes. The terminal `graphme` uses that Neo4j if the app is running. Otherwise it starts one and stops it when it finishes.
+  - The graph lives in `neo4j-data/`, so it survives updates. A Neo4j that answers on that port is not used unless it uses the data of this app folder (for example, the WSL app on the same PC).
+  - `.dump` and the Aura upload use the `neo4j-admin` that is downloaded with it, on a graph built separately in a temporary folder.
+  - Removed: the Docker Desktop install offer, the automatic start and stop, and `GRAPHME_DOCKER_AUTOSTART`, `GRAPHME_NEO4J_ADMIN_IMAGE`, `GRAPHME_NO_DOCKER` and `GRAPHME_YES`.
+  - Graphs that were in Docker up to 0.1.12 are not migrated. Read the documents again, and delete the leftover containers with `docker rm -f graphme-neo4j; docker volume rm graphme-neo4j-data graphme-neo4j-logs`.
+- If `.env` has `GRAPHME_NEO4J_URI`, the app does not start Neo4j and uses that one (Neo4j Desktop, another server, Aura). `GRAPHME_HOME` in `.env` can change the app folder.
+- Uninstall: a normal uninstall removes Neo4j and Java (`neo4j`, `jre`) and keeps the graph (`neo4j-data`). With `GRAPHME_PURGE=1`, the graph is removed too.
 
-### 고침
+### Fixed
 
-- 앱 창(`graphme-app <폴더>`)이 인수로 받은 앱 폴더를 서버에 넘기지 않아 기본 앱 폴더를 쓰던 것.
+- The app window (`graphme-app <folder>`) did not pass the app folder it received as an argument to the server, so the server used the default app folder.
 
 ## [0.1.12] - 2026-10-19
 
-### 고침
+### Fixed
 
-- 앱이 자동으로 켠 Docker Desktop이 앱을 닫은 뒤에도 남아 있던 것. Windows의 Docker Desktop은 몇 초마다 CLI 플러그인을 한꺼번에 실행해 PC 전체를 잠깐씩 멈추게 할 수 있습니다. 이제 앱이 켠 Docker Desktop은 앱 창을 닫을 때 같이 끕니다(Windows `docker desktop stop`, macOS `quit app "Docker"`). 사용자가 원래 켜 두었던 Docker는 건드리지 않습니다.
+- Docker Desktop that the app had started automatically stayed running after the app was closed. On Windows, Docker Desktop can run CLI plugins all at once every few seconds and make the whole PC freeze for moments. Now a Docker Desktop started by the app is stopped when the app window closes (Windows `docker desktop stop`, macOS `quit app "Docker"`). A Docker the user had already started is left alone.
 
 ## [0.1.11] - 2026-10-19
 
-### 고침
+### Fixed
 
-- 화면이 스스로 최신 상태가 되지 않던 것.
-  - Docker·그래프 DB가 준비되는 동안 화면이 503 세 번 뒤 다시 묻기를 멈추고 "연결할 수 없습니다"에 머물던 것. 이제 서버가 "준비 중"이라고 답하는 동안 3초마다 계속 묻고, 그동안 오류가 아닌 진행 상태를 보여 주다가 준비되면 바로 바뀝니다. 오류와 "다시 시도"는 진짜 실패(Docker 꺼짐, 3분 넘게 준비 안 됨)일 때만 나옵니다.
-  - 문서 목록과 연결 지도를 탭에 들어올 때와 창으로 돌아올 때마다 다시 묻습니다. 터미널의 `graphme build-graph`로 바뀐 그래프도 반영됩니다.
-- Docker가 켜진 뒤 Neo4j 컨테이너를 띄우는 동안 화면 요청이 20초 넘게 막히던 것. 그래프를 여는 일은 뒤에서 하고, 화면 요청은 2초 안에 "그래프 DB를 준비하는 중"으로 답합니다.
-- 한국어 Windows에서 `.dump`를 만들 때 docker 출력을 cp949로 읽다 `UnicodeDecodeError`가 찍히던 것. 앱이 실행한 프로그램의 출력은 UTF-8로 읽습니다.
-- `graphme export-corpus OUT --dump`가 확장자 없는 파일을 만들던 것. `.dump`를 붙이고, 폴더를 주면 그 안에 `graph.dump`를 만듭니다.
+- The screen did not update itself.
+  - While Docker and the graph DB were getting ready, the screen stopped asking again after three 503 responses and stayed on "Cannot connect". Now, while the server answers "preparing", the screen keeps asking every 3 seconds and shows progress instead of an error. It changes as soon as the server is ready. The error and "Try again" appear only on a real failure (Docker is off, or it is not ready after more than 3 minutes).
+  - The document list and the links map are requested again each time you enter the tab and each time you return to the window. A graph changed by `graphme build-graph` in the terminal is also picked up.
+- While the Neo4j container was starting after Docker came up, screen requests were blocked for more than 20 seconds. Opening the graph now happens in the background, and a screen request is answered within 2 seconds with "Preparing the graph DB".
+- On Korean Windows, creating a `.dump` printed a `UnicodeDecodeError` because docker output was read as cp949. Output of programs the app runs is now read as UTF-8.
+- `graphme export-corpus OUT --dump` created a file without an extension. It now adds `.dump`, and if a folder is given it creates `graph.dump` inside it.
 
 ## [0.1.10] - 2026-10-19
 
-### 고침
+### Fixed
 
-- Windows에서 `.dump` 내보내기가 실패하던 것. 내보내기 묶음의 `import.sh`·`schema.cypher`·`README.md`가 CRLF로 저장돼 컨테이너의 `sh`가 `set -e`를 거부했습니다. 이제 어느 OS에서나 LF로 씁니다.
-- 내보내기 실패 안내가 같은 말만 되풀이하던 것. 오류의 첫 줄을 보여 줍니다(Aura 비밀번호는 가림).
-- 그래프를 비운 뒤 읽은 문서가 질문 화면과 연결 지도에 나오지 않던 것. 비우기가 빌드 상태를 캐시에서 지워 화면이 다음 빌드의 끝을 보지 못했습니다.
-- 그래프 DB를 처음 여는 동안(Docker 켜기, Neo4j 이미지 받기) 화면 요청이 몇 분씩 막히던 것. 2초 안에 열리지 않으면 "그래프 DB를 준비하는 중"으로 답하고 화면이 저절로 다시 묻습니다. 빌드와 내보내기는 그대로 기다립니다.
+- The `.dump` export failed on Windows. `import.sh`, `schema.cypher` and `README.md` in the export bundle were saved with CRLF, and the container's `sh` rejected `set -e`. They are now written with LF on every OS.
+- The export failure message repeated the same text. It now shows the first line of the error (the Aura password is masked).
+- Documents read after the graph was cleared did not appear on the Ask screen or the links map. Clearing removed the build state from the cache, so the screen never saw the end of the next build.
+- While the graph DB was opened for the first time (starting Docker, pulling the Neo4j image), screen requests were blocked for minutes. If it does not open within 2 seconds, the server answers "Preparing the graph DB" and the screen asks again by itself. Builds and exports still wait.
 
-### 바뀜
+### Changed
 
-- `graphme build-graph`가 읽은 뒤 질문용 임베딩까지 합니다(앱과 같음). 건너뛰려면 `--no-embed`.
-- macOS에서 Docker Desktop을 자동으로 켤 때 창을 띄우지 않습니다(`open -g -j`).
-- 앱 창에서 F5·Ctrl+R(macOS Cmd+R)로 새로 고칩니다.
-- 문서 연결 지도의 문서 이름 글자를 키웠습니다.
+- `graphme build-graph` now also creates the question embeddings after reading (same as the app). Use `--no-embed` to skip them.
+- On macOS, no window is shown when Docker Desktop is started automatically (`open -g -j`).
+- In the app window, F5 and Ctrl+R (Cmd+R on macOS) reload the page.
+- The document names on the document links map are drawn in a larger font.
 
 ## [0.1.9] - 2026-10-18
 
-### 고침
+### Fixed
 
-- 0.1.5 이전에 만든 Windows 바로가기가 `app` 인수를 그대로 가진 채 `graphme-app.exe`를 가리켜, 앱 폴더를 `…\Graph-Me-Maybe\app`으로 잡던 것(화면 대신 API 문서, 키·그래프·뷰어 없음, 열 때마다 한 단계씩 깊어짐). 설치 프로그램이 바로가기 인수를 비우고, `graphme-app`은 전체 경로만 앱 폴더로 받습니다.
-- Windows에서 Docker Desktop 자동 켜기가 동작하지 않던 것. `docker desktop start`는 꺼져 있어도 "already running"으로 성공을 알릴 수 있어, `Docker Desktop.exe`를 직접 실행합니다.
-- 앱 창을 닫아도 남은 스레드 때문에 프로세스가 끝나지 않을 수 있던 것. 창이 닫히면 앱이 바로 끝납니다.
+- A Windows shortcut made before 0.1.5 pointed to `graphme-app.exe` with the `app` argument still attached, so the app folder became `…\Graph-Me-Maybe\app`. The result was the API docs instead of the screen, no keys, graph or viewer, and one level deeper each time it opened. The installer now clears the shortcut arguments, and `graphme-app` accepts only a full path as the app folder.
+- Automatic start of Docker Desktop did not work on Windows. `docker desktop start` can report success with "already running" even when it is off, so the app now runs `Docker Desktop.exe` directly.
+- Closing the app window could leave the process running because of leftover threads. The app now ends right away when the window closes.
 
 ## [0.1.8] - 2026-10-18
 
-### 추가
+### Added
 
-- 그래프가 필요한데 Docker Desktop이 꺼져 있으면 앱이 켭니다(Windows `docker desktop start`, 없으면 `Docker Desktop.exe`; macOS `open -a Docker`). 켜지는 동안 화면은 "Docker를 켜는 중"을 보여 주고 저절로 다시 묻습니다(서버는 503과 `Retry-After`). 3분이 지나도 준비되지 않으면 약관 동의 같은 확인이 떠 있는지 보라고 말합니다. `GRAPHME_DOCKER_AUTOSTART=0`으로 끕니다.
+- If the graph is needed and Docker Desktop is off, the app starts it (Windows `docker desktop start`, or `Docker Desktop.exe` if that is missing; macOS `open -a Docker`). While it starts, the screen shows "Starting Docker" and asks again by itself (the server answers 503 with `Retry-After`). If it is still not ready after 3 minutes, the app tells you to check whether a prompt such as a terms agreement is open. Turn this off with `GRAPHME_DOCKER_AUTOSTART=0`.
 
-### 고침
+### Fixed
 
-- Docker가 꺼져 있을 때 요청마다 `docker`를 다시 실행하던 것. 꺼져 있다는 결과를 5초 동안 기억해, 한 화면의 요청들이 한 번의 확인을 나눠 씁니다.
-- README: WSL에 깔았던 앱을 키·그래프까지 완전히 지우는 방법.
+- When Docker was off, `docker` was run again for every request. The "off" result is now remembered for 5 seconds, so the requests of one screen share one check.
+- README: how to completely remove an app installed in WSL, including its keys and graph.
 
 ## [0.1.7] - 2026-10-18
 
-### 고침
+### Fixed
 
-- Windows 앱 창에서 Docker·페이지 그리기·내보내기를 실행할 때마다 검은 콘솔 창이 잠깐 뜨던 것. 앱이 실행하는 프로그램은 모두 창 없이 실행됩니다(`graphme/processes.py` 한 곳).
+- In the Windows app window, a black console window flashed each time Docker, page drawing or export ran. Every program the app runs is now run without a window (in one place, `graphme/processes.py`).
 
-### 바뀜
+### Changed
 
-- WSL에서 `install.sh`를 실행하면 설치하지 않고 Windows 설치(PowerShell의 `install.ps1`)를 안내합니다. 한 PC에 앱이 두 벌 생기지 않게 하려는 것입니다. 그래도 WSL에 설치하려면 `GRAPHME_WSL=1`. 이미 깔린 WSL 앱 제거(`--uninstall`)는 그대로 됩니다.
+- Running `install.sh` in WSL no longer installs. It points to the Windows installation (`install.ps1` in PowerShell). This prevents two copies of the app on one PC. To install in WSL anyway, use `GRAPHME_WSL=1`. Removing an already installed WSL app (`--uninstall`) works as before.
 
 ## [0.1.6] - 2026-10-18
 
-### 추가
+### Added
 
-- 앱 창: 시작 메뉴(Windows)와 응용 프로그램 폴더(macOS)의 Graph-Me-Maybe가 브라우저 탭과 검은 콘솔 창 대신 주소창 없는 앱 창으로 열립니다(새 명령 `graphme-app`, pywebview). 서버는 창 뒤에서 돌고, 창을 닫으면 함께 꺼집니다. 앱 창을 띄울 수 없으면 브라우저로 엽니다. `graphme app`은 그대로 브라우저로 엽니다.
+- App window: Graph-Me-Maybe in the Start menu (Windows) and the Applications folder (macOS) now opens in an app window with no address bar, instead of a browser tab and a black console window (new command `graphme-app`, pywebview). The server runs behind the window and stops when the window is closed. If the app window cannot be shown, it opens in the browser. `graphme app` still opens in the browser.
 
-### 고침
+### Fixed
 
-- 터미널의 `graphme` 명령이 지금 폴더의 `.env`만 읽어, 설치한 앱의 키·그래프 데이터를 쓰지 못하던 것. 지금 폴더에 `.env`가 없으면 앱 폴더의 것을 씁니다.
-- 명령이 실행될 수 없을 때(키 없음, Docker 꺼짐 등) 긴 traceback 대신 `오류: …` 한 줄로 말하고, 키 오류는 어디서 넣는지도 말합니다.
-- 한 PC의 WSL 앱과 Windows 앱이 서로를 자기 것으로 여기던 것. `/health`가 앱 폴더를 알려 주고, 앱 실행과 설치 프로그램은 같은 폴더의 앱만 "실행 중"으로 봅니다. Docker가 꺼져 있거나 앱의 Neo4j 컨테이너가 꺼져 있는데 그 포트에서 다른 Neo4j가 답하면, 그것을 쓰지 않고 이유를 말합니다.
-- `GRAPHME_NEO4J_PASSWORD`를 적었다면 앱이 Neo4j 컨테이너를 띄우지 않습니다(직접 띄운 Neo4j를 일부러 쓰는 것).
+- The terminal `graphme` command read only the `.env` in the current folder, so it could not use the installed app's keys and graph data. If the current folder has no `.env`, it now uses the one in the app folder.
+- When a command cannot run (no key, Docker off, and so on), it now prints one line, `오류: …` (Error: …), instead of a long traceback. For a key error, it also says where to enter the key.
+- The WSL app and the Windows app on one PC took each other for their own. `/health` now reports the app folder, and the app launcher and the installer count only an app in the same folder as "running". If Docker is off or the app's Neo4j container is off, and another Neo4j answers on that port, the app does not use it and says why.
+- If `GRAPHME_NEO4J_PASSWORD` is set, the app does not start a Neo4j container (the user is deliberately using a Neo4j they started themselves).
 
 ## [0.1.5] - 2026-10-18
 
-### 제거
+### Removed
 
-- 문서 하나를 SQLite 색인으로 다루던 예전 경로와 그 CLI 명령 `ingest`·`query`·`inspect`·`evaluate`·`export-neo4j`를 지웠습니다. 문서는 `build-graph`로 그래프 공간에 올리고 `ask`로 묻고 `export-corpus`로 내보냅니다. 그 경로만 읽던 설정 `GRAPHME_HIERARCHY_MODE`·`GRAPHME_UNIT_GROUPING`·`GRAPHME_NODE_BUDGET`·`GRAPHME_TOKEN_BUDGET`·`GRAPHME_MAX_HOPS`도 더는 읽지 않습니다.
-- 쓰이지 않던 코드(호출하는 곳이 없는 grounding 경로, VLM 페이지 분할, 읽히지 않는 필드)와 중복 코드를 정리했습니다.
+- The old path that handled one document as a SQLite index, and its CLI commands `ingest`, `query`, `inspect`, `evaluate` and `export-neo4j`. Documents are now put into the graph space with `build-graph`, queried with `ask` and exported with `export-corpus`. The settings that only that path read, `GRAPHME_HIERARCHY_MODE`, `GRAPHME_UNIT_GROUPING`, `GRAPHME_NODE_BUDGET`, `GRAPHME_TOKEN_BUDGET` and `GRAPHME_MAX_HOPS`, are no longer read either.
+- Unused code (a grounding path that nothing called, VLM page splitting, fields that were never read) and duplicate code were cleaned up.
 
-### 고침
+### Fixed
 
-- 설치 프로그램으로 깐 뒤 `graphme build-graph` 등 CLI·Python API가 앱 폴더의 뷰어를 찾지 못해 DOCX·PPTX·XLSX를 그리지 못하던 것. 이제 모든 명령이 설치된 뷰어를 씁니다. 뷰어가 없으면 그렇다고, 어떻게 만드는지 말합니다.
-- 엑셀: 두 시트의 같은 셀이 같은 표를 읽는 수식에서 두 번째 연결이 빠지던 것. JPEG 그림의 형식을 `image/jpg`가 아니라 `image/jpeg`로 적습니다.
-- 첨부 파일 이름의 내부 구분자(`.emb…`)가 Python API 예제와 HTTP 예제의 근거 목록에 나오던 것(`graphme.shown_name`).
-- colima의 기본 포트 전달(ssh)에서 처음 띄운 Neo4j에 연결하지 못하던 것: README와 오류 메시지가 `--port-forwarder grpc`를 안내합니다.
+- After installing with the installer, the CLI and Python API (such as `graphme build-graph`) could not find the viewer in the app folder, so they could not draw DOCX, PPTX or XLSX. All commands now use the installed viewer. If there is no viewer, they say so and explain how to build it.
+- Excel: when the same cell on two sheets had formulas reading the same table, the second link was missing. The format of a JPEG picture is now written as `image/jpeg`, not `image/jpg`.
+- The internal separator in attachment file names (`.emb…`) showed up in the evidence list of the Python API example and the HTTP example (`graphme.shown_name`).
+- With colima's default port forwarding (ssh), the first Neo4j started could not be reached. The README and the error message now point to `--port-forwarder grpc`.
 
-### 바뀜
+### Changed
 
-- 엑셀·PDF 추출이 같은 영역·페이지를 여러 번 읽지 않습니다(결과는 같고 더 빠름).
+- Excel and PDF extraction no longer read the same area or page several times (same result, faster).
 
 ## [0.1.4] - 2026-10-18
 
-### 고침
+### Fixed
 
-- 설치 프로그램이 최신 릴리스를 GitHub API로 찾습니다. 릴리스 직후 `releases/latest` 주소가 한동안 이전 버전을 가리켜 한 버전 낮은 것이 설치됐습니다(API 한도가 찼을 때만 그 주소를 씀).
-- Linux·WSL: DOCX·PPTX·XLSX 페이지의 한글을 앱에 든 글꼴(Pretendard)로 그립니다. 시스템에 한글 글꼴이 없어도 네모로 깨지지 않고, `fonts-noto-cjk` 설치가 필요 없습니다.
-- 앱을 끄자마자 다시 띄우면 8765가 아니라 8766으로 뜨던 것: 막 닫힌 연결(TIME_WAIT)이 남은 포트를 사용 중으로 보지 않습니다.
+- The installer finds the latest release through the GitHub API. Right after a release, the `releases/latest` address pointed to the previous version for a while, so a version one lower was installed (that address is used only when the API limit is exhausted).
+- Linux and WSL: Korean text on DOCX, PPTX and XLSX pages is drawn with the font bundled with the app (Pretendard). Even without a Korean font on the system, it does not break into boxes, and installing `fonts-noto-cjk` is no longer needed.
+- If the app was restarted right after being stopped, it came up on 8766 instead of 8765. A connection that has just closed (TIME_WAIT) is no longer treated as the port being in use.
 
 ## [0.1.3] - 2026-10-18
 
-### 고침
+### Fixed
 
-- Linux·WSL: 한글 글꼴이 없으면 설치 프로그램이 `fonts-noto-cjk` 설치를 안내합니다(0.1.4에서 앱 글꼴로 대신해 안내는 빠짐).
-- README: Linux·WSL 설치 경로, Node 24, 공개 저장소 주소, 설치 프로그램이 웹 앱을 함께 까는 것을 반영했습니다.
+- Linux and WSL: if there is no Korean font, the installer tells you to install `fonts-noto-cjk` (0.1.4 replaced this with the app's own font, so the message was dropped).
+- README: updated for the Linux and WSL installation path, Node 24, the public repository address, and the installer also installing the web app.
 
 ## [0.1.2] - 2026-10-18
 
-### 고침
+### Fixed
 
-- WSL: `graphme app`이 화면을 WSL 안의 리눅스 Chrome이 아니라 Windows 기본 브라우저로 엽니다(`BROWSER`로 바꿀 수 있음).
+- WSL: `graphme app` opens the screen in the Windows default browser, not in Linux Chrome inside WSL (can be changed with `BROWSER`).
 
 ## [0.1.1] - 2026-10-18
 
-### 고침
+### Fixed
 
-- 표·차트 미리보기의 한글이 네모(□)로 그려지던 것: 한글 글꼴 Pretendard(SIL OFL)를 패키지에 넣어 그 글꼴로 그립니다.
-- Windows: 텍스트 파일을 UTF-8로 읽고 써서 한글이 든 문서의 렌더링이 멈추지 않습니다. `xlsx-bundle`이 열린 파일을 바꾸려다 "Access is denied"로 실패하던 것도 고쳤습니다.
+- Korean text in table and chart previews was drawn as boxes (□). The Korean font Pretendard (SIL OFL) is now included in the package and used for drawing.
+- Windows: text files are read and written as UTF-8, so rendering no longer hangs on documents that contain Korean. `xlsx-bundle` failed with "Access is denied" when it tried to change an open file; this is fixed too.
 
 ## [0.1.0] - 2026-10-18
 
-### 추가
+### Added
 
 - One-line installers for macOS and Windows (`install.sh`, `install.ps1`) and `graphme app`; pages
   drawn through Playwright for Python (no Node needed to run).
-- Python API: `graphme.read`(문서 하나 읽기)와 `GraphMe`(add·embed·search·ask·documents·delete·reset·export).
-- 모델 제공자: 채팅은 OpenAI·Anthropic·Gemini(`GRAPHME_PROVIDER`), 임베딩은 OpenAI·Gemini
-  (`GRAPHME_EMBEDDING_PROVIDER`). 실제 호출로 확인한 것은 OpenAI뿐입니다.
-- HTTP 서버: `graphme serve` — `/v1`(파일, 작업 폴링·취소, 검색, 답변, 내보내기), `/health`, `/docs`,
-  `GRAPHME_API_KEY`로 잠그기.
+- Python API: `graphme.read` (read one document) and `GraphMe` (add, embed, search, ask, documents, delete, reset, export).
+- Model providers: for chat, OpenAI, Anthropic and Gemini (`GRAPHME_PROVIDER`); for embeddings, OpenAI and Gemini
+  (`GRAPHME_EMBEDDING_PROVIDER`). Only OpenAI has been checked with real calls.
+- HTTP server: `graphme serve` — `/v1` (files, job polling and cancel, search, answer, export), `/health`, `/docs`,
+  and locking with `GRAPHME_API_KEY`.

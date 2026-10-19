@@ -38,7 +38,7 @@ def samples(demo: Demo) -> APIRouter:
     @router.post("/samples", response_model=Samples)
     def corpus_samples() -> dict[str, Any]:
         if demo.build.state in BUILDING:  # its files may be being read: not written over
-            raise HTTPException(409, "이미 그래프를 만드는 중입니다")
+            raise HTTPException(409, "a graph build is already running")
         written = write_samples(demo.root / "samples")
         files = [demo.open_path(str(path)) for path in written]
         return {"files": [path.name for path in written],
@@ -72,7 +72,7 @@ def run(port: int, web: Path | None, *, on_ready: Callable[[], None] | None = No
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     settings = demo_settings()
     for problem in preflight(settings):
-        logging.warning("준비 안 됨: %s", problem)
+        logging.warning("not ready: %s", problem)
     demo = make_demo(settings)
 
     def warm() -> None:

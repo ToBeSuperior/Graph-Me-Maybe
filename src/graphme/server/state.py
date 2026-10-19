@@ -106,11 +106,11 @@ def _since(started: float) -> float:
 
 # What failed is said on the page plainly; what it was -- with this machine's paths in it --
 # is in the server's log, printed where it happened.
-IN_LOG = "(자세한 내용은 서버 로그)"
+IN_LOG = "(details in the server log)"
 SPACE_WAIT = 2.0
-UNREAD = f"읽지 못했습니다 -- 손상됐거나 읽을 수 없는 내용의 파일일 수 있습니다 {IN_LOG}"
-PAGE_UNREAD = f"이 페이지를 읽지 못했습니다 {IN_LOG}"
-UNDRAWN = f"페이지를 그리지 못했습니다 {IN_LOG}"
+UNREAD = f"could not be read -- the file may be damaged or hold nothing readable {IN_LOG}"
+PAGE_UNREAD = f"this page could not be read {IN_LOG}"
+UNDRAWN = f"the pages could not be drawn {IN_LOG}"
 
 
 def _mark_failed(session: Session, pages: Iterable[RenderedPage], error: Exception) -> None:
@@ -218,7 +218,7 @@ STARTABLE = ("idle", "error", "cancelled", "rendered")
 drawn."""
 FINISHED = ("done", "error", "cancelled")
 """States a document's reading ends in."""
-CANCELLED = "빌드를 취소해 읽지 않음"
+CANCELLED = "not read: the build was cancelled"
 """Why a document a stopped build passed over was not read -- the end of its reason."""
 
 
@@ -316,7 +316,8 @@ class Demo:
                 opener.start()
         opener.join(wait)
         if opener.is_alive():
-            raise GraphStarting("그래프 DB를 준비하는 중입니다 -- 준비되면 저절로 이어집니다.")
+            raise GraphStarting(
+                "the graph DB is starting -- this carries on by itself once it is ready.")
         if (failed := self._open_failed) is not None:
             self._open_failed = None
             raise failed
@@ -383,9 +384,9 @@ class Demo:
         background. `aura` -- address, user, password -- lives only in the thread."""
         with self.exporting:
             if self.export.state in EXPORTING:
-                raise Busy("이미 내보내는 중입니다")
+                raise Busy("an export is already running")
             job = self.export = ExportJob(
-                id=uuid.uuid4().hex, kind=kind, state="dumping", message="dump를 만드는 중")
+                id=uuid.uuid4().hex, kind=kind, state="dumping", message="making the dump")
             self.jobs[job.id] = job
         threading.Thread(target=self._export, args=(job, docs, aura), daemon=True).start()
         return job
@@ -397,7 +398,7 @@ class Demo:
             self.space()  # opened under `opening_space`, like every other first use
             job.documents = self.graph.export(self.dump_path, dump=True, documents=docs)
             if aura is not None:
-                job.state, job.message = "uploading", "Aura에 올리는 중"
+                job.state, job.message = "uploading", "uploading to Aura"
                 said = self.admin().upload(self.dump_path, **aura)
                 job.message = said.strip().splitlines()[-1] if said.strip() else ""
             else:
@@ -433,7 +434,7 @@ class Demo:
                 return doc
         path = self.space().source_path(document_id)
         if not path or not Path(path).is_file():
-            raise LookupError("이 문서의 원본 파일을 찾을 수 없습니다")
+            raise LookupError("this document's source file cannot be found")
         doc = self.open_path(path)
         session = self.session(doc)
         with session.lock:
@@ -473,7 +474,7 @@ class Demo:
         build stops before the space: the files are read, and nothing else."""
         with self.building:
             if self.build.state in BUILDING:
-                raise Busy("이미 그래프를 만드는 중입니다")
+                raise Busy("a graph build is already running")
             # No total until the documents are looked through for the files they carry.
             self.build = CorpusBuild(id=uuid.uuid4().hex, kind="build" if put else "read",
                                      state="reading", source=source)
@@ -495,7 +496,7 @@ class Demo:
         never while a build is putting documents in."""
         with self.building:
             if self.build.state in BUILDING:
-                raise Busy("이미 그래프를 만드는 중입니다")
+                raise Busy("a graph build is already running")
             job = self.build = CorpusBuild(id=uuid.uuid4().hex, kind="embed", state="embedding")
             self.jobs[job.id] = job
         threading.Thread(target=self._embed_alone, args=(job,), daemon=True).start()
@@ -504,7 +505,7 @@ class Demo:
     def cancel(self, job: CorpusBuild | ExportJob) -> CorpusBuild:
         """Stop a build or a reading. An embedding or an export is not stopped half way."""
         if not isinstance(job, CorpusBuild) or job.kind == "embed":
-            raise Busy("적재와 읽기만 취소할 수 있습니다")
+            raise Busy("only a build or a reading can be cancelled")
         return self.cancel_build() if job is self.build else job
 
     def cancel_build(self) -> CorpusBuild:
@@ -579,7 +580,7 @@ class Demo:
             ) if put else read_only()
         except Exception:  # noqa: BLE001 -- the build's state says what happened
             traceback.print_exc(file=sys.stderr)
-            build.state, build.error = "error", f"그래프를 만들지 못했습니다 {IN_LOG}"
+            build.state, build.error = "error", f"the graph could not be built {IN_LOG}"
             return
         # What failed, said by file name -- the server's folders are this machine's, not the
         # reader's; what a cancel passed over is not a failure.
@@ -604,7 +605,8 @@ class Demo:
             build.embedded = self.rag().embed(on_progress=embedded)
         except Exception:  # noqa: BLE001 -- the build's state says what happened
             traceback.print_exc(file=sys.stderr)
-            build.state, build.error = "error", f"검색 준비(임베딩)를 하지 못했습니다 {IN_LOG}"
+            build.state = "error"
+            build.error = f"the passages could not be embedded for search {IN_LOG}"
             return False
         return True
 
@@ -660,9 +662,9 @@ class Demo:
         """
         suffix = Path(name).suffix.lower()
         if suffix not in SUFFIX_FORMATS:
-            raise ValueError(f"지원하지 않는 형식입니다 ({', '.join(SUFFIX_FORMATS)})")
+            raise ValueError(f"unsupported format ({', '.join(SUFFIX_FORMATS)})")
         if not content:
-            raise ValueError("빈 파일입니다")
+            raise ValueError("the file is empty")
         digest = sha256_bytes(content)
         doc = digest[:10]
         self.hashes[doc] = digest
@@ -682,7 +684,7 @@ class Demo:
     def session(self, doc: str) -> Session:
         path = self.catalog.get(doc)
         if path is None:
-            raise LookupError("이 문서를 찾을 수 없습니다")
+            raise LookupError("this document cannot be found")
         # Two requests for a document nobody opened yet must end on one session; a second
         # one overwriting the first would leave its run going where no page can see it.
         with self.opening:
@@ -805,7 +807,8 @@ class Demo:
         # under this reading's workspace: they outlive it, and they are named by content.
         session.store = LocalAssetStore(self.settings.asset_dir)
         # Drawn before this start and nothing that drew it changed: its pages as they were.
-        kept_under = page_cache.key(content_hash(session.source), self.settings.viewer_directory)
+        kept_under = page_cache.key(content_hash(session.source), self.settings.viewer_directory,
+                                    self.settings.chrome_executable)
         kept = page_cache.load(session.workspace, kept_under)
         if kept is not None:
             session.pages = kept
@@ -833,7 +836,8 @@ class Demo:
         """Apply one page's answer and record the parents it states on that page."""
         with session.lock:
             if page.index in derived.unread_pages:
-                session.errors[page.index] = "VLM이 쓸 수 있는 답을 주지 않아 계층 없이 남음"
+                session.errors[page.index] = (
+                    "left without an outline: the VLM gave no usable answer")
             else:
                 session.errors.pop(page.index, None)
             was = session.read()

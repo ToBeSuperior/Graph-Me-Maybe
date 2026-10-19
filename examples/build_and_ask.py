@@ -3,7 +3,7 @@
     python examples/build_and_ask.py <folder or file> "<question>"
 
 Needs the model's key and the embedder's key (README, step 4), and Neo4j: with Docker
-running, one is started when none answers (README, "그래프 DB(Neo4j)는 어떻게 뜨나").
+running, one is started when none answers (docs/installation.md, "The graph database").
 """
 from __future__ import annotations
 

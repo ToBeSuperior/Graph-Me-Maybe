@@ -227,8 +227,8 @@ def create_app(
             return
         settings = load_settings()
         if host not in LOOPBACK and settings.server_key is None:
-            typer.echo(f"GRAPHME_API_KEY를 설정하세요 -- 키 없는 서버는 {host}에 열지 않습니다"
-                       " (이 컴퓨터만: --host 127.0.0.1)", err=True)
+            typer.echo(f"set GRAPHME_API_KEY -- a server without a key is not opened on {host}"
+                       " (this machine only: --host 127.0.0.1)", err=True)
             raise typer.Exit(2)
         server.serve(settings, host=host, port=port, web=web)
 
@@ -334,5 +334,5 @@ def main() -> None:
     try:
         app()
     except (ValueError, RuntimeError, OSError) as error:
-        typer.echo(f"오류: {error}", err=True)
+        typer.echo(f"error: {error}", err=True)
         raise SystemExit(1) from None

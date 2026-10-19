@@ -107,26 +107,27 @@ def changed(
     them. Refused with `ValueError` -- nothing written -- for a name the page cannot change, a
     value that does not hold, or a key its server turns away; `Busy` while a build runs."""
     if demo.build.state in BUILDING:
-        raise Busy("그래프를 만드는 중에는 설정을 바꿀 수 없습니다")
+        raise Busy("settings cannot change while a graph is being built")
     values = {k: v.strip() for k, v in values.items() if v.strip()}
     unknown = sorted(set(values) - _ANY_KEY - {env for env, _ in _CHOICES})
     if unknown or any("\n" in v or "\r" in v for v in values.values()):
-        raise ValueError(f"바꿀 수 없는 설정입니다: {', '.join(unknown) or '줄바꿈'}")
+        raise ValueError(
+            f"these settings cannot be changed: {', '.join(unknown) or 'a line break'}")
     if over := sorted(set(values) & set(os.environ)):
-        raise ValueError(f"환경변수 {', '.join(over)}가 .env보다 우선합니다 -- "
-                         "셸에서 지우고 서버를 다시 시작하세요")
+        raise ValueError(f"the environment variables {', '.join(over)} take precedence over"
+                         " .env -- unset them in the shell and restart the server")
     dropped: set[str] = set()
     if values.get("GRAPHME_PROVIDER", demo.settings.provider) != demo.settings.provider:
         # The old provider's address and model would take the new provider's key there.
         dropped = {"GRAPHME_MODEL_BASE_URL", "GRAPHME_MODEL"} - set(values)
         if pinned := _pinned(env_file, dropped):
-            raise ValueError(f"{', '.join(pinned)}가 이전 제공자의 값으로 고정돼 "
-                             "있습니다 -- 지우고 서버를 다시 시작하세요")
+            raise ValueError(f"{', '.join(pinned)} is pinned to the previous provider's value "
+                             "-- remove it and restart the server")
     stored = {k: v for k, v in read_dotenv(env_file).items() if k not in dropped}
     try:
         new = load({**stored, **os.environ, **values})
     except ValueError as error:
-        raise ValueError(f"설정 값이 맞지 않습니다: {error}") from error
+        raise ValueError(f"a setting is not valid: {error}") from error
     chat_key = model_endpoint.PROVIDERS[new.provider].key_env
     embed_row = model_endpoint.EMBEDDERS.get(new.embedding_provider)
     chat_headers = auth_headers(model_endpoint.PROVIDERS[new.provider].wire, new.api_key)
@@ -139,7 +140,7 @@ def changed(
         checks.insert(0, (embed_row.key_env, lambda: _models(embed_row.base_url, embed_headers)))
     for env, tried in checks:
         if env in values and tried() == "refused":
-            raise ValueError(f"{env}: 서버가 키를 거절했습니다 -- 저장하지 않았습니다")
+            raise ValueError(f"{env}: the server refused the key -- nothing was saved")
     write_env(env_file, values, drop=dropped)
     demo.reconfigure(new)
     return new
@@ -174,24 +175,24 @@ def preflight(settings: Settings) -> list[str]:
     if embed_row is None:  # a test embedder: no key to ask for
         pass
     elif not settings.embedding_key:
-        problems.append(f"{embed_row.key_env}가 비어 있습니다 -- 그래프 임베딩과 검색에 쓰는"
-                        " 키를 .env에 적으세요.")
+        problems.append(f"{embed_row.key_env} is empty -- put in the key used to embed"
+                        " and search the graph.")
     elif _models(embed_row.base_url,
                  auth_headers("chat_completions", settings.embedding_key)) == "refused":
-        problems.append(f"{settings.embedding_provider}가 {embed_row.key_env}를 거절했습니다 -- "
-                        "제공자의 API 키인지 확인하세요.")
+        problems.append(f"{settings.embedding_provider} refused {embed_row.key_env} -- "
+                        "check that it is that provider's API key.")
     chat = _models(settings.base_url,
                    auth_headers(model_endpoint.PROVIDERS[settings.provider].wire, settings.api_key))
     if chat == "refused" and not settings.api_key:
-        problems.append(f"{chat_key}가 비어 있습니다 -- 문서 읽기와 답변에 쓰는 키를"
-                        " 넣으세요.")
+        problems.append(f"{chat_key} is empty -- put in the key used to read documents"
+                        " and answer.")
     elif chat == "refused":
-        problems.append(f"모델 서버({settings.base_url})가 키를 거절했습니다 -- .env의 키를"
-                        " 확인하세요.")
+        problems.append(f"the model server ({settings.base_url}) refused the key -- check"
+                        " the key in .env.")
     elif chat == "unreachable":
-        problems.append(f"모델 서버({settings.base_url})에 연결할 수 없습니다 -- 켜져 있는지"
-                        " 확인하세요.")
+        problems.append(f"the model server ({settings.base_url}) cannot be reached -- check"
+                        " that it is running.")
     if not (settings.viewer_directory / "dist").is_dir():
-        problems.append(f"뷰어 번들이 {settings.viewer_directory}에 없습니다 -- DOCX·PPTX·XLSX를"
-                        " 그리려면 src/graphme/adapters/rendering/viewer/setup.sh를 실행하세요.")
+        problems.append(f"no viewer bundle in {settings.viewer_directory} -- to draw DOCX,"
+                        " PPTX and XLSX, run src/graphme/adapters/rendering/viewer/setup.sh.")
     return problems

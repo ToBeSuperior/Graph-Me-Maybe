@@ -321,7 +321,7 @@ def ensure_local_neo4j(
         if not home.installed():
             home = installing(root)
         port = next(p for p in range(FIRST_PORT, FIRST_PORT + 100) if free(p))
-        _log.warning("그래프 DB(Neo4j)를 켜는 중입니다 (127.0.0.1:%s)", port)
+        _log.warning("starting the graph DB (Neo4j) on 127.0.0.1:%s", port)
         child = starting(home, home.data, port, memory)
         if not _started:
             atexit.register(stop_started)
@@ -334,4 +334,4 @@ def ensure_local_neo4j(
             sleep(1)
         said = (home.data / "logs" / "console.log")
         tail = said.read_text(encoding="utf-8", errors="replace")[-600:] if said.is_file() else ""
-        raise RuntimeError(f"그래프 DB(Neo4j)가 켜지지 않았습니다: {tail.strip()}")
+        raise RuntimeError(f"the graph DB (Neo4j) did not start: {tail.strip()}")

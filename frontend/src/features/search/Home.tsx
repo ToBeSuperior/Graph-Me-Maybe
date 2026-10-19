@@ -13,7 +13,7 @@ import { SearchBox, useAsk } from './SearchBox';
 
 /** A file the samples are written as (src/graphme/samples.py): with it in the graph, the
  * home page offers questions the samples answer. */
-const SAMPLE_FILE = 'QP-210_기밀 시험 절차서.docx';
+const SAMPLE_FILE = 'QP-210_Leak Test Procedure.docx';
 
 export function Home() {
   const t = useT();

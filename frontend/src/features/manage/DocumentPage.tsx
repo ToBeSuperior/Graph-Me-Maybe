@@ -121,7 +121,7 @@ function DocumentView({ name, graph, graphError, demoDoc, sheets, pagesOfNodes, 
           <h1 className="truncate text-lg font-semibold" title={shownName(name)}>{stem(name)}</h1>
           {status && <p className="flex items-center gap-1.5 text-xs text-muted">{status.busy && <Spinner className="size-3" />}{status.text}</p>}
         </div>
-        {/* The far right is where "자세히" was clicked: the danger button is kept off that spot. */}
+        {/* The far right is where "Details" was clicked: the danger button is kept off that spot. */}
         {actions}
         <span className="font-mono text-2xs text-faint uppercase">{format}</span>
       </div>

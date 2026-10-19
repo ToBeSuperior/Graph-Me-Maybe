@@ -11,7 +11,7 @@ export const clip = (s: unknown, n: number) => {
 
 export const stem = (file: string) => shownName(file).replace(/\.[^.]+$/, '');
 /** A file's name without the digest a file carried inside another is read under
- * ("메모.emb1a2b3c4d.docx" → "메모.docx"): it tells two files apart, not the reader anything. */
+ * ("memo.emb1a2b3c4d.docx" → "memo.docx"): it tells two files apart, not the reader anything. */
 export const shownName = (file: unknown): string => String(file ?? '').replace(/\.emb[0-9a-f]{8}(?=\.[A-Za-z0-9]{1,8}(?![A-Za-z0-9])|$)/g, '');
 export const formatOf = (file: string) => (file.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase();
 

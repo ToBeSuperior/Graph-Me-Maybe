@@ -21,7 +21,7 @@ from graphme.providers import Wire
 MALFORMED = "the model endpoint returned a malformed response"
 ANTHROPIC_VERSION = "2023-06-01"
 MAX_TOKENS = 16_000
-# ponytail: 고정 16000, 한 페이지 출력이 넘치면 스트리밍 + 설정값으로
+# ponytail: fixed at 16000; stream with a setting if one page's output overflows it
 _CUT_SHORT = frozenset({"max_tokens", "refusal"})
 MAX_IMAGE_SIDE = 8000
 MAX_IMAGE_BASE64 = 5 * 1024 * 1024

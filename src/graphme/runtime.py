@@ -50,7 +50,7 @@ def _require_chat_key(settings: Settings) -> None:
         key_env = model_endpoint.PROVIDERS[settings.provider].key_env
         raise ValueError(
             f"{key_env} is required (GRAPHME_PROVIDER={settings.provider}) -- "
-            "앱의 관리 › 키와 모델에서 넣으세요")
+            "put it in the app's Manage › Keys and model")
 
 
 def create_embedder(settings: Settings) -> OpenAIBatchEmbeddings:
@@ -71,7 +71,7 @@ def create_embedder(settings: Settings) -> OpenAIBatchEmbeddings:
         raise ValueError(
             f"{row.key_env} is required to embed or search "
             f"(GRAPHME_EMBEDDING_PROVIDER={settings.embedding_provider}{hint}) -- "
-            "앱의 관리 › 키와 모델에서 넣으세요"
+            "put it in the app's Manage › Keys and model"
         )
     return OpenAIBatchEmbeddings(
         model=settings.embedding_model,

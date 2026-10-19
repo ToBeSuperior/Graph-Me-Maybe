@@ -8,6 +8,7 @@ graph shows a document read out of another and cited from where it sat.
 
     python -m graphme.samples <folder>
 """
+# ruff: noqa: E501
 from __future__ import annotations
 
 import io
@@ -33,7 +34,7 @@ from pptx.util import Inches
 
 from graphme.application.file_titles import OFFICE_REL
 
-COMPANY = "가람정밀 (가상 회사)"
+COMPANY = "Garam Precision (fictional company)"
 DAY = 24 * 60 * 60
 WRITTEN = datetime(2026, 1, 5, 9, 0)
 """When each file says it was written. Fixed, with every zip entry's time, so the same samples
@@ -46,7 +47,7 @@ def _docx(path: Path | IO[bytes], title: str, sections: list[tuple[str, list[str
     doc = Document()
     doc.core_properties.created = doc.core_properties.modified = WRITTEN
     doc.add_heading(title, level=0)
-    doc.add_paragraph(f"{COMPANY} · 데모용 샘플 문서")
+    doc.add_paragraph(f"{COMPANY} · Demo sample document")
     for heading, paragraphs in sections:
         doc.add_heading(heading, level=1)
         for text in paragraphs:
@@ -70,70 +71,70 @@ def _rows(sheet: Worksheet, rows: list[list[object]], *, start: int = 1,
 
 
 def _spec(folder: Path) -> Path:
-    path = folder / "GS-100_밸브 부품 기본 규격서.docx"
-    _docx(path, "GS-100 밸브 부품 기본 규격서", [
-        ("1. 적용 범위", [
-            "이 규격은 가람정밀이 만드는 볼 밸브(호칭 지름 15~50)의 부품 치수와 재질을 정한다."]),
-        ("2. 재질", ["몸체는 스테인리스강 STS316, 볼은 STS304를 쓴다.",
-                     "시트 패킹은 PTFE로 하고, 사용 온도는 -20 ℃ ~ 180 ℃로 한다."]),
-        ("3. 치수 공차", ["몸체 내경 공차는 ±0.05 mm, 볼 진원도는 0.02 mm 이하로 한다."]),
-    ], table=[["부품", "재질", "공차"], ["몸체", "STS316", "±0.05 mm"],
-              ["볼", "STS304", "진원도 0.02 mm"]])
+    path = folder / "GS-100_Valve Part Basic Specification.docx"
+    _docx(path, "GS-100 Valve Part Basic Specification", [
+        ("1. Scope", [
+            "This specification sets the part dimensions and materials of the ball valves (nominal diameter 15 to 50) made by Garam Precision."]),
+        ("2. Materials", ["The body is stainless steel STS316 and the ball is STS304.",
+                     "The seat packing is PTFE, and the operating temperature is -20 ℃ to 180 ℃."]),
+        ("3. Dimensional Tolerances", ["The body bore tolerance is ±0.05 mm and the ball roundness is 0.02 mm or less."]),
+    ], table=[["Part", "Material", "Tolerance"], ["Body", "STS316", "±0.05 mm"],
+              ["Ball", "STS304", "Roundness 0.02 mm"]])
     return path
 
 
 def _test_spec(folder: Path) -> Path:
-    path = folder / "GS-110_기밀 시험 규격서.docx"
-    _docx(path, "GS-110 기밀 시험 규격서", [
-        ("1. 목적", ["GS-100 밸브 부품 기본 규격서에 따라 만든 밸브의 기밀 성능 기준을 정한다."]),
-        ("2. 시험 압력", ["시트 기밀 시험 압력은 1.1 MPa, 몸체 내압 시험 압력은 1.5 MPa로 한다.",
-                          "압력 유지 시간은 각각 60초 이상으로 한다."]),
-        ("3. 판정 기준", [
-            "시험 중 눈에 보이는 누설이 없고, 압력 강하가 0.01 MPa 이하이면 합격이다."]),
+    path = folder / "GS-110_Leak Test Specification.docx"
+    _docx(path, "GS-110 Leak Test Specification", [
+        ("1. Purpose", ["This specification sets the leak-tightness criteria for valves made to GS-100 Valve Part Basic Specification."]),
+        ("2. Test Pressure", ["The seat leak test pressure is 1.1 MPa and the body pressure test pressure is 1.5 MPa.",
+                          "The pressure hold time for each is 60 seconds or more."]),
+        ("3. Acceptance Criteria", [
+            "A valve passes if there is no visible leakage during the test and the pressure drop is 0.01 MPa or less."]),
     ])
     return path
 
 
 def _procedure(folder: Path) -> Path:
-    path = folder / "QP-210_기밀 시험 절차서.docx"
-    _docx(path, "QP-210 기밀 시험 절차서", [
-        ("1. 준비", ["시험 장치의 압력계 교정 유효기간을 확인한다.",
-                     "시험 압력과 판정 기준은 GS-110 기밀 시험 규격서를 따른다."]),
-        ("2. 시험 순서", ["밸브를 지그에 고정하고 볼을 닫는다.",
-                          "공기를 1.1 MPa까지 천천히 올린 뒤 60초간 유지한다.",
-                          "비눗물로 시트 주변 누설을 확인하고 압력 강하를 기록한다."]),
-        ("3. 기록", ["결과는 기밀 시험 기록표에 밸브 일련번호별로 남긴다.",
-                     "불합격품은 GS-100 기준으로 시트와 볼 치수를 다시 측정한다."]),
+    path = folder / "QP-210_Leak Test Procedure.docx"
+    _docx(path, "QP-210 Leak Test Procedure", [
+        ("1. Preparation", ["Check that the calibration of the test rig pressure gauge is still valid.",
+                     "Follow GS-110 Leak Test Specification for the test pressure and acceptance criteria."]),
+        ("2. Test Sequence", ["Fix the valve in the jig and close the ball.",
+                          "Raise the air pressure slowly to 1.1 MPa and hold it for 60 seconds.",
+                          "Check for leaks around the seat with soapy water and record the pressure drop."]),
+        ("3. Records", ["Record the results in the Leak Test Record by valve serial number.",
+                     "For failed valves, measure the seat and ball dimensions again against GS-100."]),
     ])
     return path
 
 
 def _work_order(folder: Path) -> Path:
-    path = folder / "WO-2026-031_밸브 조립 작업지시서.docx"
-    _docx(path, "WO-2026-031 밸브 조립 작업지시서", [
-        ("1. 작업 내용", ["볼 밸브 50A 200대를 조립하고 전수 기밀 시험을 한다."]),
-        ("2. 작업 순서", ["몸체와 볼을 세척한 뒤 시트 패킹을 끼운다.",
-                          "스템 너트를 12 N·m로 조인다.",
-                          "조립이 끝난 밸브는 QP-210 기밀 시험 절차서에 따라 시험한다."]),
-        ("3. 주의", ["시트 패킹은 맨손으로 만지지 않는다."]),
-    ], table=[["항목", "값"], ["수량", "200대"], ["납기", "2026-11-30"], ["담당", "조립 2팀"]])
+    path = folder / "WO-2026-031_Valve Assembly Work Order.docx"
+    _docx(path, "WO-2026-031 Valve Assembly Work Order", [
+        ("1. Work Description", ["Assemble 200 ball valves, size 50A, and leak test every unit."]),
+        ("2. Work Sequence", ["Clean the body and ball, then fit the seat packing.",
+                          "Tighten the stem nut to 12 N·m.",
+                          "Test each assembled valve according to QP-210 Leak Test Procedure."]),
+        ("3. Cautions", ["Do not touch the seat packing with bare hands."]),
+    ], table=[["Item", "Value"], ["Quantity", "200 units"], ["Due date", "2026-11-30"], ["Owner", "Assembly Team 2"]])
     return path
 
 
 def _record(folder: Path) -> Path:
-    path = folder / "기밀 시험 기록표.xlsx"
+    path = folder / "Leak Test Record.xlsx"
     book = Workbook()
     book.properties.created = book.properties.modified = WRITTEN
     sheet = book.active
-    sheet.title = "시험 기록"
-    sheet["A1"] = "기밀 시험 기록표 (QP-210에 따름)"
+    sheet.title = "Test Record"
+    sheet["A1"] = "Leak Test Record (per QP-210)"
     sheet["A1"].font = Font(bold=True, size=14)
     rows: list[list[object]] = [
-            ["일련번호", "시험 압력(MPa)", "유지 시간(초)", "압력 강하(MPa)", "판정"],
-            ["V50-0001", 1.1, 60, 0.002, "합격"],
-            ["V50-0002", 1.1, 60, 0.004, "합격"],
-            ["V50-0003", 1.1, 60, 0.018, "불합격"],
-            ["V50-0004", 1.1, 60, 0.003, "합격"]]
+            ["Serial No.", "Test pressure (MPa)", "Hold time (s)", "Pressure drop (MPa)", "Result"],
+            ["V50-0001", 1.1, 60, 0.002, "Pass"],
+            ["V50-0002", 1.1, 60, 0.004, "Pass"],
+            ["V50-0003", 1.1, 60, 0.018, "Fail"],
+            ["V50-0004", 1.1, 60, 0.003, "Pass"]]
     _rows(sheet, rows, start=3, bold_head=True)
     for column in "ABCDE":
         sheet.column_dimensions[column].width = 16
@@ -142,16 +143,16 @@ def _record(folder: Path) -> Path:
 
 
 def _deck(folder: Path) -> Path:
-    path = folder / "기밀 불량 개선 보고.pptx"
+    path = folder / "Leak Defect Improvement Report.pptx"
     deck = Presentation()
     deck.core_properties.created = deck.core_properties.modified = WRITTEN
     slides = [
-        ("기밀 불량 개선 보고", [COMPANY, "조립 2팀 · 데모용 샘플"]),
-        ("현상", ["WO-2026-031 조립분에서 기밀 시험 불합격 발생",
-                  "불합격 밸브의 압력 강하가 판정 기준을 넘음"]),
-        ("원인과 대책", ["원인: 시트 패킹 삽입 시 이물 혼입",
-                        "대책: 세척 후 패킹 삽입까지 클린 벤치에서 작업",
-                        "재시험은 QP-210 절차와 같은 압력·유지 시간으로 실시"]),
+        ("Leak Defect Improvement Report", [COMPANY, "Assembly Team 2 · Demo sample"]),
+        ("Findings", ["Leak test failures occurred in the WO-2026-031 assembly batch",
+                  "The pressure drop of the failed valve exceeded the acceptance criterion"]),
+        ("Cause and Countermeasures", ["Cause: foreign matter got in when the seat packing was fitted",
+                        "Countermeasure: work at a clean bench from cleaning until the packing is fitted",
+                        "Retest at the same pressure and hold time as in QP-210 Leak Test Procedure"]),
     ]
     for title, lines in slides:
         slide = deck.slides.add_slide(deck.slide_layouts[1])
@@ -176,7 +177,7 @@ _PROGS = {".docx": PROG_ID.DOCX, ".xlsx": PROG_ID.XLSX, ".pptx": PROG_ID.PPTX}
 
 def _inner_docx(title: str, lines: list[str]) -> bytes:
     buffer = io.BytesIO()
-    _docx(buffer, title, [("내용", lines)])
+    _docx(buffer, title, [("Contents", lines)])
     return _settle(buffer.getvalue())
 
 
@@ -206,7 +207,7 @@ def _inner_pptx(title: str, lines: list[str]) -> bytes:
 def _pdf(title: str, lines: list[str]) -> pymupdf.Document:
     pdf = pymupdf.open()
     pdf.new_page().insert_textbox(pymupdf.Rect(56, 56, 540, 800),
-                                  "\n\n".join([title, f"{COMPANY} · 데모용 샘플 문서", *lines]),
+                                  "\n\n".join([title, f"{COMPANY} · Demo sample document", *lines]),
                                   fontname="korea", fontsize=11)
     return pdf
 
@@ -295,32 +296,32 @@ def _rewritten(path: Path, edit: dict[str, bytes], types: list[str]) -> None:
     path.write_bytes(_settle(path.read_bytes(), edit | {"[Content_Types].xml": declared.encode()}))
 
 
-SHARED_RULES = ("공통 안전 수칙.docx", [
-    "시험 압력을 거는 동안 밸브 정면에 서지 않는다.",
-    "압력을 뺀 뒤 0 MPa를 확인하고 나서 지그를 푼다.",
-    "이 수칙은 회의록과 회의 자료에 함께 첨부한다."])
+SHARED_RULES = ("Shared Safety Rules.docx", [
+    "Do not stand in front of the valve while test pressure is applied.",
+    "Release the pressure, confirm 0 MPa, and only then unclamp the jig.",
+    "These rules are attached to both the minutes and the meeting deck."])
 
 
 def _meeting_deck(folder: Path) -> Path:
     """A deck with a Word file, a PDF and the shared rules each on a slide of its own."""
-    path = folder / "협력사 품질 회의.pptx"
+    path = folder / "Supplier Quality Meeting.pptx"
     deck = Presentation()
     deck.core_properties.created = deck.core_properties.modified = WRITTEN
     attachments = [
-        ("IQ-310 입고 검사 기준 (첨부)", "IQ-310_입고 검사 기준.docx", _inner_docx(
-            "IQ-310 입고 검사 기준", [
-                "협력사가 납품하는 볼은 GS-100 밸브 부품 기본 규격서의 진원도 0.02 mm를 따른다.",
-                "로트마다 5개를 뽑아 진원도와 표면 거칠기를 잰다.",
-                "한 개라도 벗어나면 로트 전체를 돌려보낸다."])),
-        ("불량 사진 보고 (첨부)", "불량 사진 보고.pdf", _pdf_bytes(_pdf("불량 사진 보고", [
-            "V50-0003 시트 패킹 표면에서 지름 0.3 mm 이물이 발견되었다.",
-            "이물은 세척조 필터 교체 주기를 넘긴 날 조립된 밸브에서만 나왔다.",
-            "세척조 필터 교체 주기를 2주에서 1주로 줄인다."]))),
-        ("공통 안전 수칙 (첨부)", SHARED_RULES[0], _inner_docx("공통 안전 수칙", SHARED_RULES[1])),
+        ("IQ-310 Incoming Inspection Criteria (attached)", "IQ-310_Incoming Inspection Criteria.docx", _inner_docx(
+            "IQ-310 Incoming Inspection Criteria", [
+                "Balls delivered by suppliers must meet the roundness of 0.02 mm in GS-100 Valve Part Basic Specification.",
+                "Sample 5 pieces from each lot and measure roundness and surface roughness.",
+                "If even one piece is out of tolerance, the whole lot is returned."])),
+        ("Defect Photo Report (attached)", "Defect Photo Report.pdf", _pdf_bytes(_pdf("Defect Photo Report", [
+            "A foreign particle 0.3 mm in diameter was found on the seat packing surface of V50-0003.",
+            "Particles appeared only on valves assembled on days when the washing tank filter was past its replacement interval.",
+            "The washing tank filter replacement interval is shortened from 2 weeks to 1 week."]))),
+        ("Shared Safety Rules (attached)", SHARED_RULES[0], _inner_docx("Shared Safety Rules", SHARED_RULES[1])),
     ]
     title = deck.slides.add_slide(deck.slide_layouts[0])
-    title.shapes.title.text = "협력사 품질 회의"
-    title.placeholders[1].text = f"{COMPANY} · 첨부 파일이 든 데모용 샘플"
+    title.shapes.title.text = "Supplier Quality Meeting"
+    title.placeholders[1].text = f"{COMPANY} · Demo sample with attached files"
     for heading, name, data in attachments:
         slide = deck.slides.add_slide(deck.slide_layouts[5])
         slide.shapes.title.text = heading
@@ -333,21 +334,21 @@ def _meeting_deck(folder: Path) -> Path:
 
 def _minutes(folder: Path) -> Path:
     """A memo carrying a workbook, a PDF, a deck and the shared rules as icons."""
-    path = folder / "설비 점검 회의록.docx"
-    _docx(path, "설비 점검 회의록", [
-        ("1. 안건", ["기밀 시험기 점검 결과와 압력계 교정, 다음 분기 설비 개선을 다룬다."]),
-        ("2. 첨부", ["아래 아이콘은 회의에서 함께 본 파일이다."]),
+    path = folder / "Equipment Inspection Minutes.docx"
+    _docx(path, "Equipment Inspection Minutes", [
+        ("1. Agenda", ["Covers the leak tester inspection results, pressure gauge calibration and equipment improvements for next quarter."]),
+        ("2. Attachments", ["The icons below are the files reviewed together at the meeting."]),
     ])
     attachments = [
-        ("점검 체크리스트.xlsx", _inner_xlsx("기밀 시험기 점검 체크리스트", [
-            ["항목", "기준", "결과"], ["압력계 영점", "±0.005 MPa", "적합"],
-            ["누설 감지 센서", "작동", "적합"], ["호스 균열", "없음", "교체 필요"]])),
-        ("압력계 교정 성적서.pdf", _pdf_bytes(_pdf("압력계 교정 성적서", [
-            "교정 대상: 기밀 시험기 압력계 PG-07", "교정 결과: 1.1 MPa에서 오차 +0.003 MPa",
-            "다음 교정 예정일: 2026-07-05"]))),
-        ("설비 개선 계획.pptx", _inner_pptx("설비 개선 계획", [
-            "기밀 시험기 호스를 고압용으로 교체", "QP-210 절차서의 장비 점검 항목에 호스를 추가"])),
-        (SHARED_RULES[0], _inner_docx("공통 안전 수칙", SHARED_RULES[1])),
+        ("Inspection Checklist.xlsx", _inner_xlsx("Leak Tester Inspection Checklist", [
+            ["Item", "Criterion", "Result"], ["Pressure gauge zero point", "±0.005 MPa", "OK"],
+            ["Leak detection sensor", "Operating", "OK"], ["Hose cracks", "None", "Replacement needed"]])),
+        ("Pressure Gauge Calibration Certificate.pdf", _pdf_bytes(_pdf("Pressure Gauge Calibration Certificate", [
+            "Calibrated item: leak tester pressure gauge PG-07", "Calibration result: error of +0.003 MPa at 1.1 MPa",
+            "Next calibration due: 2026-07-05"]))),
+        ("Equipment Improvement Plan.pptx", _inner_pptx("Equipment Improvement Plan", [
+            "Replace the leak tester hose with a high-pressure one", "Add the hose to the equipment inspection items of QP-210 Leak Test Procedure"])),
+        (SHARED_RULES[0], _inner_docx("Shared Safety Rules", SHARED_RULES[1])),
     ]
     with zipfile.ZipFile(path) as old:
         document = old.read("word/document.xml").decode()
@@ -377,18 +378,18 @@ def _minutes(folder: Path) -> Path:
 
 def _price_book(folder: Path) -> Path:
     """A workbook whose second sheet carries the memo the prices were agreed in."""
-    path = folder / "부품 단가표.xlsx"
+    path = folder / "Parts Price List.xlsx"
     book = Workbook()
     book.properties.created = book.properties.modified = WRITTEN
     prices = book.active
-    prices.title = "단가"
-    _rows(prices, [["부품", "재질", "단가(원)"], ["몸체 50A", "STS316", 18500],
-                   ["볼 50A", "STS304", 7200], ["시트 패킹", "PTFE", 900]])
-    book.create_sheet("협의")["A1"] = "단가 협의 메모를 첨부한다."
+    prices.title = "Prices"
+    _rows(prices, [["Part", "Material", "Unit price (KRW)"], ["Body 50A", "STS316", 18500],
+                   ["Ball 50A", "STS304", 7200], ["Seat packing", "PTFE", 900]])
+    book.create_sheet("Negotiation")["A1"] = "The price negotiation memo is attached."
     book.save(path)
-    memo = _inner_docx("단가 협의 메모", [
-        "STS316 원자재 가격 인상으로 몸체 50A 단가를 18,500원으로 올린다.",
-        "볼과 시트 패킹 단가는 그대로 둔다.", "적용은 WO-2026-031 이후 발주분부터 한다."])
+    memo = _inner_docx("Price Negotiation Memo", [
+        "Because of the STS316 raw material price increase, the Body 50A unit price is raised to 18,500 won.",
+        "The unit prices of the ball and seat packing are unchanged.", "This applies to orders placed after WO-2026-031."])
     with zipfile.ZipFile(path) as old:
         sheet = old.read("xl/worksheets/sheet2.xml").decode()
     if "xmlns:r=" not in sheet:
@@ -409,18 +410,18 @@ def _price_book(folder: Path) -> Path:
 
 def _shipping_report(folder: Path) -> Path:
     """A PDF with a workbook attached on its page and a deck attached to the whole file."""
-    path = folder / "출하 검사 보고서.pdf"
-    pdf = _pdf("출하 검사 보고서", [
-        "WO-2026-031 조립분 200대의 출하 검사를 마쳤다.",
-        "검사 항목별 결과는 이 쪽에 붙인 체크리스트 파일에 있다.",
-        "출하 브리핑 자료는 이 보고서 파일에 함께 붙였다."])
-    pdf[0].add_file_annot(pymupdf.Point(60, 300), _inner_xlsx("출하 검사 체크리스트", [
-        ["항목", "기준", "결과"], ["외관", "흠집 없음", "적합"],
-        ["기밀", "GS-110 판정 기준", "200대 합격"], ["포장", "방청지 동봉", "적합"]]),
-        "출하 검사 체크리스트.xlsx")
-    pdf.embfile_add("출하 브리핑.pptx", _inner_pptx("출하 브리핑", [
-        "출하 수량 200대, 납기 2026-11-30 준수", "다음 로트부터 포장 방청지 규격 변경"]),
-        filename="출하 브리핑.pptx")
+    path = folder / "Shipping Inspection Report.pdf"
+    pdf = _pdf("Shipping Inspection Report", [
+        "The shipping inspection of the 200 units from the WO-2026-031 assembly batch is complete.",
+        "Results for each inspection item are in the checklist file attached to this page.",
+        "The shipping briefing deck is attached to this report file."])
+    pdf[0].add_file_annot(pymupdf.Point(60, 300), _inner_xlsx("Shipping Inspection Checklist", [
+        ["Item", "Criterion", "Result"], ["Appearance", "No scratches", "OK"],
+        ["Leak tightness", "GS-110 acceptance criteria", "200 units passed"], ["Packaging", "Rust-proof paper enclosed", "OK"]]),
+        "Shipping Inspection Checklist.xlsx")
+    pdf.embfile_add("Shipping Briefing.pptx", _inner_pptx("Shipping Briefing", [
+        "Shipped quantity 200 units, due date 2026-11-30 met", "Rust-proof paper specification for packaging changes from the next lot"]),
+        filename="Shipping Briefing.pptx")
     path.write_bytes(_pdf_bytes(pdf))
     return path
 

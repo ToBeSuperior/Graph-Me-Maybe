@@ -147,10 +147,12 @@ the file. Both viewer builds carry their own copy of it, so a fix is two patches
 
 A document's pages are drawn once, not once a start: `_prepare` keeps what the renderer
 measured beside the page images (`pages.json`) and the graph as binding left it (`bound.json`),
-keyed by the file's content hash and `page_cache.identity` -- this package's code and the viewer
-bundle's files -- and takes them back while the key matches and every asset the graph names is
-still stored. Reopened after a restart, a DOCX, PPTX or XLSX needed Chrome and its extraction
-again for a view nothing about had changed.
+keyed by the file's content hash and `page_cache.identity` -- the code that draws, reads and
+binds (`code_files`: `domain/`, `adapters/rendering/`, `adapters/extractors/`, `application/`),
+the viewer bundle's files and the browser -- and takes them back while the key matches and every
+asset the graph names is still stored. Reopened after a restart, a DOCX, PPTX or XLSX needed
+Chrome and its extraction again for a view nothing about had changed; keyed on the whole package,
+every release redrew every document once, though only those parts make what is kept.
 
 ### One producer of a crop
 
@@ -395,7 +397,8 @@ the found documents are folders by hop (`lib/hops.ts`). Every API shape is in
 sends without declaring it there is dropped. The demo's `POST /v1/samples` is the one route
 outside that contract (`Samples` in `src/api/client.ts`). The build and the export shown are
 the newest job of each slot in `GET /v1/jobs` (`lastBuild`, `lastExport`). Words are in `src/lib/words.ts`, English
-typed as Korean's shape. Colours are tokens in `styles.css`; what is painted on a canvas reads
+typed as Korean's shape; the app opens in English unless Korean was chosen (`lib/i18n.tsx`), and
+every message, document and sample is written in English. Colours are tokens in `styles.css`; what is painted on a canvas reads
 them when drawn (`token()`) and draws again on a theme change.
 
 The server is `src/graphme/server/`: `app.py` (`create_app`: the `/v1` routes, the key, the
@@ -438,8 +441,7 @@ or `stop_started()` before the window app's `os._exit`. A Neo4j answering on the
 recorded is adopted only if `server.directories.data` is this home's (WSL's app answers on
 Windows' loopback too). The server never opens it in a page's request: `Demo.space(wait=)` opens
 it behind and answers `GraphStarting` (503, Retry-After), which the page keeps asking through.
-This checkout's `.env` names its own `GRAPHME_HOME`, so development keeps a graph apart from an
-installed app's. An `export-corpus` bundle leaves out `source_path` (this machine's paths never
+An `export-corpus` bundle leaves out `source_path` (this machine's paths never
 leave it), so a graph moved through one has no files to draw or download until those are set again.
 
 ### Neo4j shape
@@ -475,6 +477,8 @@ Offline results prove orchestration, persistence and readiness — never provide
   how to verify a change (no measured values, by policy).
 - `docs/method.md` — why the pipeline looks like this; the failures that shaped it.
 - `docs/roadmap.md` — what is still open.
+- `docs/installation.md`, `docs/user-guide.md`, `docs/retrieval.md` — what the README links to for
+  users; `CONTRIBUTING.md` for contributors.
 
 ## Working style
 

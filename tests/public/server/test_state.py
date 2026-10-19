@@ -283,9 +283,9 @@ def test_a_cancel_stops_a_reading_between_its_pages(demo: Demo, tmp_path: Path) 
 
 
 def test_what_the_state_refuses_it_refuses_without_http(demo: Demo, tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="지원하지 않는 형식"):
+    with pytest.raises(ValueError, match="unsupported format"):
         demo.add("notes.txt", b"x")
-    with pytest.raises(ValueError, match="빈 파일"):
+    with pytest.raises(ValueError, match="the file is empty"):
         demo.add("memo.docx", b"")
     with pytest.raises(LookupError):
         demo.session("nothing")

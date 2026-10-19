@@ -128,8 +128,8 @@ class Neo4jGraphSpace:
         except AuthError as error:
             driver.close()
             raise PasswordWanted(
-                f"{settings.neo4j_uri}의 Neo4j가 비밀번호를 받지 않습니다 -- .env의 "
-                "GRAPHME_NEO4J_PASSWORD를 확인하세요."
+                f"the Neo4j at {settings.neo4j_uri} does not take the password -- check "
+                "GRAPHME_NEO4J_PASSWORD in .env."
             ) from error
         return cls(driver)
 

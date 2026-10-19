@@ -1,13 +1,19 @@
-## 무엇을, 왜
+## What and why
 
-## 검사
+<!-- What does this change, and why? Link the issue it closes: "Closes #123". -->
 
-- [ ] `uv run ruff check src tests/public`
-- [ ] `uv run mypy src`
+## How it was checked
+
+- [ ] `uv run ruff check src tests/public && uv run mypy src`
 - [ ] `uv run pytest tests/public`
-- [ ] 동작을 바꿨다면, 바꾸기 전에 실패하는 테스트를 먼저 썼다
+- [ ] For web app changes: `cd frontend && npm run typecheck && npm test && npm run e2e`
+- [ ] A change in behaviour comes with a test that failed before it
+- [ ] User-visible changes have a line under `## [Unreleased]` in `CHANGELOG.md`
 
-## 데이터
+<!-- If you checked something with a real model call, summarise what you checked.
+     Do not paste model responses or document content. -->
 
-- [ ] 실제 문서, 그 문서에서 잰 값, 키를 넣지 않았다(테스트·커밋 메시지·이 설명 모두)
-- 모델 호출로 확인했다면 무엇을 확인했는지 요약(응답 원문은 붙이지 않음):
+## Data
+
+- [ ] No real document, nothing measured from one, and no key — in code, tests, commit messages or
+      this description

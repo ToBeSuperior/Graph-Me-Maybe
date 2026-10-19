@@ -84,7 +84,7 @@ def test_unknown_names_newlines_and_shell_overrides_are_refused(
         assert client.put("/v1/settings", json={"values": values}).status_code == 400
     monkeypatch.setenv("GRAPHME_MODEL", "shell")
     said = client.put("/v1/settings", json={"values": {"GRAPHME_MODEL": "x"}})
-    assert said.status_code == 400 and "환경변수" in said.json()["detail"]
+    assert said.status_code == 400 and "environment variables" in said.json()["detail"]
 
 
 def test_settings_are_not_changed_while_a_build_runs(page: Any) -> None:

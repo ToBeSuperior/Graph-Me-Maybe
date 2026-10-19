@@ -9,9 +9,10 @@ graph as bound is kept too: reading a workbook again and cutting its crops again
 than the drawing did.
 
 Kept only while nothing that made it has changed: the same file (by content), the same code
-(this package, all of it -- extraction and binding as much as drawing), the same viewer bundle,
-and every picture the graph names still in the asset store. Anything else and it is made
-again, and kept again.
+that draws, reads and binds (`code_files`), the same viewer bundle, the same browser, and every
+picture the graph names still in the asset store. Anything else and it is made again, and kept
+again. The server, the CLI and the words on the page are not in the key: a release changing
+only those redrew every document once it was in.
 """
 from __future__ import annotations
 
@@ -30,15 +31,38 @@ from graphme.domain.models import ExtractedDocument
 FILE = "pages.json"
 BOUND = "bound.json"
 _PACKAGE = Path(__file__).resolve().parents[2]
+_MAKERS = ("domain", "adapters/rendering", "adapters/extractors", "application")
+"""The code that makes what is kept: the pages, and the graph as read and bound."""
 _ASSET = re.compile(r'"(?:asset_hash|crop_asset_hash)"\s*:\s*"([0-9a-f]{64})"')
 
 
+def code_files() -> list[Path]:
+    return sorted(path for part in _MAKERS for path in (_PACKAGE / part).rglob("*.py"))
+
+
+def _browser(chrome: str | None) -> str:
+    """Which browser draws: an installed Chrome by its file and the version folders beside it
+    (Windows keeps one per version), else Playwright's own Chromium by Playwright's version."""
+    if chrome and Path(chrome).is_file():
+        found = Path(chrome)
+        stat = found.stat()
+        beside = sorted(p.name for p in found.parent.iterdir())
+        return f"{found}:{stat.st_size}:{stat.st_mtime_ns}:{beside}"
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return f"playwright {version('playwright')}"
+    except PackageNotFoundError:
+        return "none"
+
+
 @functools.cache
-def identity(viewer: Path) -> str:
-    """What makes the pages and the graph: this package's code, and the viewer bundle's files
-    (named by their content, and patched on top). Asked once a run."""
-    digest = hashlib.sha256()
-    for path in sorted(_PACKAGE.rglob("*.py")):
+def identity(viewer: Path, chrome: str | None = None) -> str:
+    """What makes the pages and the graph: the code that draws, reads and binds, the viewer
+    bundle's files (named by their content, and patched on top), and the browser. Asked once
+    a run."""
+    digest = hashlib.sha256(_browser(chrome).encode())
+    for path in code_files():
         digest.update(path.read_bytes())
     for part in ("dist", "xlsx"):
         folder = viewer / part
@@ -48,8 +72,8 @@ def identity(viewer: Path) -> str:
     return digest.hexdigest()
 
 
-def key(content: str | None, viewer: Path) -> str:
-    return f"{content}:{identity(viewer)}"
+def key(content: str | None, viewer: Path, chrome: str | None = None) -> str:
+    return f"{content}:{identity(viewer, chrome)}"
 
 
 def save(workspace: Path, pages: tuple[RenderedPage, ...], key: str) -> None:
