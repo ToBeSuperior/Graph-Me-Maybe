@@ -359,6 +359,23 @@ def create_app(
         return FileResponse(archive, filename="graphme-neo4j-import.zip",
                             background=BackgroundTask(shutil.rmtree, archive.parent, True))
 
+    @v1.get("/documents/files.zip")
+    def documents_zip(
+        doc: Annotated[list[str], Query()],
+        folder: Annotated[list[str], Query()],
+        name: str = "documents",
+    ) -> FileResponse:
+        """The files the documents `doc` were read from, in one zip, each in the `folder` beside
+        it (the page's folders of what a question found). A link, not a fetch: the app's own
+        window saves it as it saves any download."""
+        if len(doc) != len(folder):
+            raise HTTPException(400, "문서마다 폴더 이름이 하나씩 필요합니다")
+        opened()
+        archive = demo.files_zip(list(zip(doc, folder, strict=True)))
+        shown = "".join(c for c in name if c not in '/\\:*?"<>|').strip(". ")[:80] or "documents"
+        return FileResponse(archive, filename=f"{shown}.zip", media_type="application/zip",
+                            background=BackgroundTask(shutil.rmtree, archive.parent, True))
+
     # Files the server holds -----------------------------------------------------------------
 
     def ready(file_id: str) -> Session:

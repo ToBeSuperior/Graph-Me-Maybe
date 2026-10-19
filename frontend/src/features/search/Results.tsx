@@ -11,6 +11,7 @@ import { answerPath, citedFiles, hopTrail, placesOf, type TrailDoc } from '../..
 import { useT } from '../../lib/i18n';
 import { useMediaQuery } from '../../lib/useMediaQuery';
 import { AnswerCard } from './AnswerCard';
+import { DownloadFiles } from './DownloadFiles';
 import { Preview } from './Preview';
 import { RecentList, RecentMenu, useHistory } from './RecentList';
 import { firstRow, ResultTree, type Row } from './ResultTree';
@@ -103,6 +104,7 @@ export function Results({ question, topK, stamp }: { question: string; topK: num
                   className={cn('h-6 rounded-md border px-2 font-mono text-2xs uppercase',
                     formats.has(f) ? 'border-accent bg-accent-soft text-accent-fg' : 'border-line text-muted hover:bg-hover')}>{f}</button>
               ))}
+              <DownloadFiles docs={trail.nodes} question={question} />
               <Button variant="ghost" size="icon-sm" aria-label={t('expandAll')} title={t('expandAll')} onClick={() => setExpandAll((n) => Math.abs(n) + 1)}><ChevronsUpDown className="size-3.5" /></Button>
               <Button variant="ghost" size="icon-sm" aria-label={t('collapseAll')} title={t('collapseAll')} onClick={() => setExpandAll((n) => -(Math.abs(n) + 1))}><ChevronsDownUp className="size-3.5" /></Button>
             </div>

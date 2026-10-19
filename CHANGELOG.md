@@ -3,6 +3,12 @@
 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고, 버전은
 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [Unreleased]
+
+### 추가
+
+- 질문으로 찾은 문서의 원본 파일을 한 번에 받기. 결과 위의 **받기**에서 파일 하나하나, 1·2·3차별, 모두 선택/해제로 고르고 zip 하나로 받습니다. zip 안은 화면처럼 차수별 폴더로 나뉘고, 이름이 같은 파일은 둘 다 담기며, 열 수 없는 파일은 `missing-files.txt`에 적힙니다(`GET /v1/documents/files.zip`).
+
 ## [0.1.14] - 2026-10-19
 
 ### 고침

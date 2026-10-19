@@ -168,3 +168,30 @@ test('a server with a key asks for it, says when it is wrong, and is then asked 
   expect([cookie?.value, cookie?.sameSite, cookie?.expires]).toEqual(['k-invented', 'Strict', -1]);
   expect(fake.refused).toBeGreaterThan(0);
 });
+
+test('the files a question found are picked by file, by hop or all, and downloaded in one zip', async ({ page }) => {
+  await fakeApi(page);
+  await page.goto('/?q=%EC%8B%9C%ED%97%98%20%EC%95%95%EB%A0%A5%EC%9D%80%3F');
+  await page.getByRole('button', { name: '받기' }).click();
+  const dialog = page.getByRole('dialog');
+  const link = dialog.getByRole('link', { name: /선택한 \d+개 받기/ });
+  const docsIn = async () => new URL((await link.getAttribute('href'))!, 'http://x').searchParams.getAll('doc');
+
+  // All picked to begin with, each in its hop's folder.
+  await expect(link).toHaveText('선택한 3개 받기');
+  expect(await docsIn()).toEqual(['proc', 'spec', 'deck']);
+  const folders = new URL((await link.getAttribute('href'))!, 'http://x').searchParams.getAll('folder');
+  expect(folders).toEqual(['1차 - 질문으로 찾은 문서', '2차 - 연결된 문서', '3차 - 더 연결된 문서']);
+
+  // A hop at a time.
+  await dialog.getByRole('checkbox', { name: '2차 - 연결된 문서' }).uncheck();
+  expect(await docsIn()).toEqual(['proc', 'deck']);
+  // One file.
+  await dialog.getByRole('checkbox', { name: '가상 보고.pptx' }).uncheck();
+  expect(await docsIn()).toEqual(['proc']);
+  // All, off and on.
+  await dialog.getByRole('button', { name: '모두 해제' }).click();
+  await expect(dialog.getByRole('button', { name: '선택한 0개 받기' })).toBeDisabled();
+  await dialog.getByRole('button', { name: '모두 선택' }).click();
+  expect(await docsIn()).toEqual(['proc', 'spec', 'deck']);
+});

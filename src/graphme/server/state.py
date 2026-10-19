@@ -14,6 +14,7 @@ import time
 import traceback
 import uuid
 import weakref
+import zipfile
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
@@ -32,7 +33,7 @@ from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
 from graphme.api import GraphMe
 from graphme.application.corpus_build import BuildReport, BuildStep, build_graph, content_hash
 from graphme.application.document_graph import DocumentGraphBuilder
-from graphme.application.embedded_documents import embedded_in, safe_name
+from graphme.application.embedded_documents import embedded_in, safe_name, shown_name
 from graphme.application.hierarchy_decisions import apply_hierarchy_decisions
 from graphme.application.ingest import SUFFIX_FORMATS, format_of
 from graphme.application.page_units import flow_pages
@@ -339,6 +340,35 @@ class Demo:
             write_import_bundle(self.space().corpus_rows(docs), Path(folder))
             place = Path(tempfile.mkdtemp(prefix="neo4j-import-"))  # a dropped download: temp
             return Path(shutil.make_archive(str(place / "neo4j-import"), "zip", folder))
+
+    def files_zip(self, picked: Sequence[tuple[str, str]]) -> Path:
+        """The files the documents in `picked` were read from, each in the folder named beside
+        it, as one zip of its own per request, which the caller removes once it is sent. A
+        document the space does not hold, or whose file is gone, is named in
+        `missing-files.txt` rather than passed over."""
+        space = self.space()
+        place = Path(tempfile.mkdtemp(prefix="graphme-files-"))  # a dropped download: temp
+        archive = place / "files.zip"
+        taken: set[str] = set()
+        missing: list[str] = []
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as out:
+            for document_id, folder in picked:
+                path = space.source_path(document_id)
+                if not path or not Path(path).is_file():
+                    missing.append(shown_name(Path(path).name) if path else document_id)
+                    continue
+                # A folder name is one folder: no separator, no way out of the zip.
+                where = "".join(c for c in folder if c not in '/\\:*?"<>|').strip(". ") or "files"
+                stem, suffix = os.path.splitext(shown_name(Path(path).name))
+                name, n = f"{where}/{stem}{suffix}", 1
+                while name in taken:  # two files of one name in one folder: both kept
+                    n += 1
+                    name = f"{where}/{stem} ({n}){suffix}"
+                taken.add(name)
+                out.write(path, name)
+            if missing:
+                out.writestr("missing-files.txt", "\n".join(missing) + "\n")
+        return archive
 
     def start_export(
         self, kind: str, docs: list[str] | None, aura: dict[str, str] | None = None

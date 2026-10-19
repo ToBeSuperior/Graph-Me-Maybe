@@ -431,7 +431,9 @@ or `stop_started()` before the window app's `os._exit`. A Neo4j answering on the
 recorded is adopted only if `server.directories.data` is this home's (WSL's app answers on
 Windows' loopback too). The server never opens it in a page's request: `Demo.space(wait=)` opens
 it behind and answers `GraphStarting` (503, Retry-After), which the page keeps asking through.
-This checkout's `.env` names `GRAPHME_NEO4J_URI`, so development uses the Neo4j it names.
+This checkout's `.env` names its own `GRAPHME_HOME`, so development keeps a graph apart from an
+installed app's. An `export-corpus` bundle leaves out `source_path` (this machine's paths never
+leave it), so a graph moved through one has no files to draw or download until those are set again.
 
 ### Neo4j shape
 

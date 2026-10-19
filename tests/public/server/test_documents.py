@@ -256,3 +256,37 @@ def test_a_file_opened_from_its_folder_and_uploaded_too_is_one_entry(
     items = client.get("/v1/documents").json()["items"]
 
     assert [(i["name"], i["in_space"]) for i in items] == [("spec.docx", True)]
+
+
+def test_the_files_a_question_found_leave_in_one_zip_by_its_folders(
+    demo: Demo, space: FakeSpace, client: TestClient, tmp_path: Path
+) -> None:
+    found, linked, attached = tmp_path / "spec.docx", tmp_path / "other" / "spec.docx", (
+        tmp_path / "memo.emb0123abcd.pdf")
+    found.write_bytes(b"first")
+    linked.parent.mkdir()
+    linked.write_bytes(b"second")
+    attached.write_bytes(b"%PDF-1.4")
+    space.paths = {"d1": str(found), "d2": str(linked), "d3": str(attached),
+                   "d4": str(tmp_path / "gone.xlsx")}
+    space.held = {"d1": "spec.docx", "d2": "spec.docx", "d3": "memo.pdf", "d4": "gone.xlsx"}
+
+    got = client.get("/v1/documents/files.zip", params=[
+        ("doc", "d1"), ("folder", "1 found"), ("doc", "d2"), ("folder", "1 found"),
+        ("doc", "d3"), ("folder", "../2 linked"), ("doc", "d4"), ("folder", "2 linked"),
+        ("doc", "nope"), ("folder", "2 linked"), ("name", "a question?")])
+
+    assert got.status_code == 200, got.text
+    assert "attachment" in got.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(got.content)) as archive:
+        names = archive.namelist()
+        assert names[:3] == ["1 found/spec.docx", "1 found/spec (2).docx", "2 linked/memo.pdf"]
+        assert archive.read("1 found/spec (2).docx") == b"second"
+        # Nothing the server could not open is passed over in silence.
+        missing = archive.read("missing-files.txt").decode("utf-8")
+    assert "gone.xlsx" in missing and "nope" in missing
+    assert not any(".." in n or n.startswith("/") for n in names)
+
+
+def test_a_zip_of_nothing_chosen_is_refused(client: TestClient) -> None:
+    assert client.get("/v1/documents/files.zip").status_code in (400, 422)

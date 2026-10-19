@@ -238,6 +238,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/documents/files.zip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Documents Zip
+         * @description The files the documents `doc` were read from, in one zip, each in the `folder` beside
+         *     it (the page's folders of what a question found). A link, not a fetch: the app's own
+         *     window saves it as it saves any download.
+         */
+        get: operations["documents_zip_v1_documents_files_zip_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/files": {
         parameters: {
             query?: never;
@@ -1390,6 +1412,39 @@ export interface operations {
         parameters: {
             query?: {
                 docs?: string[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    documents_zip_v1_documents_files_zip_get: {
+        parameters: {
+            query: {
+                doc: string[];
+                folder: string[];
+                name?: string;
             };
             header?: never;
             path?: never;
