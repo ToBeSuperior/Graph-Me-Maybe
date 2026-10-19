@@ -32,10 +32,14 @@ def test_nothing_starts_a_program_but_through_it() -> None:
     for path in SRC.rglob("*.py"):
         if path == SRC / "processes.py":
             continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        # `Popen` only when called: as a type (`subprocess.Popen[bytes]`) it starts nothing.
+        called = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
+        for node in ast.walk(tree):
             if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
                     and node.value.id == "subprocess"
-                    and node.attr in {"run", "Popen", "call", "check_call", "check_output"}):
+                    and (node.attr in {"run", "call", "check_call", "check_output"}
+                         or (node.attr == "Popen" and id(node) in called))):
                 direct.append(f"{path.relative_to(SRC)}:{node.lineno}")
     assert direct == []
 

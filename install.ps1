@@ -6,8 +6,8 @@
 #   GRAPHME_VERSION=v0.1.0      a release tag (default: the latest)
 #   GRAPHME_INSTALL_SOURCE=DIR  take the release files from a folder or URL instead
 #   GRAPHME_HOME=DIR            the app's folder (settings, graph data, web app, viewer)
-#   GRAPHME_YES=1               answer yes (installs Docker Desktop when it is missing)
-#   GRAPHME_NO_DOCKER=1  GRAPHME_NO_SHORTCUT=1  GRAPHME_NO_LAUNCH=1
+#   GRAPHME_NO_NEO4J=1          do not fetch the graph DB now (the app fetches it when it opens)
+#   GRAPHME_NO_SHORTCUT=1  GRAPHME_NO_LAUNCH=1
 #   GRAPHME_UNINSTALL=1         remove the app; GRAPHME_PURGE=1 also its settings and data
 #   UV_NO_MODIFY_PATH=1         leave your user PATH alone
 $ErrorActionPreference = 'Stop'
@@ -20,11 +20,6 @@ $Shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Graph-
 
 function Say([string]$Message) { Write-Host "graph-me-maybe: $Message" }
 function Fail([string]$Message) { Write-Error "graph-me-maybe: $Message"; exit 1 }
-function Ask([string]$Question) {
-    if ($env:GRAPHME_YES) { return $true }
-    if (-not [Environment]::UserInteractive) { return $false }
-    try { return (Read-Host "$Question [y/N]") -match '^(y|yes)$' } catch { return $false }
-}
 # Windows PowerShell 5.1 turns a native command's redirected stderr into a terminating error
 # under 'Stop'; commands whose output is thrown away run here instead.
 function Quiet([scriptblock]$Run) { $ErrorActionPreference = 'Continue'; & $Run *> $null }
@@ -73,22 +68,11 @@ function Has-Chrome {
     return $false
 }
 
-function Offer-Docker {
-    if ($env:GRAPHME_NO_DOCKER) { return }
-    if (Get-Command docker -ErrorAction SilentlyContinue) {
-        Quiet { docker info }
-        if ($LASTEXITCODE -ne 0) { Say 'Docker is installed but not running: start Docker Desktop before building a graph' }
-        return
-    }
-    Say 'Docker runs the graph database (Neo4j). Docker Desktop is free for personal use and small'
-    Say 'companies; larger ones need a paid plan. The first time, Windows may ask for administrator'
-    Say 'rights to turn on WSL 2 and to restart; open Docker Desktop once afterwards and accept its terms.'
-    if ((Get-Command winget -ErrorAction SilentlyContinue) -and (Ask 'Install Docker Desktop now with winget?')) {
-        winget install -e --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements
-        if ($LASTEXITCODE -ne 0) { Say "warning: winget could not install Docker Desktop (exit $LASTEXITCODE); get it from https://www.docker.com/products/docker-desktop/" }
-        return
-    }
-    Say 'get Docker Desktop from https://www.docker.com/products/docker-desktop/, start it once, then restart the app'
+function Fetch-Neo4j([string]$Python) {
+    if ($env:GRAPHME_NO_NEO4J) { return }
+    # The graph DB (Neo4j Community and a Java runtime, ~210 MB) into the app's folder: no Docker.
+    & $Python -m graphme.neo4j_install $AppHome
+    if ($LASTEXITCODE -ne 0) { Say 'warning: the graph DB did not download; the app fetches it when it first opens' }
 }
 
 function Make-Shortcut([string]$Graphme) {
@@ -145,13 +129,13 @@ function Uninstall {
     if ((Test-Path -LiteralPath (Join-Path $bin 'graphme.exe')) -or (Test-Path -LiteralPath (Join-Path $bin 'graphme-app.exe'))) {
         Fail 'close Graph-Me-Maybe first (it is still running), then uninstall again'
     }
-    foreach ($path in @((Join-Path $AppHome 'web'), (Join-Path $AppHome 'viewer'), $Shortcut)) {
+    foreach ($path in @((Join-Path $AppHome 'web'), (Join-Path $AppHome 'viewer'), (Join-Path $AppHome 'neo4j'), (Join-Path $AppHome 'jre'), $Shortcut)) {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
     }
     if (Test-Path $UninstallKey) { Remove-Item $UninstallKey -Force }
     if ($env:GRAPHME_PURGE -and (Test-Path -LiteralPath $AppHome)) {
         # Only what the app made; the folder goes only if nothing else is left in it.
-        foreach ($part in @('.env', '.graphme', 'app.log', 'install.ps1', 'webview')) {
+        foreach ($part in @('.env', '.graphme', 'app.log', 'install.ps1', 'webview', 'neo4j-data')) {
             $path = Join-Path $AppHome $part
             if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
         }
@@ -160,7 +144,8 @@ function Uninstall {
             Say "removed $AppHome"
         } else { Say "removed the app's files; kept $AppHome, which holds files it did not make" }
     }
-    Say 'removed. The graph database stays in Docker: docker rm -f graphme-neo4j; docker volume rm graphme-neo4j-data graphme-neo4j-logs'
+    if (-not $env:GRAPHME_PURGE) { Say "the graph stays in $AppHome\neo4j-data (GRAPHME_PURGE=1 removes it)" }
+    Say 'removed. A graph from before 0.1.13 may still be in Docker: docker rm -f graphme-neo4j; docker volume rm graphme-neo4j-data graphme-neo4j-logs'
 }
 
 function Install {
@@ -205,7 +190,7 @@ function Install {
         & $python -m playwright install chromium --only-shell
         if ($LASTEXITCODE -ne 0) { Say "warning: Playwright's Chromium did not download; install Google Chrome, or run: & '$python' -m playwright install chromium --only-shell" }
     }
-    Offer-Docker
+    Fetch-Neo4j $python
     Make-Shortcut $graphme
     Register-Uninstall $tag
     $open = if ($env:GRAPHME_HOME) { "`$env:GRAPHME_HOME='$($AppHome.Replace("'", "''"))'; graphme app" } else { 'graphme app' }

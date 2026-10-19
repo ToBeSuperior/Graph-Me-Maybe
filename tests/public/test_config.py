@@ -209,3 +209,40 @@ def test_a_command_run_outside_a_checkout_uses_the_installed_app_s_settings_and_
 
     (elsewhere / ".env").write_text(f"GRAPHME_PROVIDER={provider}\n", encoding="utf-8")
     assert load_settings().api_key is None  # a checkout's own `.env` is still its own
+
+
+def test_settings_naming_no_neo4j_use_the_app_s_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text("GRAPHME_PROFILE=test\n", encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.setenv("GRAPHME_HOME", str(home))
+    monkeypatch.delenv("GRAPHME_NEO4J_URI", raising=False)
+
+    monkeypatch.chdir(elsewhere)  # a terminal anywhere: the app's settings, its own Neo4j
+    assert load_settings().local_neo4j == home
+    monkeypatch.chdir(home)  # the app itself, started in its home
+    assert load_settings().local_neo4j == home
+
+    (home / ".env").write_text("GRAPHME_NEO4J_URI=bolt://127.0.0.1:7999\n", encoding="utf-8")
+    assert load_settings().local_neo4j is None  # one named on purpose
+    (elsewhere / ".env").write_text("GRAPHME_PROFILE=test\n", encoding="utf-8")
+    monkeypatch.chdir(elsewhere)  # a checkout's own .env naming none: the app's own too
+    assert load_settings().local_neo4j == home
+    assert load_settings({"GRAPHME_HOME": str(home)}).local_neo4j is None  # tests, explicit
+
+
+def test_a_home_named_in_the_settings_file_is_where_its_neo4j_lives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A checkout keeps its graph apart from the installed app's by naming a home in its .env.
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / ".env").write_text(f"GRAPHME_HOME={tmp_path / 'dev-home'}\n", encoding="utf-8")
+    monkeypatch.chdir(checkout)
+    monkeypatch.delenv("GRAPHME_HOME", raising=False)
+    monkeypatch.delenv("GRAPHME_NEO4J_URI", raising=False)
+    assert load_settings().local_neo4j == tmp_path / "dev-home"

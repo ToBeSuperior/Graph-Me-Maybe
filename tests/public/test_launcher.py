@@ -2,6 +2,7 @@
 Invented paths only; nothing is served."""
 from __future__ import annotations
 
+import os
 import socket
 import sys
 from pathlib import Path
@@ -255,14 +256,17 @@ def test_the_window_app_takes_only_a_full_path_for_its_home(
     monkeypatch.setattr(launcher.sys, "argv", ["graphme-app", str(tmp_path / "custom")])
     launcher.main()
     assert seen == [str(tmp_path / "home"), str(tmp_path / "custom")]
+    # The server reads its settings, and its Neo4j's home, from this process's environment:
+    # given only to the launcher, the home was the default one and Neo4j was fetched there.
+    assert os.environ["GRAPHME_HOME"] == str(tmp_path / "custom")
     # Closed, the process ends, whatever threads are left: the window is the app.
     assert exits == [0, 0]
 
 
-@pytest.mark.parametrize("ours", [True, False])
-def test_closed_it_stops_the_docker_desktop_it_started_and_no_other(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ours: bool
+def test_closed_it_stops_the_neo4j_it_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Without it the window app's Neo4j outlived it: os._exit skips what atexit would do.
     from graphme.adapters.storage import local_neo4j
 
     stopped: list[bool] = []
@@ -270,7 +274,6 @@ def test_closed_it_stops_the_docker_desktop_it_started_and_no_other(
     monkeypatch.setattr(launcher, "launch", lambda **kw: None)
     monkeypatch.setattr(launcher.os, "_exit", lambda code: None)
     monkeypatch.setattr(launcher.sys, "argv", ["graphme-app"])
-    monkeypatch.setattr(local_neo4j, "started_docker", lambda: ours)
-    monkeypatch.setattr(local_neo4j, "stop_docker_desktop", lambda: stopped.append(True))
+    monkeypatch.setattr(local_neo4j, "stop_started", lambda: stopped.append(True))
     launcher.main()
-    assert stopped == ([True] if ours else [])
+    assert stopped == [True]

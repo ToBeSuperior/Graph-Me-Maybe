@@ -19,3 +19,10 @@ def run(args: Any, **kwargs: Any) -> subprocess.CompletedProcess[Any]:
         kwargs.setdefault("encoding", "utf-8")
         kwargs.setdefault("errors", "replace")
     return subprocess.run(args, **kwargs)
+
+
+def popen(args: Any, **kwargs: Any) -> subprocess.Popen[Any]:
+    """A program left running (the app's Neo4j): no console window either."""
+    if sys.platform == "win32":
+        kwargs.setdefault("creationflags", CREATE_NO_WINDOW)
+    return subprocess.Popen(args, **kwargs)

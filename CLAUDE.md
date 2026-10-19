@@ -370,8 +370,8 @@ on it with no code from here. Vectors never go in a Cypher script: the server pa
 literal, and a space's vectors in a script ran a 1 GB server out of memory.
 
 `--dump` (and the demo's export dialog) turns that bundle into one `.dump` with
-`adapters/export/neo4j_admin.py`: `neo4j-admin` runs in a throwaway container of
-`GRAPHME_NEO4J_ADMIN_IMAGE`, imports the bundle, starts a server only to make the indexes (a
+`adapters/export/neo4j_admin.py`: the app's own `neo4j-admin`, on a scratch folder of its own,
+imports the bundle, a scratch Neo4j is started only to make the indexes (a
 dump carries them, the import does not make them), and dumps. That file is what Aura's
 Import Database, Neo4j Desktop and `neo4j-admin database upload` take. An upload replaces
 the Aura instance's data and sends the documents off this machine, so the demo requires a
@@ -420,12 +420,18 @@ only when `GET /v1/settings` says `samples`.
 
 ### The local Neo4j
 
-`runtime.create_graph_space` never asks a user for Neo4j credentials: where nothing answers at
-`GRAPHME_NEO4J_URI` it starts `graphme-neo4j` (`local_neo4j.py`, auth off; one made with a password
-or other memory is made again on the same volume, one published on another port is never moved).
-A Neo4j there that refuses (`PasswordWanted`, from `verify_connectivity`) with no
-`GRAPHME_NEO4J_PASSWORD` set is someone else's: ours runs on `own_port()` instead. Credentials
-are for a Neo4j one points at on purpose, and for Aura.
+No Docker: Docker Desktop on Windows runs dozens of CLI plugins every twelve seconds while any
+container runs, and the PC stalls each time. Settings naming no `GRAPHME_NEO4J_URI` get
+`local_neo4j` (the app's home), and `runtime.create_graph_space` runs that home's own Neo4j
+(`local_neo4j.py`): Neo4j Community `NEO4J_VERSION` and a Temurin JRE fetched into `neo4j/` and
+`jre/` (checksums checked; by the installer, or on first use), the graph in `neo4j-data/` so an
+update never touches it, started as a child (`neo4j console`, its own `NEO4J_CONF`, auth off,
+bolt on 127.0.0.1 at the first free port from 7687) and stopped when that process ends -- atexit,
+or `stop_started()` before the window app's `os._exit`. A Neo4j answering on the port the home
+recorded is adopted only if `server.directories.data` is this home's (WSL's app answers on
+Windows' loopback too). The server never opens it in a page's request: `Demo.space(wait=)` opens
+it behind and answers `GraphStarting` (503, Retry-After), which the page keeps asking through.
+This checkout's `.env` names `GRAPHME_NEO4J_URI`, so development uses the Neo4j it names.
 
 ### Neo4j shape
 

@@ -170,9 +170,11 @@ def main() -> None:
     # The webview finds its own files from the program's path, which the move into the home
     # below would leave pointing nowhere when it was given relative.
     sys.argv[0] = os.path.abspath(sys.argv[0])
-    environ = dict(os.environ)
     if len(sys.argv) > 1 and Path(sys.argv[1]).is_absolute():
-        environ["GRAPHME_HOME"] = sys.argv[1]
+        # Into this process's own environment: the server reads its settings, and its Neo4j's
+        # home, from there -- not from what the launcher alone is handed.
+        os.environ["GRAPHME_HOME"] = sys.argv[1]
+    environ = dict(os.environ)
     where = home(environ)
     if sys.stdout is None or sys.stderr is None:  # started without a console: say it in a file
         prepare(where)
@@ -180,10 +182,9 @@ def main() -> None:
         sys.stdout = sys.stderr = log
     launch(port=None, browser=True, environ=environ,
            window=lambda url: show_window(url, where / "webview"))
-    # The window is closed: a Docker Desktop the app started goes with it (the window is gone,
-    # so the wait is not seen), then the app ends, whatever threads a build or a driver left.
+    # The window is closed: the Neo4j the app started goes with it (the window is gone, so the
+    # wait is not seen), then the app ends, whatever threads a build or a driver left.
     from graphme.adapters.storage import local_neo4j
 
-    if local_neo4j.started_docker():
-        local_neo4j.stop_docker_desktop()
+    local_neo4j.stop_started()
     os._exit(0)

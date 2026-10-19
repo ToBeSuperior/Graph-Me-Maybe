@@ -21,13 +21,13 @@ from pathlib import Path
 
 import httpx
 
-from graphme.adapters.export.neo4j_admin import DockerNeo4jAdmin
+from graphme.adapters.export.neo4j_admin import LocalNeo4jAdmin
 from graphme.adapters.export.neo4j_import import write_import_bundle
 from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import GraphRag
-from graphme.adapters.storage.local_neo4j import DockerStarting
+from graphme.adapters.storage.local_neo4j import GraphStarting
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
 from graphme.api import GraphMe
 from graphme.application.corpus_build import BuildReport, BuildStep, build_graph, content_hash
@@ -314,7 +314,7 @@ class Demo:
                 opener.start()
         opener.join(wait)
         if opener.is_alive():
-            raise DockerStarting("그래프 DB를 준비하는 중입니다 -- 준비되면 저절로 이어집니다.")
+            raise GraphStarting("그래프 DB를 준비하는 중입니다 -- 준비되면 저절로 이어집니다.")
         if (failed := self._open_failed) is not None:
             self._open_failed = None
             raise failed
@@ -327,7 +327,7 @@ class Demo:
         except Exception as error:  # noqa: BLE001 -- said to the next request
             self._open_failed = error
 
-    def admin(self) -> DockerNeo4jAdmin:
+    def admin(self) -> LocalNeo4jAdmin:
         """`neo4j-admin`, in a throwaway container of the configured Neo4j image."""
         return create_neo4j_admin(self.settings)
 

@@ -41,7 +41,7 @@ from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.rendering.visual_binding import placed_units
 from graphme.adapters.storage.graph_rag import MAX_TOP_K, GraphNotEmbedded, GraphRag
-from graphme.adapters.storage.local_neo4j import DockerStarting
+from graphme.adapters.storage.local_neo4j import GraphStarting
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, modified_at
 from graphme.application.ingest import documents_in
 from graphme.application.xlsx_visual_binding import CROP_ASSET_KEY, read_node_crop
@@ -200,7 +200,7 @@ def create_app(
         """The graph space; one that cannot be reached is said (503), not a crash."""
         try:
             return demo.space(wait=SPACE_WAIT)
-        except DockerStarting as error:  # the page asks again on its own
+        except GraphStarting as error:  # the page asks again on its own
             raise HTTPException(503, str(error), headers={"Retry-After": "3"}) from error
         except Exception as error:  # noqa: BLE001 -- said to the caller
             raise HTTPException(503, f"그래프 DB에 연결할 수 없습니다: {error}") from error

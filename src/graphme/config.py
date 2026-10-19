@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import ntpath
 import os
@@ -43,11 +44,9 @@ ENV_FIELDS = {
     "GRAPHME_NEO4J_URI": "neo4j_uri",
     "GRAPHME_NEO4J_USER": "neo4j_user",
     "GRAPHME_NEO4J_PASSWORD": "neo4j_password",
-    "GRAPHME_NEO4J_ADMIN_IMAGE": "neo4j_admin_image",
     "GRAPHME_NEO4J_HEAP": "neo4j_heap",
     "GRAPHME_API_KEY": "server_key",
     "GRAPHME_NEO4J_PAGECACHE": "neo4j_pagecache",
-    "GRAPHME_DOCKER_AUTOSTART": "docker_autostart",
 }
 _FLOAT_FIELDS = {"render_timeout_seconds", "relevance_floor", "hybrid_dense_weight"}
 _INT_FIELDS = {
@@ -168,11 +167,12 @@ class Settings(BaseModel):
     where they disagree the model is shown both beside the page and picks one -- a page
     costs that many calls, plus one more only when the readings actually differ."""
     neo4j_uri: str = "bolt://127.0.0.1:7687"
-    """The graph space a corpus is put in (`graphme build-graph`). At this machine's address
-    with nothing answering, a Neo4j without authentication is started there (`local_neo4j`)."""
+    """The graph space a corpus is put in (`graphme build-graph`), when it is not the app's own
+    (`local_neo4j`): a checkout's, someone's own Neo4j, Aura."""
+    local_neo4j: Path | None = None
+    """The app's home, whose own Neo4j is the graph space (`local_neo4j.py`): set whenever the
+    settings name no GRAPHME_NEO4J_URI."""
     neo4j_user: str = "neo4j"
-    # Docker Desktop started when the graph needs it and it is off (Windows, macOS).
-    docker_autostart: bool = True
     neo4j_password: str | None = Field(default=None, repr=False)
     """Only for a Neo4j run with a password; the one started here needs none."""
     server_key: str | None = Field(default=None, repr=False)
@@ -180,13 +180,9 @@ class Settings(BaseModel):
     nothing, and serves this machine only."""
     neo4j_heap: str = Field(default="1g", pattern=r"^[1-9][0-9]*[kmg]$")
     neo4j_pagecache: str = Field(default="512m", pattern=r"^[1-9][0-9]*[kmg]$")
-    """The heap and page cache of the Neo4j started here. The page cache holds the passages'
-    vectors: a space of thousands of documents wants it at least their size. Changed, the
-    container is made again on the same data."""
-    neo4j_admin_image: str = "neo4j:5.26-community"
-    """The Neo4j image the local graph space runs, and `neo4j-admin` runs from in a throwaway
-    container to write a `.dump` and to upload one to Aura. A dump loads into this version of
-    Neo4j or a later one."""
+    """The heap and page cache of the app's own Neo4j. The page cache holds the passages'
+    vectors: a space of thousands of documents wants it at least their size. Changed, it is
+    taken up on the next start."""
 
     @field_validator("data_dir", "viewer_directory")
     @classmethod
@@ -317,6 +313,11 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         values["embedding_key"] = env[row.key_env]
     if base is not None and base != Path.cwd() and "data_dir" not in values:
         values["data_dir"] = base / ".graphme"
+    if base is not None and "neo4j_uri" not in values:
+        # No Neo4j named: the app's own, in its home, is the graph space -- for the app, a
+        # command anywhere, and a checkout alike.
+        with contextlib.suppress(KeyError):  # no home directory named in this environment
+            values["local_neo4j"] = app_home(env)
     if "viewer_directory" not in values:
         # The viewer the installer put in the app's home: every command draws with it, not
         # only `graphme app`.

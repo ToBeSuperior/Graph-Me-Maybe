@@ -7,8 +7,8 @@
 #   GRAPHME_VERSION=v0.1.0      a release tag (default: the latest)
 #   GRAPHME_INSTALL_SOURCE=DIR  take the release files from a folder or URL instead
 #   GRAPHME_HOME=DIR            the app's folder (settings, graph data, web app, viewer)
-#   GRAPHME_YES=1               answer yes (installs Docker Desktop when it is missing)
-#   GRAPHME_NO_DOCKER=1  GRAPHME_NO_SHORTCUT=1  GRAPHME_NO_LAUNCH=1
+#   GRAPHME_NO_NEO4J=1          do not fetch the graph DB now (the app fetches it when it opens)
+#   GRAPHME_NO_SHORTCUT=1  GRAPHME_NO_LAUNCH=1
 #   GRAPHME_UNINSTALL=1         remove the app; GRAPHME_PURGE=1 also its settings and data
 #   UV_NO_MODIFY_PATH=1         leave your shell's PATH setup (rc files) alone
 set -eu
@@ -20,14 +20,6 @@ say() { printf 'graph-me-maybe: %s\n' "$*"; }
 die() { printf 'graph-me-maybe: %s\n' "$*" >&2; exit 1; }
 
 # Questions go to the terminal: under `curl | sh` standard input is this script.
-ask() {
-  [ -n "${GRAPHME_YES:-}" ] && return 0
-  if [ -n "${GRAPHME_NO_TTY:-}" ] || ! { true </dev/tty; } 2>/dev/null; then return 1; fi
-  printf '%s [y/N] ' "$1" >/dev/tty
-  read -r answer </dev/tty || return 1
-  case $answer in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
-}
-
 app_home() {
   if [ -n "${GRAPHME_HOME:-}" ]; then printf '%s' "$GRAPHME_HOME"; return; fi
   case $(uname -s) in
@@ -101,18 +93,11 @@ has_chrome() {
   esac
 }
 
-offer_docker() {
-  [ -n "${GRAPHME_NO_DOCKER:-}" ] && return
-  if command -v docker >/dev/null 2>&1; then
-    docker info >/dev/null 2>&1 || say "Docker is installed but not running: start Docker Desktop before building a graph"
-    return
-  fi
-  say "Docker runs the graph database (Neo4j). Docker Desktop is free for personal use and small"
-  say "companies; larger ones need a paid plan. It asks for your password once, the first time it starts."
-  if [ "$(uname -s)" = Darwin ] && command -v brew >/dev/null 2>&1 && ask "Install Docker Desktop now with Homebrew?"; then
-    brew install --cask docker-desktop && say "open Docker Desktop once and accept its terms" && return
-  fi
-  say "get Docker Desktop from https://www.docker.com/products/docker-desktop/, start it once, then open the app again"
+fetch_neo4j() {  # fetch_neo4j PYTHON
+  [ -n "${GRAPHME_NO_NEO4J:-}" ] && return
+  # The graph DB (Neo4j Community and a Java runtime, ~210 MB) into the app's folder: no Docker.
+  "$1" -m graphme.neo4j_install "$HOME_DIR" \
+    || say "warning: the graph DB did not download; the app fetches it when it first opens"
 }
 
 make_shortcut() {  # make_shortcut BIN_DIR
@@ -130,8 +115,7 @@ make_shortcut() {  # make_shortcut BIN_DIR
 <key>CFBundlePackageType</key><string>APPL</string>
 </dict></plist>
 EOF
-  # Finder starts an app with a bare PATH; docker lives in Homebrew's or Docker's own folder.
-  printf '#!/bin/sh\nPATH="/usr/local/bin:/opt/homebrew/bin:$HOME/.docker/bin:$PATH"; export PATH\nGRAPHME_HOME="%s" exec "%s/graphme-app" >>"%s/app.log" 2>&1\n' \
+  printf '#!/bin/sh\nGRAPHME_HOME="%s" exec "%s/graphme-app" >>"%s/app.log" 2>&1\n' \
     "$HOME_DIR" "$1" "$HOME_DIR" \
     >"$app/Contents/MacOS/Graph-Me-Maybe"
   chmod +x "$app/Contents/MacOS/Graph-Me-Maybe"
@@ -154,14 +138,18 @@ uninstall() {
   fi
   ensure_uv
   uv tool uninstall "$TOOL" 2>/dev/null || true
-  rm -rf "$HOME_DIR/web" "$HOME_DIR/viewer" "$HOME/Applications/Graph-Me-Maybe.app"
+  rm -rf "$HOME_DIR/web" "$HOME_DIR/viewer" "$HOME_DIR/neo4j" "$HOME_DIR/jre" \
+    "$HOME/Applications/Graph-Me-Maybe.app"
   if [ -n "${GRAPHME_PURGE:-}" ]; then
     # Only what the app made; the folder goes only if nothing else is left in it.
-    for part in .env .graphme app.log install.ps1 webview; do rm -rf "${HOME_DIR:?}/$part"; done
+    for part in .env .graphme app.log install.ps1 webview neo4j-data; do
+      rm -rf "${HOME_DIR:?}/$part"
+    done
     if rmdir "$HOME_DIR" 2>/dev/null; then say "removed $HOME_DIR"
     else say "removed the app's files; kept $HOME_DIR, which holds files it did not make"; fi
   fi
-  say "removed. The graph database stays in Docker: docker rm -f graphme-neo4j;" \
+  [ -n "${GRAPHME_PURGE:-}" ] || say "the graph stays in $HOME_DIR/neo4j-data (GRAPHME_PURGE=1 removes it)"
+  say "removed. A graph from before 0.1.13 may still be in Docker: docker rm -f graphme-neo4j;" \
       "docker volume rm graphme-neo4j-data graphme-neo4j-logs"
 }
 
@@ -194,7 +182,7 @@ install() {
     say "no Google Chrome: fetching Playwright's Chromium to draw pages with"
     "$python" -m playwright install chromium --only-shell || say "warning: Playwright's Chromium did not download; install Google Chrome, or run: $python -m playwright install chromium --only-shell"
   fi
-  offer_docker
+  fetch_neo4j "$python"
   make_shortcut "$bin"
   say "installed. Open it with: $(open_hint)   (a new terminal finds the command)"
   if [ -z "${GRAPHME_NO_LAUNCH:-}" ]; then
@@ -206,7 +194,7 @@ install() {
 main() {
   for arg in "$@"; do
     case $arg in
-      -y|--yes) GRAPHME_YES=1 ;;
+      -y|--yes) ;;  # nothing is asked any more
       --uninstall) GRAPHME_UNINSTALL=1 ;;
       -h|--help) sed -n '2,13p' "$0" 2>/dev/null; exit 0 ;;
       *) die "unknown option: $arg" ;;

@@ -128,3 +128,12 @@ DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 ```
+
+## Fetched at install, not distributed here
+
+The installer (or the app, on first use) downloads these from their publishers into the app's
+folder; they are not part of this repository or its releases, and keep their own licenses:
+
+- Neo4j Community Edition (https://neo4j.com), GNU General Public License v3.
+- Eclipse Temurin Java runtime (https://adoptium.net), GNU General Public License v2 with the
+  Classpath Exception.

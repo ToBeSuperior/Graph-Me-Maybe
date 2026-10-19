@@ -180,7 +180,7 @@ def test_without_a_key_only_this_machines_pages_reach_the_api(page: Any) -> None
     _, demo, _, _ = page
 
     def no_space(**_: object) -> None:
-        # Only the gate is asked here: a real space would start Docker's Neo4j on the machine
+        # Only the gate is asked here: a real space would start a Neo4j on the machine
         # running the tests, and its log landed in another test's output.
         raise RuntimeError("no graph space in this test")
 

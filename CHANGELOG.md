@@ -3,6 +3,24 @@
 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고, 버전은
 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.1.13] - 2026-10-19
+
+### 바뀜
+
+- **Docker를 더는 쓰지 않습니다.** Windows의 Docker Desktop은 컨테이너가 하나라도 돌면 12초마다 CLI 플러그인 수십 개를 실행해 PC 전체를 멈칫하게 했습니다. 이제 그래프 DB(Neo4j Community 5.26)를 앱이 직접 띄웁니다.
+  - 설치 프로그램이 Neo4j와 Java 실행 환경(Temurin 21, 합쳐 약 210MB)을 공식 배포처에서 받아 체크섬을 확인하고 앱 폴더의 `neo4j/`·`jre/`에 둡니다. 받지 못했으면 앱이 처음 열릴 때 받습니다(`GRAPHME_NO_NEO4J=1`로 미룸).
+  - 앱을 열면 Neo4j가 창 없이 하위 프로세스로 뜨고(비밀번호 없음, 127.0.0.1만, 7687부터 빈 포트), 앱을 닫으면 함께 꺼집니다. 터미널의 `graphme`는 앱이 켜져 있으면 그 Neo4j를 쓰고, 아니면 띄웠다가 끝나면 끕니다.
+  - 그래프는 `neo4j-data/`에 있어 업데이트해도 남습니다. 그 포트에서 답하는 Neo4j라도 이 앱 폴더의 데이터를 쓰는 것이 아니면 쓰지 않습니다(같은 PC의 WSL 앱 등).
+  - `.dump`와 Aura 올리기는 함께 받은 `neo4j-admin`으로, 임시 폴더에 따로 만든 그래프에서 합니다.
+  - Docker Desktop 설치 제안, 자동 켜기·끄기, `GRAPHME_DOCKER_AUTOSTART`·`GRAPHME_NEO4J_ADMIN_IMAGE`·`GRAPHME_NO_DOCKER`·`GRAPHME_YES`를 없앴습니다.
+  - 0.1.12까지 Docker에 있던 그래프는 옮기지 않습니다. 문서를 다시 읽고, 남은 컨테이너는 `docker rm -f graphme-neo4j; docker volume rm graphme-neo4j-data graphme-neo4j-logs`로 지웁니다.
+- `.env`에 `GRAPHME_NEO4J_URI`가 있으면 앱이 Neo4j를 띄우지 않고 그것을 씁니다(Neo4j Desktop, 다른 서버, Aura). `.env`의 `GRAPHME_HOME`으로 앱 폴더를 바꿀 수 있습니다.
+- 지우기: 일반 제거는 Neo4j·Java(`neo4j`, `jre`)를 지우고 그래프(`neo4j-data`)는 남깁니다. `GRAPHME_PURGE=1`이면 그래프도 지웁니다.
+
+### 고침
+
+- 앱 창(`graphme-app <폴더>`)이 인수로 받은 앱 폴더를 서버에 넘기지 않아 기본 앱 폴더를 쓰던 것.
+
 ## [0.1.12] - 2026-10-19
 
 ### 고침

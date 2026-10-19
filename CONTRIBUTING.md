@@ -6,7 +6,7 @@
 
 [README의 0단계](README.md#0-준비물-설치)를 따릅니다. 검사만 돌리려면 Python 3.11과
 [uv](https://docs.astral.sh/uv/)면 충분합니다. Node·Chrome·뷰어 번들(DOCX·PPTX·XLSX 렌더링),
-Docker(Neo4j)는 그 기능을 고칠 때 설치합니다. 없으면 해당 테스트는 이유를 말하고 건너뜁니다.
+Neo4j는 그 기능을 고칠 때 앱 폴더에 받아 씁니다(Docker는 쓰지 않음). 없으면 해당 테스트는 이유를 말하고 건너뜁니다.
 
 ```bash
 uv sync --extra dev

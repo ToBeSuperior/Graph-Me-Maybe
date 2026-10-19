@@ -42,8 +42,8 @@ def _install(tmp_path: Path, source: Path) -> subprocess.CompletedProcess[str]:
     home = tmp_path / "Application Support" / "Graph-Me-Maybe"
     env = {**_scratch_env(tmp_path), "GRAPHME_INSTALL_SOURCE": str(source),
            "GRAPHME_HOME": str(home),
-           "GRAPHME_NO_DOCKER": "1", "GRAPHME_NO_SHORTCUT": "1", "GRAPHME_NO_LAUNCH": "1",
-           "GRAPHME_YES": "1", "GRAPHME_VERSION": "v0.0.0"}
+           "GRAPHME_NO_NEO4J": "1", "GRAPHME_NO_SHORTCUT": "1", "GRAPHME_NO_LAUNCH": "1",
+           "GRAPHME_VERSION": "v0.0.0"}
     return subprocess.run(["sh", str(ROOT / "install.sh")], env=env, capture_output=True,
                           text=True, stdin=subprocess.DEVNULL, timeout=60)
 
@@ -62,18 +62,6 @@ def test_a_missing_asset_installs_nothing(tmp_path: Path) -> None:
     (source / "viewer.zip").unlink()
     done = _install(tmp_path, source)
     assert done.returncode != 0 and "viewer.zip" in done.stderr
-
-
-@posix
-def test_a_question_without_a_terminal_is_no_and_does_not_wait(tmp_path: Path) -> None:
-    script = (f'GRAPHME_INSTALL_LIB=1 . "{ROOT / "install.sh"}";'
-              ' command -v ask >/dev/null || exit 3;'
-              ' if ask "Install?"; then echo yes; else echo no; fi')
-    done = subprocess.run(["sh", "-c", script], capture_output=True, text=True,
-                          stdin=subprocess.DEVNULL, timeout=10,
-                          env={k: v for k, v in os.environ.items() if k != "GRAPHME_YES"}
-                          | {"GRAPHME_NO_TTY": "1"})
-    assert done.returncode == 0 and done.stdout.strip() == "no"
 
 
 @posix
@@ -121,7 +109,7 @@ def test_the_shortcut_opens_the_installed_home(tmp_path: Path) -> None:
 def test_the_windows_installer_checks_before_it_installs_and_can_be_removed() -> None:
     text = (ROOT / "install.ps1").read_text()
     assert text.index("Get-FileHash") < text.index("uv tool install")
-    for needed in ("--only-shell", "Docker.DockerDesktop", "--accept-package-agreements",
+    for needed in ("--only-shell", "graphme.neo4j_install",
                    r"CurrentVersion\Uninstall\Graph-Me-Maybe", "CreateShortcut",
                    "GRAPHME_UNINSTALL", "GRAPHME_PURGE"):
         assert needed in text, needed
@@ -191,10 +179,10 @@ def _scratch_env(tmp_path: Path) -> dict[str, str]:
 
 
 @posix
-def test_the_mac_shortcut_finds_docker_where_finder_does_not_look(tmp_path: Path) -> None:
+def test_the_mac_shortcut_opens_the_window_app_in_its_home(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "graphme-app").write_text('#!/bin/sh\necho "PATH=$PATH"\n')
+    (bin_dir / "graphme-app").write_text('#!/bin/sh\necho "HOME_IS=$GRAPHME_HOME"\n')
     (bin_dir / "graphme-app").chmod(0o755)
     data = tmp_path / "data"
     data.mkdir()
@@ -205,16 +193,14 @@ def test_the_mac_shortcut_finds_docker_where_finder_does_not_look(tmp_path: Path
                           env=env | {"HOME": str(tmp_path)})
     assert done.returncode == 0, done.stderr
     launcher = tmp_path / "Applications/Graph-Me-Maybe.app/Contents/MacOS/Graph-Me-Maybe"
-    assert subprocess.run(["sh", "-n", str(launcher)]).returncode == 0
     subprocess.run([str(launcher)], env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
                    timeout=10, check=True)
-    path = (data / "app.log").read_text().strip().removeprefix("PATH=").split(":")
-    for folder in ("/usr/local/bin", "/opt/homebrew/bin", f"{tmp_path}/.docker/bin"):
-        assert folder in path, folder
+    assert (data / "app.log").read_text().strip() == f"HOME_IS={data}"
 
 
 APP_FILES = (".env", ".graphme/graph.sqlite3", "web/index.html", "viewer/dist/x.js", "app.log",
-             "install.ps1", "webview/Local Storage/x")
+             "install.ps1", "webview/Local Storage/x", "neo4j/bin/neo4j", "jre/bin/java",
+             "neo4j-data/db/graph")
 
 
 def _app_home(tmp_path: Path, *, mine: bool) -> Path:
@@ -245,7 +231,8 @@ def test_a_purge_removes_only_what_the_app_made(tmp_path: Path, mine: bool) -> N
 def test_the_windows_purge_removes_only_what_the_app_made() -> None:
     uninstall = _windows_uninstall()
     purge = uninstall[uninstall.index("Remove-Item $UninstallKey"):]
-    for name in (".env", ".graphme", "web", "viewer", "app.log", "install.ps1", "webview"):
+    for name in (".env", ".graphme", "web", "viewer", "app.log", "install.ps1", "webview",
+                 "neo4j", "jre", "neo4j-data"):
         assert f"'{name}'" in uninstall, name
     assert "-Recurse -Force -ErrorAction SilentlyContinue; Say" not in purge
     assert "GetFileSystemInfos" in purge
@@ -278,7 +265,7 @@ def test_an_install_stops_while_the_app_runs(tmp_path: Path, home: str | None) -
         data = tmp_path / "data"
         env = _scratch_env(tmp_path) | {
             "GRAPHME_INSTALL_SOURCE": str(_assets(tmp_path / "assets")), "GRAPHME_HOME": str(data),
-            "GRAPHME_NO_DOCKER": "1", "GRAPHME_NO_SHORTCUT": "1", "GRAPHME_NO_LAUNCH": "1",
+            "GRAPHME_NO_NEO4J": "1", "GRAPHME_NO_SHORTCUT": "1", "GRAPHME_NO_LAUNCH": "1",
             "GRAPHME_VERSION": "v0.0.0", "GRAPHME_PORT": str(server.server_address[1])}
         done = subprocess.run(["sh", str(ROOT / "install.sh")], env=env, capture_output=True,
                               text=True, stdin=subprocess.DEVNULL, timeout=60)
@@ -306,7 +293,7 @@ def test_a_failed_browser_download_is_a_warning_not_silence() -> None:
               if "playwright install" in x)
     assert "|| say" in sh and "warning" in sh
     ps = (ROOT / "install.ps1").read_text()
-    for command in ("playwright install", "winget install"):
+    for command in ("playwright install", "neo4j_install"):
         after = ps[ps.index(command):]
         check = after[:after.index("\n", after.index("\n") + 1)]
         assert "$LASTEXITCODE -ne 0" in check and "warning" in check, command
@@ -326,10 +313,26 @@ def test_the_closing_line_names_a_custom_home(tmp_path: Path, custom: bool) -> N
     assert done.stdout.strip() == want
 
 
-def test_the_windows_closing_line_names_a_custom_home_and_docker_needs_a_restart() -> None:
+def test_the_windows_closing_line_names_a_custom_home() -> None:
     text = (ROOT / "install.ps1").read_text()
     assert "$env:GRAPHME_HOME='" in text[text.index("function Install"):]
-    assert "the app waits for it" not in text and "restart" in text
+
+
+@posix
+def test_a_failed_graph_db_download_is_a_warning_and_the_app_fetches_it_later() -> None:
+    sh = (ROOT / "install.sh").read_text()
+    fetch = sh[sh.index("fetch_neo4j() {"):]
+    fetch = fetch[:fetch.index("\n}\n")]
+    assert "neo4j_install" in fetch and "|| say" in fetch and "warning" in fetch
+    assert "GRAPHME_NO_NEO4J" in fetch
+
+
+def test_no_installer_offers_docker_any_more() -> None:
+    # Docker Desktop stalled Windows PCs every twelve seconds while any container ran.
+    for script in ("install.sh", "install.ps1"):
+        text = (ROOT / script).read_text()
+        assert "docker-desktop" not in text.lower().replace("docker desktop", "")
+        assert "winget install" not in text and "brew install --cask" not in text
 
 
 @posix
@@ -369,3 +372,16 @@ def test_under_wsl_the_windows_installer_is_named_unless_asked(
                           text=True, stdin=subprocess.DEVNULL, timeout=60)
     assert done.returncode != 0
     assert ("install.ps1" in done.stderr) is not asked, done.stderr
+
+
+
+@posix
+def test_an_uninstall_takes_the_graph_db_programs_and_keeps_the_graph(tmp_path: Path) -> None:
+    data = _app_home(tmp_path, mine=False)
+    (tmp_path / "home").mkdir()
+    env = _scratch_env(tmp_path) | {"GRAPHME_HOME": str(data)}
+    done = subprocess.run(["sh", str(ROOT / "install.sh"), "--uninstall"], env=env,
+                          capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=60)
+    assert done.returncode == 0, done.stderr
+    assert not (data / "neo4j").exists() and not (data / "jre").exists()
+    assert (data / "neo4j-data" / "db" / "graph").is_file()

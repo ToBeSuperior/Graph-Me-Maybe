@@ -66,8 +66,6 @@ jobs:
       GRAPHME_INSTALL_SOURCE: ${{ github.workspace }}/assets
       GRAPHME_VERSION: v0.0.0-ci
       GRAPHME_HOME: ${{ github.workspace }}/app home
-      GRAPHME_YES: "1"
-      GRAPHME_NO_DOCKER: "1"
       GRAPHME_NO_SHORTCUT: "1"
       GRAPHME_NO_LAUNCH: "1"
       UV_NO_MODIFY_PATH: "1"
@@ -94,6 +92,9 @@ jobs:
           trap 'kill "$app" 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do curl -fs 127.0.0.1:8797/health && break; sleep 2; done
           curl -fs 127.0.0.1:8797/health || { cat app.log; exit 1; }
+          # The graph DB the installer fetched (Neo4j and Java, no Docker) starts and answers.
+          for i in $(seq 1 90); do curl -fs 127.0.0.1:8797/v1/graph/map >/dev/null && break; sleep 2; done
+          curl -fs 127.0.0.1:8797/v1/graph/map || { cat app.log; exit 1; }
           python_dir="$tools/graph-me-maybe"
           py="$python_dir/bin/python"; [ -x "$py" ] || py="$python_dir/Scripts/python.exe"
           "$py" -m graphme.samples samples
