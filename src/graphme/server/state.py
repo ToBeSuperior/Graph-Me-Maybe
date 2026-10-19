@@ -24,6 +24,7 @@ import httpx
 
 from graphme.adapters.export.neo4j_admin import LocalNeo4jAdmin
 from graphme.adapters.export.neo4j_import import write_import_bundle
+from graphme.adapters.rendering import page_cache
 from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.storage.assets import LocalAssetStore
@@ -798,16 +799,27 @@ class Demo:
         # The crops go where the graph space's answers read them (`GraphRag._pictures`), not
         # under this reading's workspace: they outlive it, and they are named by content.
         session.store = LocalAssetStore(self.settings.asset_dir)
-        with self.drawing:
-            session.pages = self.renderer.render(session.source, session.format)
-        builder = self._builder(session)
-        # Give tables their crop and let each own the pictures it encloses.
-        session.bound = session.extracted = builder.bind(
-            builder.extract(session.source, session.format), session.source
-        )
+        # Drawn before this start and nothing that drew it changed: its pages as they were.
+        kept_under = page_cache.key(content_hash(session.source), self.settings.viewer_directory)
+        kept = page_cache.load(session.workspace, kept_under)
+        if kept is not None:
+            session.pages = kept
+        else:
+            with self.drawing:
+                session.pages = self.renderer.render(session.source, session.format)
+        bound = None if kept is None else page_cache.load_bound(
+            session.workspace, kept_under, session.store)
+        if bound is None:
+            builder = self._builder(session)
+            # Give tables their crop and let each own the pictures it encloses.
+            bound = builder.bind(builder.extract(session.source, session.format), session.source)
+            page_cache.save_bound(session.workspace, bound, kept_under)
+        session.bound = session.extracted = bound
         session.page_of = pages_of(session.bound, session.pages, session.format)
-        for page in session.pages:
-            (session.workspace / f"page-{page.index:02d}.png").write_bytes(page.png)
+        if kept is None:
+            for page in session.pages:
+                (session.workspace / f"page-{page.index:02d}.png").write_bytes(page.png)
+            page_cache.save(session.workspace, session.pages, kept_under)
 
     @staticmethod
     def apply(

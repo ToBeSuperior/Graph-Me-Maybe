@@ -145,6 +145,13 @@ out, silently — so a picture that renders as frames and arrows alone means the
 the file. Both viewer builds carry their own copy of it, so a fix is two patches
 (`viewer/patches/` for XLSX, `viewer/dist-patches/` for DOCX and PPTX).
 
+A document's pages are drawn once, not once a start: `_prepare` keeps what the renderer
+measured beside the page images (`pages.json`) and the graph as binding left it (`bound.json`),
+keyed by the file's content hash and `page_cache.identity` -- this package's code and the viewer
+bundle's files -- and takes them back while the key matches and every asset the graph names is
+still stored. Reopened after a restart, a DOCX, PPTX or XLSX needed Chrome and its extraction
+again for a view nothing about had changed.
+
 ### One producer of a crop
 
 `application/xlsx_visual_binding.py` is the **only** thing that cuts a node's crop.

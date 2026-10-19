@@ -3,6 +3,12 @@
 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고, 버전은
 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [Unreleased]
+
+### 바뀜
+
+- 앱을 다시 켠 뒤 문서를 열 때 DOCX·PPTX·XLSX를 다시 그리지 않습니다. 렌더링이 잰 기하 정보(`pages.json`)와 바인딩까지 끝난 문서 그래프(`bound.json`)를 페이지 이미지 옆에 두고, 파일 내용·코드·뷰어 번들이 그대로이고 그래프가 가리키는 그림이 모두 남아 있으면 그것을 씁니다. 다시 열 때 Chrome도 추출도 돌지 않습니다.
+
 ## [0.1.15] - 2026-10-19
 
 ### 추가
