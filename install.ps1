@@ -68,6 +68,28 @@ function Has-Chrome {
     return $false
 }
 
+function Ensure-Runtime([string]$Python) {
+    # PyMuPDF, numpy and matplotlib are built against the Visual C++ runtime, which a fresh
+    # Windows may not have: without it nothing of the app starts, and the first word of it was
+    # a warning that the graph DB was not fetched. So the app is opened once, here, first.
+    $probe = { & { $ErrorActionPreference = 'Continue'; & $Python -c 'import graphme, fitz' 2>&1 } | Out-String }
+    $said = & $probe
+    if ($LASTEXITCODE -eq 0) { return }
+    $missing = @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll') |
+        Where-Object { -not (Test-Path -LiteralPath (Join-Path $env:SystemRoot "System32\$_")) }
+    if (-not $missing) { Fail "Graph-Me-Maybe does not start: $($said.Trim())" }
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+    Say "the Microsoft Visual C++ runtime is missing ($($missing -join ', ')): the app cannot start without it"
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Say 'installing it with winget (Windows may ask for permission)'
+        winget install --id "Microsoft.VCRedist.2015+.$arch" -e --accept-package-agreements --accept-source-agreements
+    }
+    $said = & $probe
+    if ($LASTEXITCODE -ne 0) {
+        Fail "install the Microsoft Visual C++ Redistributable ($arch) from https://aka.ms/vs/17/release/vc_redist.$arch.exe, then run the installer again"
+    }
+}
+
 function Fetch-Neo4j([string]$Python) {
     if ($env:GRAPHME_NO_NEO4J) { return }
     # The graph DB (Neo4j Community and a Java runtime, ~210 MB) into the app's folder: no Docker.
@@ -191,6 +213,7 @@ function Install {
         & $python -m playwright install chromium --only-shell
         if ($LASTEXITCODE -ne 0) { Say "warning: Playwright's Chromium did not download; install Google Chrome, or run: & '$python' -m playwright install chromium --only-shell"; $global:LASTEXITCODE = 0 }
     }
+    Ensure-Runtime $python
     Fetch-Neo4j $python
     Make-Shortcut $graphme
     Register-Uninstall $tag

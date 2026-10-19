@@ -355,11 +355,15 @@ class Demo:
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as out:
             for document_id, folder in picked:
                 path = space.source_path(document_id)
-                if not path or not Path(path).is_file():
-                    missing.append(shown_name(Path(path).name) if path else document_id)
-                    continue
                 # A folder name is one folder: no separator, no way out of the zip.
                 where = "".join(c for c in folder if c not in '/\\:*?"<>|').strip(". ") or "files"
+                if not path:
+                    missing.append(f"{document_id}\tnot in the graph")
+                    continue
+                if not Path(path).is_file():
+                    # Named as a reader can find it: where it was for, and where it was.
+                    missing.append(f"{where}/{shown_name(Path(path).name)}\tnot found at {path}")
+                    continue
                 stem, suffix = os.path.splitext(shown_name(Path(path).name))
                 name, n = f"{where}/{stem}{suffix}", 1
                 while name in taken:  # two files of one name in one folder: both kept
@@ -368,7 +372,8 @@ class Demo:
                 taken.add(name)
                 out.write(path, name)
             if missing:
-                out.writestr("missing-files.txt", "\n".join(missing) + "\n")
+                out.writestr("missing-files.txt", "These could not be added:\n"
+                             + "\n".join(missing) + "\n")
         return archive
 
     def start_export(

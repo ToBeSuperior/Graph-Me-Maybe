@@ -3,6 +3,13 @@
 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고, 버전은
 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [Unreleased]
+
+### 고침
+
+- Visual C++ 런타임이 없는 Windows에서 설치가 "그래프 DB를 받지 못했다"는 경고만 남기고 끝나, 앱이 시작되지 않는데 원인을 알 수 없던 것. 설치 프로그램이 앱을 한 번 불러 보고, 런타임 DLL(`vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`)이 없으면 그렇다고 말한 뒤 winget으로 Visual C++ 재배포 패키지를 설치합니다(Windows가 권한을 물음). 그래도 안 되면 받을 주소를 알려 주고 설치를 실패로 끝냅니다. DLL이 있는데도 안 되면 Python이 낸 오류를 그대로 보여 줍니다.
+- `missing-files.txt`에 문서 ID만 적히던 것. 그래프에 있는 문서는 넣으려던 폴더, 파일 이름, 찾았던 경로를, 그래프에 없는 ID는 그렇다고 적습니다.
+
 ## [0.1.16] - 2026-10-19
 
 ### 바뀜

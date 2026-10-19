@@ -332,7 +332,7 @@ def test_no_installer_offers_docker_any_more() -> None:
     for script in ("install.sh", "install.ps1"):
         text = (ROOT / script).read_text()
         assert "docker-desktop" not in text.lower().replace("docker desktop", "")
-        assert "winget install" not in text and "brew install --cask" not in text
+        assert "Docker.DockerDesktop" not in text and "brew install --cask" not in text
 
 
 @posix
@@ -393,3 +393,19 @@ def test_a_windows_warning_leaves_no_failing_exit_code_behind() -> None:
     for warning in ("the graph DB did not download", "Playwright's Chromium did not download"):
         line = next(x for x in text.splitlines() if warning in x)
         assert "$global:LASTEXITCODE = 0" in line, warning
+
+
+def test_a_windows_without_the_vc_runtime_is_told_so_before_anything_else() -> None:
+    # Without the Visual C++ runtime PyMuPDF's DLL did not load: nothing of the app started,
+    # and the only word was "the graph DB did not download", which pointed the wrong way.
+    text = (ROOT / "install.ps1").read_text()
+    install = text[text.index("function Install"):]
+    assert install.index("uv tool install") < install.index("Ensure-Runtime") < install.index(
+        "Fetch-Neo4j $python")
+    check = text[text.index("function Ensure-Runtime"):]
+    check = check[:check.index("\n}\n")]
+    assert "import graphme, fitz" in check
+    for dll in ("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"):
+        assert dll in check, dll
+    assert "Microsoft.VCRedist.2015+" in check and "aka.ms/vs/17/release/vc_redist" in check
+    assert "Fail" in check  # an app that cannot start is not installed

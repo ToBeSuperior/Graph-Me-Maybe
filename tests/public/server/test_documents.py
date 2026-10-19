@@ -284,7 +284,12 @@ def test_the_files_a_question_found_leave_in_one_zip_by_its_folders(
         assert archive.read("1 found/spec (2).docx") == b"second"
         # Nothing the server could not open is passed over in silence.
         missing = archive.read("missing-files.txt").decode("utf-8")
-    assert "gone.xlsx" in missing and "nope" in missing
+    # Each named as a reader can find it: the folder it was for, its name, where it was looked
+    # for -- and an id the graph does not hold, said to be one.
+    lines = missing.splitlines()
+    assert any(line.startswith("2 linked/gone.xlsx") and str(tmp_path / "gone.xlsx") in line
+               for line in lines), missing
+    assert any(line.startswith("nope") and "not in the graph" in line for line in lines), missing
     assert not any(".." in n or n.startswith("/") for n in names)
 
 
