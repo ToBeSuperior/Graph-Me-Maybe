@@ -385,3 +385,11 @@ def test_an_uninstall_takes_the_graph_db_programs_and_keeps_the_graph(tmp_path: 
     assert done.returncode == 0, done.stderr
     assert not (data / "neo4j").exists() and not (data / "jre").exists()
     assert (data / "neo4j-data" / "db" / "graph").is_file()
+
+
+def test_a_windows_warning_leaves_no_failing_exit_code_behind() -> None:
+    # The step after a failed download warned, but the code it left made the whole install fail.
+    text = (ROOT / "install.ps1").read_text()
+    for warning in ("the graph DB did not download", "Playwright's Chromium did not download"):
+        line = next(x for x in text.splitlines() if warning in x)
+        assert "$global:LASTEXITCODE = 0" in line, warning

@@ -80,7 +80,7 @@ def test_an_archive_that_does_not_match_its_checksum_installs_nothing(
     tmp_path: Path, bad: str
 ) -> None:
     sources = _Publishers("linux", bad=bad)
-    with pytest.raises(RuntimeError, match="체크섬"):
+    with pytest.raises(RuntimeError, match="checksum"):
         local_neo4j.install(tmp_path, platform="linux", machine="x86_64",
                             fetch=sources.fetch, read=sources.read, say=lambda _: None)
     assert not Neo4jHome(tmp_path).installed() and not (tmp_path / "neo4j").exists()
@@ -139,7 +139,7 @@ def test_it_starts_as_a_child_with_no_window_and_its_own_settings(
     local_neo4j.start(home, home.data, 7688, ("1g", "512m"), popen=popen,  # type: ignore[arg-type]
                       platform=platform)
     (args, options), = started
-    assert args[0].endswith("neo4j.bat" if platform == "win32" else "/bin/neo4j")
+    assert Path(args[0]).name == ("neo4j.bat" if platform == "win32" else "neo4j")
     assert args[1:] == ["console"]
     assert options["env"]["NEO4J_CONF"] == str(home.data / "conf")
     assert options["env"]["JAVA_HOME"] == str(home.java_home())
@@ -245,3 +245,21 @@ def test_what_this_process_started_is_stopped_and_forgotten(
     assert stopped == [child] and not (home.data / "run" / "graphme.json").exists()
     local_neo4j.stop_started()
     assert stopped == [child]
+
+
+def test_the_installer_s_fetch_never_fails_over_the_console_s_code_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # English Windows' console is cp1252: a Korean progress line failed the whole download.
+    import io as _io
+    import sys as _sys
+
+    from graphme import neo4j_install
+
+    console = _io.TextIOWrapper(_io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(_sys, "stdout", console)
+    monkeypatch.setattr(neo4j_install, "__name__", "graphme.neo4j_install")
+    said: list[str] = []
+    monkeypatch.setattr(local_neo4j, "install",
+                        lambda root, say: said.append("ok") or say("그래프 · 준비"))
+    assert neo4j_install.main([str(tmp_path)]) == 0 and said == ["ok"]

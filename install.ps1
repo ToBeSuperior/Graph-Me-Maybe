@@ -71,8 +71,9 @@ function Has-Chrome {
 function Fetch-Neo4j([string]$Python) {
     if ($env:GRAPHME_NO_NEO4J) { return }
     # The graph DB (Neo4j Community and a Java runtime, ~210 MB) into the app's folder: no Docker.
+    # A warning, not a failure: the app fetches it when it opens (and the exit code is not left set).
     & $Python -m graphme.neo4j_install $AppHome
-    if ($LASTEXITCODE -ne 0) { Say 'warning: the graph DB did not download; the app fetches it when it first opens' }
+    if ($LASTEXITCODE -ne 0) { Say 'warning: the graph DB did not download; the app fetches it when it first opens'; $global:LASTEXITCODE = 0 }
 }
 
 function Make-Shortcut([string]$Graphme) {
@@ -188,7 +189,7 @@ function Install {
     if (-not (Has-Chrome)) {
         Say "no Google Chrome: fetching Playwright's Chromium to draw pages with"
         & $python -m playwright install chromium --only-shell
-        if ($LASTEXITCODE -ne 0) { Say "warning: Playwright's Chromium did not download; install Google Chrome, or run: & '$python' -m playwright install chromium --only-shell" }
+        if ($LASTEXITCODE -ne 0) { Say "warning: Playwright's Chromium did not download; install Google Chrome, or run: & '$python' -m playwright install chromium --only-shell"; $global:LASTEXITCODE = 0 }
     }
     Fetch-Neo4j $python
     Make-Shortcut $graphme

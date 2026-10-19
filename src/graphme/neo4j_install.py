@@ -7,6 +7,11 @@ from pathlib import Path
 
 
 def main(argv: list[str] | None = None) -> int:
+    # The installers' console may be cp1252 (English Windows): never fail over a character.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
     args = sys.argv[1:] if argv is None else argv
     if len(args) != 1:
         print("usage: python -m graphme.neo4j_install HOME", file=sys.stderr)
@@ -16,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         install(Path(args[0]), say=lambda line: print(line, flush=True))
     except (OSError, RuntimeError, ValueError) as error:
-        print(f"그래프 DB(Neo4j)를 받지 못했습니다: {error}", file=sys.stderr)
+        print(f"the graph DB (Neo4j) did not download: {error}", file=sys.stderr)
         return 1
     return 0
 

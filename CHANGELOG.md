@@ -3,6 +3,13 @@
 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따르고, 버전은
 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.1.14] - 2026-10-19
+
+### 고침
+
+- 영문 Windows(콘솔 cp1252)에서 설치 프로그램의 그래프 DB 받기가 한국어 안내 한 줄 때문에 실패하던 것. 안내는 영어로 쓰고, 출력할 수 없는 글자는 바꿔 씁니다.
+- Windows 설치 프로그램이 받기 실패를 경고만 하고도 실패 종료 코드를 남기던 것(Chromium 받기도 같음).
+
 ## [0.1.13] - 2026-10-19
 
 ### 바뀜

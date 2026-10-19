@@ -161,22 +161,22 @@ def install(
         work = Path(scratch)
         neo4j_url = _neo4j_archive(platform)
         neo4j_file = work / neo4j_url.rsplit("/", 1)[-1]
-        say(f"Neo4j {NEO4J_VERSION} 받는 중")
+        say(f"fetching Neo4j {NEO4J_VERSION}")
         fetch(neo4j_url, neo4j_file)
         want = read(f"{neo4j_url}.sha256").decode().split()[0].lower()
         if _digest(neo4j_file) != want:
-            raise RuntimeError(f"{neo4j_file.name}: 체크섬이 맞지 않습니다")
+            raise RuntimeError(f"{neo4j_file.name}: checksum does not match")
         package = json.loads(read(_jre_query(platform, machine or platforms.machine())))[0][
             "binary"]["package"]
         jre_file = work / package["name"]
-        say(f"Java {JAVA_MAJOR} 받는 중")
+        say(f"fetching Java {JAVA_MAJOR}")
         fetch(package["link"], jre_file)
         if _digest(jre_file) != package["checksum"].lower():
-            raise RuntimeError(f"{jre_file.name}: 체크섬이 맞지 않습니다")
+            raise RuntimeError(f"{jre_file.name}: checksum does not match")
         _unpack(jre_file, home.jre)
         _unpack(neo4j_file, home.neo4j)
     (home.neo4j / ".graphme-version").write_text(NEO4J_VERSION, encoding="utf-8")
-    say("그래프 DB(Neo4j) 준비됨")
+    say("the graph DB (Neo4j) is ready")
     return home
 
 
