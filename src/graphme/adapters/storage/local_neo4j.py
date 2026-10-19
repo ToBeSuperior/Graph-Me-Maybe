@@ -48,10 +48,6 @@ _starting = threading.Lock()
 _started: list[tuple[Neo4jHome, subprocess.Popen[bytes]]] = []
 
 
-class GraphStarting(RuntimeError):
-    """The graph DB is being fetched or started and is not up yet: ask again shortly."""
-
-
 @dataclass(frozen=True)
 class Neo4jHome:
     """Where the app keeps Neo4j, its Java runtime and its graph."""

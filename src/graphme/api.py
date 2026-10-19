@@ -93,15 +93,15 @@ class GraphMe:
 
     def embed(self, *, on_progress: Callable[[int, int], None] | None = None) -> int:
         """Passages cut and embedded for every document not embedded yet; how many."""
-        return self._graph_rag().embed(on_progress=on_progress)
+        return self.rag().embed(on_progress=on_progress)
 
     def search(self, question: str, *, top_k: int | None = None) -> list[GraphSource]:
         """The passages a question finds, each with the documents linked to its own."""
-        return self._graph_rag().find(question, top_k=top_k or self.settings.retrieval_top_k)
+        return self.rag().find(question, top_k=top_k or self.settings.retrieval_top_k)
 
     def ask(self, question: str, *, top_k: int | None = None) -> GraphAnswer:
         """An answer from what the question finds, citing its files."""
-        return self._graph_rag().ask(question, top_k=top_k or self.settings.retrieval_top_k)
+        return self.rag().ask(question, top_k=top_k or self.settings.retrieval_top_k)
 
     def documents(self) -> dict[str, str]:
         """Every document in the space: id -> file name."""
@@ -146,10 +146,20 @@ class GraphMe:
             self._space = create_graph_space(self.settings)
         return self._space
 
-    def _graph_rag(self) -> GraphRag:
+    @property
+    def opened_space(self) -> Neo4jGraphSpace | None:
+        """The graph space if it is open already; None, and nothing is opened."""
+        return self._space
+
+    def rag(self) -> GraphRag:
+        """What embeds the space and answers questions over it, made on first use."""
         if self._rag is None:
             self._rag = create_graph_rag(self.settings, self.graph_space(), client=self._http())
         return self._rag
+
+    def forget_rag(self) -> None:
+        """The next question makes its retriever again: the keys or the model changed."""
+        self._rag = None
 
     def _http(self) -> httpx.Client:
         if self._client is None:

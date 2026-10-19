@@ -16,6 +16,10 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
   documentation is in English.
 - The contributor kit: a new `CONTRIBUTING.md` with a map of the code, issue forms for bugs and
   feature requests, an English pull request template, `CODE_OF_CONDUCT.md` and `SECURITY.md`.
+- A worksheet's outline is asked like a slide's or a page's: text a chart or picture holds goes
+  out inside that visual, not again beside it, and pictures and charts are placed by the extent
+  they are drawn at rather than the cells they are anchored to. Text and tables are still placed
+  by their cells.
 - Reading a workbook no longer draws a preview of every table and chart that nothing used, and
   matplotlib is no longer a dependency.
 - `import.sh` and the app's own `.dump` build the `neo4j-admin import` command and the graph's

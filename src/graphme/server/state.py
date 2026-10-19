@@ -29,7 +29,6 @@ from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import GraphRag
-from graphme.adapters.storage.local_neo4j import GraphStarting
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
 from graphme.api import GraphMe
 from graphme.application.corpus_build import BuildReport, BuildStep, build_graph, content_hash
@@ -58,6 +57,10 @@ READERS = 8
 
 Placed = dict[str, tuple[int, tuple[int, int, int, int]]]
 """Where each node is drawn: its page and its pixel box there (`placed_units`)."""
+
+
+class GraphStarting(RuntimeError):
+    """The graph DB is being fetched or started and is not up yet: ask again shortly."""
 
 
 class Busy(Exception):
@@ -297,7 +300,7 @@ class Demo:
         self.settings = settings
         self.graph.settings = settings
         with self.opening_space:
-            self.graph._rag = None  # made again, with the new keys, on the next question
+            self.graph.forget_rag()
 
     def space(self, *, wait: float = -1) -> Neo4jGraphSpace:
         """The graph space every built document is put in, opened on first use. A build waits
@@ -306,8 +309,8 @@ class Demo:
         if wait < 0:
             with self.opening_space:
                 return self.graph.graph_space()
-        if self.graph._space is not None:
-            return self.graph._space
+        if (opened := self.graph.opened_space) is not None:
+            return opened
         # Fetching and starting Neo4j takes minutes, so a page's request never does it: it is done
         # behind, and the request told to wait (503, Retry-After) while it goes on.
         with self._starting_opener:  # the list and the map ask at once: one opening
@@ -324,7 +327,7 @@ class Demo:
         # Every request that joined a failed opening is told; a later one starts another.
         if (failed := self._open_failed) is not None:
             raise failed
-        if (space := self.graph._space) is None:
+        if (space := self.graph.opened_space) is None:
             raise GraphStarting(STARTING)
         return space
 
@@ -423,7 +426,7 @@ class Demo:
         # Made under the space's lock too: two first questions at once make one engine.
         with self.opening_space:
             self.graph.graph_space()
-            return self.graph._graph_rag()
+            return self.graph.rag()
 
     def pages_of_document(self, document_id: str) -> str:
         """The id of the file that draws the pages of a document in the graph space.

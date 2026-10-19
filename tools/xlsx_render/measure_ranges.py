@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from graphme.application.xlsx_measurement import measure_workbook
+from graphme.adapters.rendering.xlsx_measurement import measure_workbook
 
 
 def main() -> None:

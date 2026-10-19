@@ -16,6 +16,7 @@ from graphme.application.unit_placement import FlowPlacer, home_pages
 from graphme.application.xlsx_visual_binding import VISUAL_TYPES, read_node_crop
 from graphme.domain.enums import EdgeType, NodeType
 from graphme.domain.models import ExtractedDocument, GraphNode
+from graphme.ports.storage import AssetStore
 
 _Job = TypeVar("_Job")
 _Answer = TypeVar("_Answer")
@@ -101,7 +102,7 @@ def units_by_page(
 
 def crops_of(
     units: Sequence[GraphNode],
-    asset_store: Any,
+    asset_store: AssetStore,
     *,
     kinds: Sequence[NodeType] | None = None,
 ) -> dict[str, bytes]:

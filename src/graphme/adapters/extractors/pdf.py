@@ -10,7 +10,6 @@ from typing import Any, cast
 
 import pymupdf
 
-from graphme.application.text_match import encodable
 from graphme.domain.enums import (
     DocumentFormat,
     EdgeType,
@@ -30,6 +29,7 @@ from graphme.domain.models import (
     WarningRecord,
     native_edge,
 )
+from graphme.domain.text_match import encodable
 from graphme.ports.storage import AssetStore
 
 

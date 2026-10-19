@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from graphme.application.page_units import held_by_a_visual
 from graphme.application.reading_order import in_columns
-from graphme.application.unit_placement import UnitPlacer
+from graphme.application.unit_placement import CellRangePlacer, DrawingLike, UnitPlacer
 from graphme.application.xlsx_crop_regions import PixelBox, SheetPixelGrid
 from graphme.application.xlsx_visual_binding import crop_box
 from graphme.domain.enums import NodeType
@@ -86,37 +86,27 @@ def build_sheet_scope(
     scope: str,
     page_index: int,
     grid: SheetPixelGrid,
+    extents: Mapping[int, DrawingLike] | None = None,
 ) -> HierarchyScopeUnits | None:
-    """Return the scope for one rendered worksheet, or None when nothing was placed."""
-    on_sheet = [node for node in extracted.nodes if node.locator.sheet == sheet_name]
-    worksheet = next(
-        (node for node in on_sheet if node.type is NodeType.WORKSHEET), None
-    )
+    """Return the scope for one rendered worksheet, or None when nothing was placed.
+
+    A worksheet is asked like any other page (`build_placed_scope`): what a visual holds is
+    part of it, not a unit beside it. Only the placing is the sheet's own. Text and tables are
+    where their cells are -- a sheet is a grid without end, and nothing else bounds them --
+    and a picture or chart is its DrawingML extent (`extents`, by `xml_index`), the box its
+    crop was cut by, since a resized picture keeps a stale anchor cell.
+    """
+    members = [node for node in extracted.nodes if node.locator.sheet == sheet_name]
+    worksheet = next((node for node in members if node.type is NodeType.WORKSHEET), None)
     if worksheet is None:
         return None
-
-    # The binding phase already merged the pictures -- on the real DrawingML extent, not
-    # on the cells a picture is anchored to -- and wrote the answer down: a CONTAINS edge
-    # per swallowed piece, the region's box as the owner's crop_bbox, and the count.
-    # Merging again here elected a different owner from the same pictures, so the crop
-    # stored under one node went out introduced by another node's id.
-    absorbed = held_by_a_visual(extracted)
-    entries: list[_Entry] = []
-    for node in on_sheet:
-        if node.type is NodeType.WORKSHEET or not node.locator.cell_range:
-            continue
-        box = grid.cell_range(node.locator.cell_range)
-        if box is None:  # anything outside the rendering cannot be judged visually
-            continue
-        if node.type is not NodeType.IMAGE or node.id not in absorbed:
-            entries.append(_entry(node, box))
-    if not entries:
-        return None
-    return HierarchyScopeUnits(
+    return build_placed_scope(
+        extracted=extracted,
+        members=members,
+        placer=CellRangePlacer(grid, extents=extents),
+        root=worksheet,
         scope=scope,
         page_index=page_index,
-        scope_root_id=worksheet.id,
-        units=_units(entries, scope=scope),
     )
 
 

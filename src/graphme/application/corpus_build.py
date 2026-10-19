@@ -21,8 +21,6 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 
-from neo4j.exceptions import ServiceUnavailable, SessionExpired
-
 from graphme.application.corpus_links import LINK_RULE, DocumentIdentity, Mention, relinked
 from graphme.domain.ids import sha256_file
 from graphme.domain.models import ExtractedDocument, GraphEdge
@@ -49,6 +47,10 @@ class BuildStep(StrEnum):
 
 StepListener = Callable[[BuildStep, int, int], None]
 """Hears the step a build is in and how far along it is: (step, done, total)."""
+
+
+class SpaceUnavailable(RuntimeError):
+    """The graph space itself is gone -- not one document's write -- so a build stops."""
 
 
 class GraphSpace(Protocol):
@@ -125,7 +127,7 @@ def build_graph(
         told(BuildStep.PUT, index - 1, len(documents))
         try:
             space.put_document(extracted)
-        except (ServiceUnavailable, SessionExpired):
+        except SpaceUnavailable:
             raise  # the space is gone, not this document: reading on would only spend model calls
         except Exception as error:  # noqa: BLE001 -- the write is one transaction: all or none
             _log.warning("%s: not put -- %s", path, error)

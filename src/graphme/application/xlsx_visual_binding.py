@@ -28,6 +28,7 @@ from graphme.application.xlsx_unit_regions import (
 )
 from graphme.domain.enums import EdgeType, NodeType
 from graphme.domain.models import ExtractedDocument, GraphEdge, GraphNode
+from graphme.ports.storage import AssetStore
 
 VISUAL_TYPES = (NodeType.TABLE, NodeType.PIVOT_TABLE, NodeType.CHART, NodeType.IMAGE)
 """What is read as a picture: cropped, captioned, and able to hold other units. The one
@@ -150,7 +151,7 @@ def crop_box(node: GraphNode) -> PixelBox | None:
     return PixelBox(x0, y0, x1, y1)
 
 
-def read_node_crop(node: GraphNode, *, asset_store: Any) -> bytes | None:
+def read_node_crop(node: GraphNode, *, asset_store: AssetStore) -> bytes | None:
     """The crop this module stored for a node, or None when it stored none.
 
     It lives beside the write so the two cannot drift. Consumers used to cut their own
@@ -164,7 +165,7 @@ def read_node_crop(node: GraphNode, *, asset_store: Any) -> bytes | None:
     return read_crop(asset_hash, asset_store)
 
 
-def read_crop(asset_hash: str, asset_store: Any) -> bytes | None:
+def read_crop(asset_hash: str, asset_store: AssetStore) -> bytes | None:
     """A stored crop by its hash, or None when it was never written."""
     try:
         crop: bytes = asset_store.read(asset_hash, ".png")
@@ -174,10 +175,6 @@ def read_crop(asset_hash: str, asset_store: Any) -> bytes | None:
 
 
 CropCallable = Callable[[tuple[int, int, int, int]], bytes]
-
-
-class AssetPut(Protocol):
-    def put(self, payload: bytes, *, suffix: str = "") -> str: ...
 
 
 class VisualBinder(Protocol):
@@ -221,7 +218,7 @@ def bind_page_visuals(
     page: RenderedSheet,
     members: Sequence[GraphNode],
     placer: UnitPlacer,
-    asset_store: AssetPut,
+    asset_store: AssetStore,
     crop: CropCallable,
     ink: Sequence[PixelBox] = (),
 ) -> ExtractedDocument:

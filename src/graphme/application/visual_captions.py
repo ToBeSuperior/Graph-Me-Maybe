@@ -39,6 +39,7 @@ from graphme.domain.models import (
     VisualCaptionRequest,
     VisualCaptionResult,
 )
+from graphme.ports.storage import AssetStore
 from graphme.ports.vision import VisionProvider
 
 _log = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ def caption_visuals(
     *,
     pages: Sequence[RenderedPageLike],
     vision: VisionProvider,
-    asset_store: Any,
+    asset_store: AssetStore,
     workers: int = 1,
     limiter: AbstractContextManager[Any] | None = None,
     page_of: Mapping[str, int] | None = None,

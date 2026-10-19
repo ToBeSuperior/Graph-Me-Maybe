@@ -19,6 +19,7 @@ from typing import Any
 
 from PIL import Image
 
+from graphme.adapters.extractors.xlsx_drawings import DrawingObject, parse_xlsx_drawings
 from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import RendersPages
 from graphme.application.hierarchy_decisions import dropped_subjects
@@ -28,7 +29,6 @@ from graphme.application.page_hierarchy_scope import (
     build_sheet_scope,
 )
 from graphme.application.page_units import flow_pages
-from graphme.application.text_match import estimated_tokens
 from graphme.application.unit_placement import (
     FlowPlacer,
     NormalizedBoxPlacer,
@@ -47,6 +47,8 @@ from graphme.domain.models import (
     HierarchyScopeResult,
     HierarchyUnit,
 )
+from graphme.domain.text_match import estimated_tokens
+from graphme.ports.storage import AssetStore
 from graphme.ports.vision import VisionProvider
 
 _log = logging.getLogger(__name__)
@@ -60,7 +62,7 @@ def unit_crops(
     units: Iterable[HierarchyUnit],
     *,
     nodes: Mapping[str, GraphNode],
-    asset_store: Any,
+    asset_store: AssetStore,
 ) -> dict[str, bytes]:
     """The stored crop of every picture in the scope, keyed by the unit's id."""
     crops: dict[str, bytes] = {}
@@ -131,7 +133,7 @@ class RenderedHierarchyScopeProvider:
         *,
         renderer: RendersPages,
         vision: VisionProvider,
-        asset_store: Any = None,
+        asset_store: AssetStore | None = None,
         readings: int = 1,
         limiter: AbstractContextManager[Any] | None = None,
         workers: int = 1,
@@ -157,6 +159,13 @@ class RenderedHierarchyScopeProvider:
         the renderer's business, not this pass's."""
         return tuple(self._renderer.render(Path(source_path), document_format))
 
+    @staticmethod
+    def _drawings(source_path: str, document_format: DocumentFormat) -> tuple[DrawingObject, ...]:
+        """A workbook's pictures and charts as drawn: their own extent, not their anchor cells."""
+        if document_format is not DocumentFormat.XLSX:
+            return ()
+        return tuple(parse_xlsx_drawings(Path(source_path)).objects)
+
     def group_figures(
         self, *, extracted: ExtractedDocument, source_path: str
     ) -> tuple[HierarchyFigureGroup, ...]:
@@ -173,8 +182,9 @@ class RenderedHierarchyScopeProvider:
         figures: list[HierarchyFigureGroup] = []
         pages = self._pages(source_path, document_format)
         home = flow_pages(extracted, pages, document_format)
+        drawings = self._drawings(source_path, document_format)
         for page in pages:
-            asked = self._asked(extracted, page, home, nodes)
+            asked = self._asked(extracted, page, home, nodes, drawings)
             if asked is None:
                 continue
             scope, shown, crops = asked
@@ -211,9 +221,10 @@ class RenderedHierarchyScopeProvider:
         nodes = {node.id: node for node in extracted.nodes}
         pages = self._pages(source_path, document_format)
         home = flow_pages(extracted, pages, document_format)
+        drawings = self._drawings(source_path, document_format)
         flowing = document_format in FLOW_FORMATS
         if not flowing:
-            return self._derive_apart(extracted, pages, home, nodes, on_page)
+            return self._derive_apart(extracted, pages, home, nodes, drawings, on_page)
         decisions: list[HierarchyDecision] = []
         unread: list[int] = []
         seen: dict[str, HierarchyUnit] = {}
@@ -221,7 +232,7 @@ class RenderedHierarchyScopeProvider:
         carried = _Carried()
         tail: bytes | None = None
         for page in pages:
-            asked = self._asked(extracted, page, home, nodes)
+            asked = self._asked(extracted, page, home, nodes, drawings)
             if asked is None:
                 continue
             scope, shown, crops = asked
@@ -253,12 +264,13 @@ class RenderedHierarchyScopeProvider:
         pages: Sequence[RenderedPage],
         home: Mapping[str, int],
         nodes: Mapping[str, GraphNode],
+        drawings: Sequence[DrawingObject],
         on_page: Callable[[int, tuple[HierarchyDecision, ...] | None], None] | None,
     ) -> HierarchyDerivation:
         """Pages that stand alone, read `workers` at a time and each heard as it lands."""
 
         def read(page: RenderedPage) -> tuple[int, tuple[HierarchyDecision, ...] | None]:
-            asked = self._asked(extracted, page, home, nodes)
+            asked = self._asked(extracted, page, home, nodes, drawings)
             if asked is None:
                 return page.index, ()
             scope, shown, crops = asked
@@ -286,6 +298,7 @@ class RenderedHierarchyScopeProvider:
         page: RenderedPage,
         home: Mapping[str, int],
         nodes: Mapping[str, GraphNode],
+        drawings: Sequence[DrawingObject] = (),
     ) -> tuple[HierarchyScopeUnits, RenderedPage, dict[str, bytes] | None] | None:
         """What one page is asked with: its units, the page shown, and each picture's crop.
 
@@ -293,7 +306,7 @@ class RenderedHierarchyScopeProvider:
         is drawn on it; the crops are cut from the page itself and are not touched by this,
         so no box moves.
         """
-        scope = self._scope(extracted, page, extracted.document.format, home)
+        scope = self._scope(extracted, page, extracted.document.format, home, drawings)
         if scope is None or len(scope.units) > MAX_SCOPE_UNITS:
             return None
         crops = (
@@ -348,6 +361,7 @@ class RenderedHierarchyScopeProvider:
         page: RenderedPage,
         document_format: DocumentFormat,
         home: Mapping[str, int],
+        drawings: Sequence[DrawingObject] = (),
     ) -> HierarchyScopeUnits | None:
         """One page's units, placed the way that format states a position."""
         if document_format in FLOW_FORMATS:
@@ -396,6 +410,7 @@ class RenderedHierarchyScopeProvider:
             scope=f"sheet-{page.index:02d}",
             page_index=page.index,
             grid=grid,
+            extents={item.xml_index: item for item in drawings if item.worksheet == page.label},
         )
 
     @staticmethod

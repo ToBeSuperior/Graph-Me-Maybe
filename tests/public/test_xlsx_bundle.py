@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook
 
-from graphme.application import xlsx_bundle
-from graphme.application.xlsx_bundle import XlsxBundleOrchestrator
+from graphme import xlsx_bundle
+from graphme.xlsx_bundle import XlsxBundleOrchestrator
 
 
 def test_a_prepared_copy_is_replaced_only_once_it_is_closed(

@@ -137,6 +137,12 @@ no picture. If one is needed, draw a fresh one then.
       without an error, so the symptom is silent.
 - [ ] The worker's copy of the metafile player is still unpatched. If rendering moves to the
       worker, the same branch must go in there too (noted in `viewer/README.md`).
+- [ ] (Refinement) A unit the figure pass wrongly calls part of a figure is never shown to the
+      outline pass again, on any format: its place comes from `figure_part_decisions`
+      alone. Worksheets now follow the same rule as slides and pages
+      (`build_placed_scope`, pictures and charts placed by their DrawingML extent, text and
+      tables by their cells). If a misjudged part turns up, the correction belongs in the
+      figure pass or in binding, not in a format-specific exception.
 - [ ] Settle the git baseline (initial files and ignore policy) under the owner's approval.
       Do not commit or push it as part of roadmap verification.
 

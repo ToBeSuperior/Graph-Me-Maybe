@@ -41,7 +41,6 @@ from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.rendering.visual_binding import placed_units
 from graphme.adapters.storage.graph_rag import MAX_TOP_K, GraphNotEmbedded, GraphRag
-from graphme.adapters.storage.local_neo4j import GraphStarting
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, modified_at
 from graphme.application.embedded_documents import name_part
 from graphme.application.ingest import documents_in
@@ -58,6 +57,7 @@ from graphme.server.state import (
     CorpusBuild,
     Demo,
     ExportJob,
+    GraphStarting,
     Session,
     Undrawn,
     page_name,
@@ -475,7 +475,8 @@ def create_app(
         found = next((n for n in session.read().nodes if n.id == node), None)
         if found is None:
             raise HTTPException(404, "this node cannot be found")
-        picture = read_node_crop(found, asset_store=session.store)
+        picture = (read_node_crop(found, asset_store=session.store)
+                   if session.store is not None else None)
         if picture is None:
             raise HTTPException(404, "this node has no stored image")
         return Response(picture, media_type="image/png")

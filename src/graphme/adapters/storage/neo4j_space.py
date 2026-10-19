@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from neo4j import Driver, GraphDatabase, ManagedTransaction
-from neo4j.exceptions import AuthError
+from neo4j.exceptions import AuthError, ServiceUnavailable, SessionExpired
 
 from graphme.adapters.export.neo4j import (
     CHUNK_LABEL,
@@ -33,6 +33,7 @@ from graphme.adapters.export.neo4j_import import (
     NodeRow,
     RelationshipRow,
 )
+from graphme.application.corpus_build import SpaceUnavailable
 from graphme.application.corpus_links import DocumentIdentity, Mention, identity_of
 from graphme.application.file_titles import stated_titles
 from graphme.application.graph_chunks import Chunk, GraphUnit
@@ -148,8 +149,11 @@ class Neo4jGraphSpace:
                 modified=modified_at(source),
             )
 
-        with self.driver.session() as session:
-            session.execute_write(write)
+        try:
+            with self.driver.session() as session:
+                session.execute_write(write)
+        except (ServiceUnavailable, SessionExpired) as error:
+            raise SpaceUnavailable(str(error)) from error
 
     def source_path(self, document_id: str) -> str | None:
         """The file a document in the space was read from, as it was put there."""

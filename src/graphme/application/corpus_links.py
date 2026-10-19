@@ -30,9 +30,9 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from graphme.application.final_edges import final_edges
-from graphme.application.text_match import folded, letters, normalized
 from graphme.domain.enums import EdgeType, NodeType
 from graphme.domain.models import ExtractedDocument, GraphEdge
+from graphme.domain.text_match import folded, letters, normalized
 
 MIN_NAME_CHARS = 4
 """Shorter than this, a name -- "7", "A1" -- answers to too much to mean one document."""

@@ -16,9 +16,9 @@ from graphme.application.corpus_build import (
     StepListener,
 )
 from graphme.application.embedded_documents import shown_name
-from graphme.application.xlsx_bundle import XlsxBundleOrchestrator
 from graphme.config import load_settings
 from graphme.runtime import create_browser_renderer
+from graphme.xlsx_bundle import XlsxBundleOrchestrator
 
 
 class CorpusService(Protocol):

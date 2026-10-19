@@ -15,6 +15,7 @@ from graphme.application.document_references import link_references
 from graphme.application.page_units import flow_pages
 from graphme.application.visual_captions import caption_visuals
 from graphme.domain.models import ExtractedDocument
+from graphme.ports.storage import AssetStore
 from graphme.ports.vision import VisionProvider
 
 
@@ -39,7 +40,7 @@ class RenderedPageEnricher:
         *,
         renderer: Any,
         vision: VisionProvider,
-        asset_store: Any,
+        asset_store: AssetStore,
         workers: int = 1,
         limiter: AbstractContextManager[Any] | None = None,
     ) -> None:

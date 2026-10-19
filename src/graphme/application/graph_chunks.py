@@ -22,7 +22,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from graphme.application.text_match import estimated_tokens
+from graphme.domain.text_match import estimated_tokens
 
 CHUNK_TOKENS = 600
 """A search unit: a section of a few paragraphs, or a table with the line that names it."""

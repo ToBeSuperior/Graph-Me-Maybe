@@ -364,7 +364,7 @@ def test_while_the_graph_is_being_opened_another_request_is_told_to_wait(
     # Neo4j being fetched and started held every request past the page's own timeout.
     import threading
 
-    from graphme.adapters.storage.local_neo4j import GraphStarting
+    from graphme.server.state import GraphStarting
     held = threading.Event()
     release = threading.Event()
     demo.graph._space = None  # not opened yet: the opening below holds the way
@@ -389,7 +389,7 @@ def test_a_page_request_never_does_the_slow_opening_itself(demo, monkeypatch) ->
     import threading
     import time
 
-    from graphme.adapters.storage.local_neo4j import GraphStarting
+    from graphme.server.state import GraphStarting
 
     opened = threading.Event()
     space = demo.graph._space
@@ -418,7 +418,7 @@ def test_when_the_opening_fails_no_waiting_request_opens_the_graph_itself(
     import threading
     import time
 
-    from graphme.adapters.storage.local_neo4j import GraphStarting
+    from graphme.server.state import GraphStarting
 
     demo.graph._space = None
     calls: list[str] = []

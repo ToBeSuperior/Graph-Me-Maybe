@@ -16,7 +16,7 @@ from xml.etree import ElementTree
 
 import pymupdf
 
-from graphme.application.text_match import encodable, letters
+from graphme.domain.text_match import encodable, letters
 
 RELS = "{http://schemas.openxmlformats.org/package/2006/relationships}Relationship"
 OFFICE_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"

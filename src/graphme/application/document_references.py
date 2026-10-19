@@ -26,7 +26,6 @@ from graphme.application.page_units import (
     scope_of,
     units_by_page,
 )
-from graphme.application.text_match import folded, without
 from graphme.application.xlsx_visual_binding import CONTAINER_TYPES, VISUAL_TYPES
 from graphme.domain.enums import EdgeType, NodeType
 from graphme.domain.ids import stable_id
@@ -40,6 +39,8 @@ from graphme.domain.models import (
     HierarchyUnit,
     SourceLocator,
 )
+from graphme.domain.text_match import folded, without
+from graphme.ports.storage import AssetStore
 from graphme.ports.vision import VisionProvider
 
 _log = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ def link_references(
     *,
     pages: Sequence[RenderedPageLike],
     vision: VisionProvider,
-    asset_store: Any = None,
+    asset_store: AssetStore | None = None,
     page_of: Mapping[str, int] | None = None,
     workers: int = 1,
     limiter: AbstractContextManager[Any] | None = None,

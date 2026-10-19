@@ -21,6 +21,7 @@ from graphme.application.unit_placement import UnitPlacer
 from graphme.application.xlsx_visual_binding import CONTAINER_TYPES, CROP_ASSET_KEY, crop_box
 from graphme.domain.enums import NodeType
 from graphme.domain.models import ExtractedDocument, GraphNode, HierarchyFigureGroup
+from graphme.ports.storage import AssetStore
 
 _log = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def widen_figures(
     placers: Mapping[int, UnitPlacer],
     page_of: Mapping[str, int],
     crop: Any,
-    asset_store: Any,
+    asset_store: AssetStore,
 ) -> ExtractedDocument:
     """Cut each named figure's crop again, around the figure and the parts drawn with it.
 

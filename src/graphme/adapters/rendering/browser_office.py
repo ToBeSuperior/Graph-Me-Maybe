@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Any
 
 from graphme import processes
+from graphme.adapters.rendering.xlsx_measurement import CellRange, measure_workbook
 from graphme.application.xlsx_crop_regions import PixelBox, SheetPixelGrid
-from graphme.application.xlsx_measurement import CellRange, measure_workbook
 from graphme.domain.enums import DocumentFormat
 from graphme.domain.models import SourceLocator
 
