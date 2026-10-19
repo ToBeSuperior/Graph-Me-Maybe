@@ -86,6 +86,12 @@ end to end, and the VLM hierarchy handles worksheets, slides, DOCX and PDF.
 - [ ] Decide whether to split a table into cell, row and column semantic units, and if so,
       set the rules. Today one table is one node. This item is on hold until the
       representative table meaning and the ownership rules are settled.
+- [ ] (Refinement) A worksheet table drawn without borders is not recognised as a table: each
+      cell becomes a text unit of its own, and the outline pass hangs every value under the
+      first cell or header, flat, so its rows and columns are lost. A table needs its border
+      today (`extractors/xlsx_visual_tables.py`). Decide how a borderless table on a sheet is
+      told from loose cells -- by principle, for any workbook, not by the shape of the ones
+      at hand.
 
 ## 3 · Quality evaluation set
 

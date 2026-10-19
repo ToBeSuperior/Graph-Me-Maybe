@@ -5,6 +5,8 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-10-19
+
 ### Changed
 
 - Everything is in English by default: the app opens in English unless Korean is chosen in the
