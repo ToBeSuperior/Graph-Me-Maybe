@@ -2,7 +2,7 @@
 // brought that are not in it (still being read, or failed). Each says where it stands and when
 // its file was last changed, like a folder listing.
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronRight, FileSearch, RotateCw, Search, X } from 'lucide-react';
+import { AlertTriangle, ChevronRight, ExternalLink, FileSearch, RotateCw, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDeferredValue, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -113,7 +113,12 @@ export function LibraryPage() {
                         </Link>
                         <span title={item.in_space ? undefined : t('outsideTip')}><Badge tone={state.tone}>{t(state.word)}</Badge></span>
                         <span className="text-xs text-muted max-sm:hidden" title={changedAt(item.modified, lang, true)}>{changedAt(item.modified, lang)}</span>
-                        <span className="flex justify-end max-sm:hidden">
+                        <span className="flex items-center justify-end gap-1 max-sm:hidden">
+                          {item.web_url && (
+                            <a href={item.web_url} target="_blank" rel="noreferrer" className="text-faint hover:text-fg" aria-label={t('openOriginal')} title={t('openOriginal')}>
+                              <ExternalLink className="size-4" />
+                            </a>
+                          )}
                           {/* A row opens its document, whose page is where it is deleted: a bin
                               here sat where every other row offers its details. */}
                           {item.in_space || BUSY.includes(item.state)

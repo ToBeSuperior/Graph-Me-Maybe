@@ -5,11 +5,9 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import socket
 import sys
 import threading
-import webbrowser
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -78,22 +76,6 @@ def running(port: int, home: Path, *, get: Callable[..., Any] = httpx.get) -> bo
         return False
 
 
-def open_in_browser(
-    url: str, *, environ: Mapping[str, str] = os.environ,
-    which: Callable[[str], str | None] = shutil.which,
-    run: Callable[..., object] = processes.run,
-    fallback: Callable[[str], object] = webbrowser.open,
-) -> None:
-    """The page in the user's browser. Under WSL that is Windows' default one: Python picks
-    the Linux Chrome there first, which is the renderer's, in a window of its own. A browser
-    the user names in BROWSER is always kept."""
-    if ("WSL_DISTRO_NAME" in environ or "WSL_INTEROP" in environ) and "BROWSER" not in environ:
-        opener = which("wslview")
-        run([opener, url] if opener else ["explorer.exe", url], check=False)
-        return
-    fallback(url)
-
-
 def show_window(url: str, storage: Path) -> bool:
     """The page in a window of its own -- Edge WebView2 on Windows, WebKit on macOS -- until it
     is closed. False when there is none to show it in (Linux and WSL install no webview)."""
@@ -115,7 +97,7 @@ def show_window(url: str, storage: Path) -> bool:
 
 def launch(
     *, port: int | None, browser: bool, environ: Mapping[str, str] = os.environ,
-    open_url: Callable[[str], object] = open_in_browser,
+    open_url: Callable[[str], object] = processes.open_in_browser,
     serve: Callable[..., None] | None = None,
     window: Callable[[str], bool] | None = None,
 ) -> None:

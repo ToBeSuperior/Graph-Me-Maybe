@@ -19,6 +19,7 @@ import zipfile
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,11 @@ from graphme.adapters.export.neo4j_import import write_import_bundle
 from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.rendering.visual_binding import pages_of, with_geometry
+from graphme.adapters.sources import Sources
+from graphme.adapters.sources.drive import SCHEME as DRIVE_SCHEME
+from graphme.adapters.sources.drive import DriveSource
+from graphme.adapters.sources.drive import web_url as drive_web_url
+from graphme.adapters.sources.google import Client, GoogleAccount, Picked, vault
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import GraphRag
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
@@ -40,6 +46,7 @@ from graphme.application.corpus_build import (
     build_graph,
     content_hash,
     relocated,
+    with_origin,
 )
 from graphme.application.document_graph import DocumentGraphBuilder
 from graphme.application.embedded_documents import (
@@ -55,6 +62,7 @@ from graphme.config import Settings
 from graphme.domain.enums import DocumentFormat, EdgeType
 from graphme.domain.ids import sha256_bytes
 from graphme.domain.models import ExtractedDocument, HierarchyDecision, HierarchyDerivation
+from graphme.ports.sources import SourceStore
 from graphme.runtime import create_graph_builder, create_neo4j_admin, create_vision
 
 VLM_CALLS_AT_ONCE = 24
@@ -122,6 +130,24 @@ def _forget_kept_pages(root: Path) -> None:
     for kept in (*root.glob("*/page-*.png"), *root.glob("*/pages.json"),
                  *root.glob("*/bound.json")):
         kept.unlink(missing_ok=True)
+
+
+class _Lazy:
+    """A source made when first asked for: a cloud drive is signed in only when one of its
+    files is needed."""
+
+    def __init__(self, make: Callable[[], SourceStore]) -> None:
+        self._make = make
+
+    def open_copy(self, origin: str) -> AbstractContextManager[Path]:
+        try:
+            store = self._make()
+        except LookupError as error:  # not set up, or not signed in
+            raise FileNotFoundError(f"{origin}: {error}") from error
+        return store.open_copy(origin)
+
+    def web_url(self, origin: str) -> str | None:
+        return drive_web_url(origin)
 
 
 class GraphStarting(RuntimeError):
@@ -205,6 +231,9 @@ class Session:
     """What the graph space holds of a document built earlier -- where each node is drawn,
     its pages, its graph -- when it was opened from there: shown with no extraction, no
     binding and no drawing but of the page looked at."""
+    origin: str = ""
+    """Where the original is, as the graph space records it (`SourceStore`): a path on this
+    machine, or a cloud drive's address."""
     stamp: tuple[int, int] | None = None
     """The file's size and time when this reading began: another means the file changed."""
     """Its pages are drawn by one request; another asking meanwhile waits for those pages
@@ -330,6 +359,13 @@ class Demo:
         self.previews: OrderedDict[tuple[str, int, tuple[int, int] | None], bytes] = OrderedDict()
         """Pages drawn for a reader, the latest PREVIEWS_KEPT: nothing is kept across starts."""
         self.previewing = threading.Lock()
+        self.sources = Sources()
+        self._google: tuple[Client, GoogleAccount] | None = None
+        self.origins: dict[str, tuple[str, dict[str, str | None]]] = {}
+        """A file fetched from a cloud drive for a build: its address there, and what is
+        recorded about it."""
+        self.sources.add(DRIVE_SCHEME, _Lazy(self._drive))
+        """Where originals are read from: this machine, and a connected cloud drive."""
         if root is not None:
             _forget_kept_pages(self.root)
         self.build = CorpusBuild()
@@ -421,17 +457,19 @@ class Demo:
                 if not path:
                     missing.append(f"{document_id}\tnot in the graph")
                     continue
-                if not Path(path).is_file():
-                    # Named as a reader can find it: where it was for, and where it was.
-                    missing.append(f"{where}/{shown_name(Path(path).name)}\tnot found at {path}")
-                    continue
                 stem, suffix = os.path.splitext(shown_name(Path(path).name))
                 name, n = f"{where}/{stem}{suffix}", 1
                 while name in taken:  # two files of one name in one folder: both kept
                     n += 1
                     name = f"{where}/{stem} ({n}){suffix}"
+                try:
+                    with self.sources.open_copy(path) as copy:
+                        out.write(copy, name)
+                except (FileNotFoundError, LookupError):
+                    # Named as a reader can find it: where it was for, and where it was.
+                    missing.append(f"{where}/{stem}{suffix}\tnot found at {path}")
+                    continue
                 taken.add(name)
-                out.write(path, name)
             if missing:
                 out.writestr("missing-files.txt", "These could not be added:\n"
                              + "\n".join(missing) + "\n")
@@ -521,6 +559,10 @@ class Demo:
                 with session.lock:
                     session.state, session.error = "error", GONE
                 raise LookupError(GONE) from error
+            except LookupError as error:  # a cloud drive not signed in: said as it is
+                with session.lock:
+                    session.state, session.error = "error", str(error)
+                raise
             except Exception as error:  # noqa: BLE001 -- said on the page
                 traceback.print_exc(file=sys.stderr)
                 with session.lock:
@@ -541,18 +583,61 @@ class Demo:
             if key in self.previews:
                 self.previews.move_to_end(key)
                 return self.previews[key]
-        if not session.source.is_file():
-            raise LookupError(GONE)
-        with self.drawing:
-            try:
-                png = self.renderer.preview(session.source, session.format, index)
-            except Exception as error:
-                raise Undrawn(UNDRAWN) from error
+        try:
+            original = session.origin or str(session.source)
+            with self.sources.open_copy(original) as source, self.drawing:
+                try:
+                    png = self.renderer.preview(source, session.format, index)
+                except Exception as error:
+                    raise Undrawn(UNDRAWN) from error
+        except FileNotFoundError as error:
+            raise LookupError(GONE) from error
         with self.previewing:
             self.previews[key] = png
             while len(self.previews) > PREVIEWS_KEPT:
                 self.previews.popitem(last=False)
         return png
+
+    # Google Drive --------------------------------------------------------------------------
+
+    def google(self) -> GoogleAccount:
+        """The Google account the user signs in with, through their own OAuth client."""
+        client_id = self.settings.google_client_id
+        if not client_id:
+            raise LookupError("Google Drive is not set up -- put in your OAuth client (Desktop "
+                              "app) in Keys and model")
+        client = Client(id=client_id, secret=self.settings.google_client_secret)
+        with self.opening:
+            if self._google is None or self._google[0] != client:
+                self._google = (client, GoogleAccount(
+                    client, self.client, vault(self.root / "google.token")))
+            return self._google[1]
+
+    @property
+    def picked(self) -> list[str]:
+        """The Drive files the user picked, in the order picked."""
+        try:
+            said = json.loads((self.root / "google.json").read_text(encoding="utf-8"))
+            return [str(i) for i in said.get("picked", [])]
+        except (OSError, ValueError, AttributeError):
+            return []
+
+    def google_state(self) -> dict[str, Any]:
+        configured = bool(self.settings.google_client_id)
+        return {"configured": configured,
+                "connected": configured and self.google().connected(),
+                "picked": len(self.picked)}
+
+    def google_picked(self, picked: Picked) -> int:
+        """`picked` kept beside what was picked before; how many are kept now."""
+        kept = list(dict.fromkeys([*self.picked, *picked.file_ids]))
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / "google.json").write_text(json.dumps({"picked": kept}), encoding="utf-8")
+        return len(kept)
+
+    def google_disconnect(self) -> None:
+        self.google().disconnect()
+        (self.root / "google.json").unlink(missing_ok=True)
 
     def open_path(self, path: str) -> str:
         """A document on this machine, opened by its path, and its id. One kept under
@@ -587,8 +672,48 @@ class Demo:
                     with session.lock:
                         if session.state not in STARTABLE:
                             session.stop = self.build_stop
-        threading.Thread(target=self._build_corpus, args=(docs, put, embed), daemon=True).start()
+        threading.Thread(target=self._build_then_let_go, args=(docs, put, embed),
+                         daemon=True).start()
         return self.build
+
+    def _build_then_let_go(self, docs: list[str], put: bool, embed: bool) -> None:
+        """The build, then the copies fetched from a cloud drive for it removed: the space
+        records where each one is, and a reader is shown it from there."""
+        try:
+            self._build_corpus(docs, put, embed)
+        finally:
+            for doc in docs:
+                if doc in self.origins:
+                    shutil.rmtree(Path(self.catalog.get(doc, "")).parent, ignore_errors=True)
+
+    def build_google(self) -> CorpusBuild:
+        """The picked Drive files read into the space: what the space holds already, by the
+        content Drive states (`sha256Checksum`), is passed over without being fetched; the rest
+        is fetched for the build and removed after it. A file changed since is read again and
+        replaces its earlier reading."""
+        drive = self._drive()
+        found, lost = drive.documents(self.picked)
+        held = self.space().contents([f.sha256 for f in found if f.sha256])
+        docs: list[str] = []
+        for wanted in (f for f in found if f.sha256 not in held):
+            folder = self.root / "drive" / wanted.id
+            shutil.rmtree(folder, ignore_errors=True)
+            folder.mkdir(parents=True)
+            with drive.open_copy(wanted.origin) as copy:
+                kept = folder / copy.name
+                shutil.copyfile(copy, kept)
+            doc = self.open_path(str(kept))
+            self.origins[doc] = (wanted.origin, {
+                "drive_file_id": wanted.id, "drive_revision": wanted.revision,
+                "web_url": wanted.web_url or drive.web_url(wanted.origin)})
+            docs.append(doc)
+        build = self.build_corpus(docs, "Google Drive")
+        build.known += len(found) - len(docs)
+        build.failed += [f"{file_id}: no longer readable in Google Drive" for file_id in lost]
+        return build
+
+    def _drive(self) -> DriveSource:
+        return DriveSource(self.client, self.google().access_token, self.root / "drive-copies")
 
     def start_embed(self) -> CorpusBuild:
         """Passages cut and embedded for every document not embedded yet, in the build's slot:
@@ -660,6 +785,8 @@ class Demo:
                 time.sleep(1)
             if session.state != "done" or session.extracted is None:
                 raise RuntimeError(f"{Path(session.source).name}: {session.error}")
+            if handle.name in self.origins:
+                return with_origin(session.extracted, *self.origins[handle.name])
             return session.extracted
 
         def step(name: BuildStep, done: int, total: int) -> None:
@@ -804,6 +931,7 @@ class Demo:
                     source=source,
                     workspace=self.root / doc,
                     format=format_of(source),
+                    origin=self.origins[doc][0] if doc in self.origins else path,
                     stamp=_stamp(path),
                 )
             return self.sessions[doc]
@@ -929,16 +1057,15 @@ class Demo:
         # The crops go where the graph space's answers read them (`GraphRag._pictures`), not
         # under this reading's workspace: they outlive it, and they are named by content.
         session.store = LocalAssetStore(self.settings.asset_dir)
-        if not session.source.is_file():
-            raise FileNotFoundError(session.source)
-        with self.drawing:
-            try:
-                session.pages = self.renderer.render(session.source, session.format)
-            except Exception as error:
-                raise Undrawn(UNDRAWN) from error
-        builder = self._builder(session)
-        # Give tables their crop and let each own the pictures it encloses.
-        bound = builder.bind(builder.extract(session.source, session.format), session.source)
+        with self.sources.open_copy(session.origin or str(session.source)) as source:
+            with self.drawing:
+                try:
+                    session.pages = self.renderer.render(source, session.format)
+                except Exception as error:
+                    raise Undrawn(UNDRAWN) from error
+            builder = self._builder(session)
+            # Give tables their crop and let each own the pictures it encloses.
+            bound = builder.bind(builder.extract(source, session.format), source)
         session.extracted = bound
         session.page_of = pages_of(bound, session.pages, session.format)
         # Shown while the document is read; gone once it is (`_lighten`).

@@ -27,6 +27,8 @@ class LibraryItem(_Model):
     state: str
     modified: float | None = None
     """When its file was last changed, in seconds."""
+    web_url: str | None = None
+    """Where its original opens in a browser: a cloud drive's page; none for a local file."""
 
 
 class Library(_Model):
@@ -280,6 +282,20 @@ class SettingField(_Model):
     """The value, for a setting that is not a secret."""
     hint: str | None = None
     """A secret's last four characters, when it is set -- the secret itself is never sent."""
+
+
+class GoogleDrive(_Model):
+    configured: bool
+    """Whether the user's OAuth client is set (GRAPHME_GOOGLE_CLIENT_ID)."""
+    connected: bool
+    """Whether a Google account is signed in."""
+    picked: int
+    """How many Drive files (or folders) the user picked for the graph."""
+
+
+class GoogleConnect(_Model):
+    url: str
+    """Where the browser signs in and picks files; opened already when the server could."""
 
 
 class ServerSettings(_Model):

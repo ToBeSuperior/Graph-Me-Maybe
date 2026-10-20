@@ -5,6 +5,13 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- Google Drive as a source: connect with your own OAuth client, pick files (or folders) in
+  Google's picker, and build them into the graph. Files stay in Drive -- the app fetches one only
+  while it reads, draws or downloads it -- and only changed files are read again. The app reads
+  only the files picked (`drive.file`); the sign-in is kept in the OS credential store.
+
 ## [0.1.21] - 2026-10-20
 
 ### Changed

@@ -41,11 +41,12 @@ def test_one_list_holds_the_space_and_what_the_server_is_still_reading(
     assert said["space_ok"] is True
     assert items["spec.docx"] == {"name": "spec.docx", "format": "docx", "in_space": True,
                                   "document_id": "s1", "file_id": reading_inside,
-                                  "state": "idle", "modified": 1_600_000_000}
+                                  "state": "idle", "modified": 1_600_000_000, "web_url": None}
     assert items["old.docx"]["in_space"] and items["old.docx"]["file_id"] is None
     assert items["draft.pdf"] == {"name": "draft.pdf", "format": "pdf", "in_space": False,
                                   "document_id": None, "file_id": reading_outside,
-                                  "state": "idle", "modified": outside.stat().st_mtime}
+                                  "state": "idle", "modified": outside.stat().st_mtime,
+                                  "web_url": None}
     assert "never.xlsx" not in items, "a file nothing began on is not listed"
     names = [i["name"] for i in said["items"]]
     assert names.index("old.docx") < names.index("draft.pdf"), "the space's documents first"

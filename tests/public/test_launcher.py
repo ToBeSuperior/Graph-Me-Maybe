@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from graphme import launcher, model_endpoint
+from graphme import launcher, model_endpoint, processes
 from graphme.config import load_settings, read_dotenv
 
 
@@ -93,7 +93,7 @@ def test_under_wsl_the_page_opens_in_the_windows_browser() -> None:
     ran: list[list[str]] = []
     fallback: list[str] = []
 
-    launcher.open_in_browser(
+    processes.open_in_browser(
         "http://127.0.0.1:8765", environ={"WSL_DISTRO_NAME": "Ubuntu"},
         which=lambda name: f"/usr/bin/{name}" if name == "wslview" else None,
         run=lambda args, **_: ran.append(args), fallback=fallback.append)
@@ -105,7 +105,7 @@ def test_under_wsl_the_page_opens_in_the_windows_browser() -> None:
 def test_under_wsl_without_wslview_explorer_opens_it() -> None:
     ran: list[list[str]] = []
 
-    launcher.open_in_browser(
+    processes.open_in_browser(
         "http://127.0.0.1:8765", environ={"WSL_DISTRO_NAME": "Ubuntu"},
         which=lambda name: None, run=lambda args, **_: ran.append(args),
         fallback=lambda url: None)
@@ -117,7 +117,7 @@ def test_a_browser_named_by_the_user_is_kept_even_under_wsl() -> None:
     fallback: list[str] = []
     ran: list[object] = []
 
-    launcher.open_in_browser(
+    processes.open_in_browser(
         "http://127.0.0.1:8765", environ={"WSL_DISTRO_NAME": "Ubuntu", "BROWSER": "firefox"},
         which=lambda name: "/usr/bin/x", run=lambda args, **_: ran.append(args),
         fallback=fallback.append)

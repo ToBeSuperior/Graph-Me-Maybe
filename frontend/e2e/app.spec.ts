@@ -206,3 +206,18 @@ test.describe('on a Korean browser', () => {
     await expect(page.getByText('Drop a folder of documents')).toBeVisible();
   });
 });
+
+test('Google Drive is connected in the browser, then its picked files are built', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto('/manage/drive');
+  await expect(page.getByText('연결되지 않았습니다.')).toBeVisible();
+
+  await page.getByRole('button', { name: '연결하고 파일 고르기' }).click();
+  await expect(page.getByRole('link', { name: '이 링크를 여세요' })).toHaveAttribute('href', /trigger_onepick/);
+  await expect(page.getByText('연결됨 · 2개 골랐습니다')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Drive에서 그래프 만들기' }).click();
+  await expect.poll(() => fake.drive.built).toBe(1);
+  await page.getByRole('button', { name: '연결 해제' }).click();
+  await expect(page.getByText('연결되지 않았습니다.')).toBeVisible();
+});

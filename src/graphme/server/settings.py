@@ -39,6 +39,8 @@ _CHOICES = (
     ("GRAPHME_MODEL_BASE_URL", False),
     ("GRAPHME_MODEL", False),
     ("GRAPHME_HIERARCHY_READINGS", False),
+    ("GRAPHME_GOOGLE_CLIENT_ID", False),
+    ("GRAPHME_GOOGLE_CLIENT_SECRET", True),
 )
 _ANY_KEY = {row.key_env for row in model_endpoint.PROVIDERS.values()} | {
     row.key_env for row in model_endpoint.EMBEDDERS.values()}

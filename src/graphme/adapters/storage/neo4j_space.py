@@ -33,7 +33,7 @@ from graphme.adapters.export.neo4j_import import (
     NodeRow,
     RelationshipRow,
 )
-from graphme.application.corpus_build import SpaceUnavailable
+from graphme.application.corpus_build import SpaceUnavailable, origin_of
 from graphme.application.corpus_links import DocumentIdentity, Mention, identity_of
 from graphme.application.file_titles import stated_titles
 from graphme.application.graph_chunks import Chunk, GraphUnit
@@ -143,7 +143,7 @@ class Neo4jGraphSpace:
                 "SET d.source_path = $path, d.title = $title, d.stated_titles = $stated, "
                 "d.modified_at = $modified",
                 document=extracted.document.id,
-                path=str(source),
+                path=origin_of(extracted),
                 title=identity_of(extracted).title,
                 stated=stated,
                 modified=modified_at(source),
@@ -362,7 +362,7 @@ class Neo4jGraphSpace:
             OPTIONAL MATCH (e:DocNode:ExternalDocument {document_id: d.id})
             RETURN d.id AS id, d.label AS label, d.title AS title, count(e) AS mentions,
                    d.source_path AS source_path, d.modified_at AS modified_at,
-                   d.content_hash AS content_hash
+                   d.content_hash AS content_hash, d.meta_web_url AS web_url
             ORDER BY label
             """
         )

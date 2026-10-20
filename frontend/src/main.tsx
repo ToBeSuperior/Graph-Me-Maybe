@@ -7,6 +7,7 @@ import { AppShell } from './components/AppShell';
 import { KeyGate } from './components/KeyGate';
 import { TipProvider } from './components/ui';
 import { DangerPage } from './features/manage/DangerPage';
+import { DrivePage } from './features/manage/DrivePage';
 import { SettingsPage } from './features/manage/SettingsPage';
 import { ExportPage } from './features/manage/ExportPage';
 import { LibraryPage } from './features/manage/LibraryPage';
@@ -60,6 +61,7 @@ const router = createBrowserRouter([
           { path: 'docs/:id', element: <DocumentRoute /> },
           { path: 'export', element: <ExportPage /> },
           { path: 'settings', element: <SettingsPage /> },
+          { path: 'drive', element: <DrivePage /> },
           { path: 'danger', element: <DangerPage /> },
         ],
       },

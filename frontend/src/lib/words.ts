@@ -280,6 +280,19 @@ const ko = {
   resetWhileBuilding: '그래프를 만드는 동안에는 초기화할 수 없습니다.',
 
   // Keys and model
+  driveTitle: 'Google Drive',
+  driveBody: 'Drive에서 고른 파일을 그래프에 넣습니다. 파일은 Drive에 그대로 있고, 읽거나 그리거나 내려받을 때만 잠깐 가져옵니다. 앱은 고른 파일만 읽습니다.',
+  driveNotSetUp: '먼저 본인의 OAuth 클라이언트(데스크톱 앱)를 넣어 주세요:',
+  driveNotConnected: '연결되지 않았습니다.',
+  drivePicked: (n: number) => `연결됨 · ${n}개 골랐습니다`,
+  driveConnect: '연결하고 파일 고르기',
+  drivePickMore: '파일 더 고르기',
+  driveBuild: 'Drive에서 그래프 만들기',
+  driveDisconnect: '연결 해제',
+  driveOpened: '브라우저에서 로그인하고 파일을 고르세요. 열리지 않았다면',
+  driveOpenLink: '이 링크를 여세요',
+  driveBuilding: '고른 파일을 읽고 있습니다. 바뀌지 않은 파일은 건너뜁니다.',
+  openOriginal: '원본 열기',
   keysTitle: '키와 모델',
   keysBody: '이 데모가 쓰는 키와 모델입니다. 저장하면 .env에 남고 바로 적용됩니다. 키는 저장하기 전에 확인하고(모델 호출 없음, 비용 없음), 화면에 다시 보내지 않습니다.',
   settingName: (env: string) => ({
@@ -291,6 +304,8 @@ const ko = {
     GRAPHME_MODEL_BASE_URL: '모델 서버 주소',
     GRAPHME_MODEL: '모델',
     GRAPHME_HIERARCHY_READINGS: '페이지당 읽기 횟수',
+    GRAPHME_GOOGLE_CLIENT_ID: 'Google OAuth 클라이언트 ID',
+    GRAPHME_GOOGLE_CLIENT_SECRET: 'Google OAuth 클라이언트 secret',
   } as Record<string, string>)[env] ?? env,
   settingNote: (env: string) => ({
     ...{
@@ -303,6 +318,8 @@ const ko = {
     GRAPHME_MODEL_BASE_URL: '비워 두면 제공자의 기본 주소를 씁니다.',
     GRAPHME_MODEL: '이미지 입력과 JSON 스키마 출력을 지원해야 합니다.',
     GRAPHME_HIERARCHY_READINGS: '2면 페이지마다 두 번 읽고 갈린 페이지만 한 번 더 부릅니다 — 비용이 약 두 배입니다.',
+    GRAPHME_GOOGLE_CLIENT_ID: 'Google Cloud 프로젝트의 OAuth 클라이언트(데스크톱 앱 유형). Drive API와 Google Picker API를 켜 두세요.',
+    GRAPHME_GOOGLE_CLIENT_SECRET: '같은 클라이언트의 secret. 이 컴퓨터의 .env에만 남습니다.',
   } as Record<string, string>)[env] ?? '',
   keySet: (hint: string | null) => (hint ? `설정됨 · …${hint}` : '설정됨'),
   keyUnset: '비어 있음',
@@ -594,6 +611,19 @@ const en: Words = {
   resetFailed: 'Could not reset',
   resetWhileBuilding: 'The graph cannot be reset while it is being built.',
 
+  driveTitle: 'Google Drive',
+  driveBody: 'Files you pick in Drive go into the graph. They stay in Drive: the app fetches one only while it reads, draws or downloads it, and reads only the files you pick.',
+  driveNotSetUp: 'First put in your own OAuth client (Desktop app) in',
+  driveNotConnected: 'Not connected.',
+  drivePicked: (n) => `Connected · ${n} picked`,
+  driveConnect: 'Connect and pick files',
+  drivePickMore: 'Pick more files',
+  driveBuild: 'Build from Drive',
+  driveDisconnect: 'Disconnect',
+  driveOpened: 'Sign in and pick files in your browser. If it did not open,',
+  driveOpenLink: 'open this link',
+  driveBuilding: 'Reading the picked files; unchanged ones are passed over.',
+  openOriginal: 'Open original',
   keysTitle: 'Keys and model',
   keysBody: 'The keys and model this demo uses. Saved, they go into .env and take effect at once. Keys are tried before saving (no model call, no cost) and are never sent back to the page.',
   settingName: (env) => ({
@@ -605,6 +635,8 @@ const en: Words = {
     GRAPHME_MODEL_BASE_URL: 'Model server address',
     GRAPHME_MODEL: 'Model',
     GRAPHME_HIERARCHY_READINGS: 'Readings per page',
+    GRAPHME_GOOGLE_CLIENT_ID: 'Google OAuth client ID',
+    GRAPHME_GOOGLE_CLIENT_SECRET: 'Google OAuth client secret',
   } as Record<string, string>)[env] ?? env,
   settingNote: (env) => ({
     ...{
@@ -617,6 +649,8 @@ const en: Words = {
     GRAPHME_MODEL_BASE_URL: 'Left empty, the provider’s own address.',
     GRAPHME_MODEL: 'Must take images and answer to a JSON schema.',
     GRAPHME_HIERARCHY_READINGS: 'At 2 each page is read twice, and only pages where they differ once more — about twice the cost.',
+    GRAPHME_GOOGLE_CLIENT_ID: 'The OAuth client (Desktop app type) of your Google Cloud project, with the Drive API and the Google Picker API enabled.',
+    GRAPHME_GOOGLE_CLIENT_SECRET: "The same client's secret. It stays in this computer's .env.",
   } as Record<string, string>)[env] ?? '',
   keySet: (hint) => (hint ? `Set · …${hint}` : 'Set'),
   keyUnset: 'Empty',

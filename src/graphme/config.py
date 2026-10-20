@@ -47,6 +47,8 @@ ENV_FIELDS = {
     "GRAPHME_NEO4J_HEAP": "neo4j_heap",
     "GRAPHME_API_KEY": "server_key",
     "GRAPHME_NEO4J_PAGECACHE": "neo4j_pagecache",
+    "GRAPHME_GOOGLE_CLIENT_ID": "google_client_id",
+    "GRAPHME_GOOGLE_CLIENT_SECRET": "google_client_secret",
 }
 _FLOAT_FIELDS = {"render_timeout_seconds", "relevance_floor", "hybrid_dense_weight"}
 _INT_FIELDS = {
@@ -177,6 +179,9 @@ class Settings(BaseModel):
     neo4j_password: str | None = Field(default=None, repr=False)
     """Only for a Neo4j run with a password; the one started here needs none."""
     server_key: str | None = Field(default=None, repr=False)
+    google_client_id: str | None = None
+    """The user's own OAuth client (Desktop app) that reads the Google Drive files they pick."""
+    google_client_secret: str | None = Field(default=None, repr=False)
     """GRAPHME_API_KEY: what `graphme serve` asks every `/v1` request for. Unset, it asks for
     nothing, and serves this machine only."""
     neo4j_heap: str = Field(default="1g", pattern=r"^[1-9][0-9]*[kmg]$")

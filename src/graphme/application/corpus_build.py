@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Protocol
 
 from graphme.application.corpus_links import LINK_RULE, DocumentIdentity, Mention, relinked
+from graphme.domain.enums import NodeType
 from graphme.domain.ids import sha256_file
 from graphme.domain.models import ExtractedDocument, GraphEdge
 
@@ -145,7 +146,7 @@ def build_graph(
         put.add(extracted.document.id)
         # A file edited since it was read is a new document (its content, so its id, changed):
         # what was read from it before goes, or the old values answer beside the new ones.
-        replaced = space.read_from(str(extracted.document.source_path)) - {extracted.document.id}
+        replaced = space.read_from(origin_of(extracted)) - {extracted.document.id}
         if replaced:
             space.delete_documents(sorted(replaced))
     told(BuildStep.PUT, len(documents), len(documents))
@@ -160,6 +161,26 @@ def build_graph(
     told(BuildStep.LINK, 1, 1)
     return BuildReport(processed=len(put), failed=tuple(failed), links=len(links),
                        known=len(known))
+
+
+def origin_of(extracted: ExtractedDocument) -> str:
+    """Where the document's original is, as the space records it: a cloud drive's address
+    (`origin`) for one fetched from there, else the file it was read from."""
+    said = extracted.document.metadata.get("origin")
+    return said if isinstance(said, str) and said else str(extracted.document.source_path)
+
+
+def with_origin(extracted: ExtractedDocument, origin: str,
+                facts: dict[str, str | None]) -> ExtractedDocument:
+    """A document read from a copy, recorded as the original it was copied from: `origin` on
+    the record, and `facts` about it (its drive's id, revision, web address) on the document
+    node, where the space keeps them."""
+    record = extracted.document.model_copy(
+        update={"metadata": {**extracted.document.metadata, "origin": origin}})
+    kept = {k: v for k, v in facts.items() if v}
+    nodes = tuple(node.model_copy(update={"metadata": {**node.metadata, **kept}})
+                  if node.type is NodeType.DOCUMENT else node for node in extracted.nodes)
+    return extracted.model_copy(update={"document": record, "nodes": nodes})
 
 
 def relocated(space: GraphSpace, known: Mapping[str, str | None]) -> None:

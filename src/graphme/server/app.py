@@ -2,7 +2,9 @@
 the contract at `/docs`, and the web app for every other path."""
 from __future__ import annotations
 
+import contextlib
 import hmac
+import html
 import json
 import logging
 import math
@@ -34,7 +36,7 @@ from neo4j.exceptions import Neo4jError, ServiceUnavailable, SessionExpired
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from graphme import __version__
+from graphme import __version__, processes
 from graphme.adapters.export.neo4j import graph_records, records_cypher, to_cypher
 from graphme.adapters.export.neo4j_admin import AURA_URI
 from graphme.adapters.rendering.browser_office import RenderedPage
@@ -131,6 +133,11 @@ def refused() -> Iterator[None]:
         raise HTTPException(404, str(said)) from error
 
 
+def _closing_page(said: str) -> str:
+    return ("<!doctype html><meta charset=utf-8><title>Graph-Me-Maybe</title>"
+            f"<p style='font:16px system-ui;margin:3em'>{html.escape(said)}</p>")
+
+
 def create_app(
     demo: Demo,
     web: Path | None = None,
@@ -164,6 +171,22 @@ def create_app(
 
     v1 = APIRouter(prefix="/v1", dependencies=[Depends(keyed)])
 
+    @app.get("/v1/cloud/google/callback", response_class=HTMLResponse, include_in_schema=False)
+    def google_callback(request: Request, state: str = "", code: str | None = None,
+                        picked_file_ids: str | None = None, error: str | None = None) -> str:
+        """Where Google sends the browser back. Outside the key: it is the browser's own
+        visit, carrying no cookie of the app's window -- the sign-in's state, started by this
+        process, is what proves it."""
+        if not from_here(request):
+            raise HTTPException(403, "only this machine's browser may finish a sign-in")
+        try:
+            kept = demo.google_picked(demo.google().finish(
+                state=state, code=code, picked_file_ids=picked_file_ids, error=error))
+        except (LookupError, ValueError) as refusal:
+            return _closing_page(f"Google Drive was not connected: {refusal}")
+        return _closing_page(f"Google Drive is connected; {kept} picked. You can close this tab "
+                             "and go back to Graph-Me-Maybe.")
+
     @app.get("/health", response_model=api.Health)
     def health() -> dict[str, str]:
         """That the server answers, and from which folder: another install on this machine
@@ -194,6 +217,34 @@ def create_app(
         with refused():
             new = changed(demo, change.values, Path.cwd() / ".env", load)
         return {**described(new), "samples": has_samples()}
+
+    # Google Drive ---------------------------------------------------------------------------
+
+    @v1.get("/cloud/google", response_model=api.GoogleDrive)
+    def google_state() -> dict[str, Any]:
+        with refused():
+            return demo.google_state()
+
+    @v1.post("/cloud/google/connect", response_model=api.GoogleConnect)
+    def google_connect(request: Request) -> dict[str, str]:
+        """Sign in to Google and pick files, in the browser: Google's own picker, which grants
+        this app the files picked and nothing else."""
+        if not from_here(request):
+            raise HTTPException(403, "Google Drive can only be connected from this machine")
+        with refused():
+            url = demo.google().start(f"{request.base_url}v1/cloud/google/callback")
+        with contextlib.suppress(Exception):  # the page opens it when the server cannot
+            processes.open_in_browser(url)
+        return {"url": url}
+
+    @v1.delete("/cloud/google", response_model=api.GoogleDrive)
+    def google_disconnect(request: Request) -> dict[str, Any]:
+        """The sign-in revoked at Google and forgotten here, with the files picked."""
+        if not from_here(request):
+            raise HTTPException(403, "Google Drive can only be disconnected from this machine")
+        with refused():
+            demo.google_disconnect()
+            return demo.google_state()
 
     # Documents in the graph space ----------------------------------------------------------
 
@@ -255,7 +306,8 @@ def create_app(
             matched.update([*same, *([file_id] if file_id else [])])
             items.append({"name": d["label"], "format": Path(d["label"]).suffix.lower().lstrip("."),
                           "in_space": True, "document_id": d["id"], "file_id": file_id,
-                          "state": state(file_id), "modified": d.get("modified_at")})
+                          "state": state(file_id), "modified": d.get("modified_at"),
+                          "web_url": d.get("web_url")})
         items += [
             {"name": Path(path).name, "format": Path(path).suffix.lower().lstrip("."),
              "in_space": False, "document_id": None, "file_id": doc, "state": state(doc),
@@ -609,6 +661,14 @@ def create_app(
         if not known:
             raise HTTPException(400, "no file to read -- POST /v1/files first")
         return known
+
+    @v1.post("/cloud/google/build", status_code=202, response_model=api.BuildState)
+    def google_build(response: Response) -> dict[str, Any]:
+        """The picked Drive files into the space: changed ones read again, unchanged ones
+        passed over by the content Drive states, without being fetched."""
+        opened()
+        with refused():
+            return started(demo.build_google(), response)
 
     @v1.post("/jobs/build", status_code=202, response_model=api.BuildState)
     def build(request: api.BuildRequest, response: Response) -> dict[str, Any]:

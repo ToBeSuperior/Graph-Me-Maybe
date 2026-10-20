@@ -53,6 +53,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/cloud/google": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Google State */
+        get: operations["google_state_v1_cloud_google_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Google Disconnect
+         * @description The sign-in revoked at Google and forgotten here, with the files picked.
+         */
+        delete: operations["google_disconnect_v1_cloud_google_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cloud/google/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Google Connect
+         * @description Sign in to Google and pick files, in the browser: Google's own picker, which grants
+         *     this app the files picked and nothing else.
+         */
+        post: operations["google_connect_v1_cloud_google_connect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/documents": {
         parameters: {
             query?: never;
@@ -326,7 +368,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Image */
+        /**
+         * Image
+         * @description The page while its document is read; drawn for the reader, now, after that.
+         */
         get: operations["image_v1_files__file_id__pages__index__image_get"];
         put?: never;
         post?: never;
@@ -449,6 +494,27 @@ export interface paths {
          * @description A question answered from the graph space, with the passages it was answered from.
          */
         post: operations["ask_v1_ask_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cloud/google/build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Google Build
+         * @description The picked Drive files into the space: changed ones read again, unchanged ones
+         *     passed over by the content Drive states, without being fetched.
+         */
+        post: operations["google_build_v1_cloud_google_build_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -825,6 +891,20 @@ export interface components {
             /** Sources */
             sources: components["schemas"]["Source"][];
         };
+        /** GoogleConnect */
+        GoogleConnect: {
+            /** Url */
+            url: string;
+        };
+        /** GoogleDrive */
+        GoogleDrive: {
+            /** Configured */
+            configured: boolean;
+            /** Connected */
+            connected: boolean;
+            /** Picked */
+            picked: number;
+        };
         /** GraphNode */
         GraphNode: {
             /** Id */
@@ -888,6 +968,8 @@ export interface components {
             state: string;
             /** Modified */
             modified?: number | null;
+            /** Web Url */
+            web_url?: string | null;
         };
         /** LinkedDocument */
         LinkedDocument: {
@@ -1174,6 +1256,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    google_state_v1_cloud_google_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleDrive"];
+                };
+            };
+        };
+    };
+    google_disconnect_v1_cloud_google_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleDrive"];
+                };
+            };
+        };
+    };
+    google_connect_v1_cloud_google_connect_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleConnect"];
                 };
             };
         };
@@ -1788,6 +1930,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    google_build_v1_cloud_google_build_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildState"];
                 };
             };
         };
