@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field
 from graphme.adapters.chat import Endpoint, complete, image_part, is_transient
 from graphme.adapters.embedding import BatchEmbedder
 from graphme.adapters.export.neo4j import CHUNK_LABEL, NODE_LABEL
-from graphme.adapters.storage.neo4j_space import CHUNK_TEXT_INDEX, Neo4jGraphSpace
+from graphme.adapters.storage.neo4j_space import CHUNK_TEXT_INDEX, Neo4jGraphSpace, checked_name
 from graphme.adapters.storage.similar_documents import SimilarDocuments
 from graphme.adapters.strict_schema import strict_response_schema
 from graphme.application.corpus_links import document_numbers
@@ -196,6 +196,8 @@ class GraphRag:
         client: httpx.Client,
         model: str,
         dimensions: int,
+        index: str = VECTOR_INDEX,
+        vector_property: str = VECTOR_PROPERTY,
         relevance_floor: float,
         dense_weight: float,
         rrf_k: int,
@@ -216,17 +218,18 @@ class GraphRag:
         self._client = client
         self._model = model
         self._dimensions = dimensions
-        self._index = VECTOR_INDEX
+        # Another index and property are a run of its own beside the space's (the tests).
+        self._index = checked_name(index)
         self._text_index = CHUNK_TEXT_INDEX
         self._floor = relevance_floor
         self._dense_weight = dense_weight
         self._rrf_k = rrf_k
-        self._vector = VECTOR_PROPERTY
-        self._model_property = f"{VECTOR_PROPERTY}_model"
-        self._centroid = f"{VECTOR_PROPERTY}_centroid"
+        self._vector = checked_name(vector_property)
+        self._model_property = checked_name(f"{vector_property}_model")
+        self._centroid = checked_name(f"{vector_property}_centroid")
         """On each document: the mean of its passages' vectors, what it is mostly about."""
-        self._similar = SimilarDocuments(space.driver, index=VECTOR_INDEX,
-                                         vector_property=VECTOR_PROPERTY)
+        self._similar = SimilarDocuments(space.driver, index=index,
+                                         vector_property=vector_property)
         self._rag: _OnceRetriever | None = None
         """Made on the first question: building a retriever asks the database twice."""
 
@@ -785,7 +788,7 @@ class _OnceRetriever(HybridCypherRetriever):
             "CALL db.index.fulltext.queryNodes($index, $words, {limit: 1}) YIELD node "
             "RETURN count(node) AS found",
             {"index": self.fulltext_index_name,
-             "words": " OR ".join(f'"{word}"' for word in named)},
+             "words": any_named(named)},
             database_=self.neo4j_database,
             routing_=neo4j.RoutingControl.READ,
         )
@@ -833,8 +836,25 @@ def every_word(question: str) -> str:
     # Lower case, as the analyzer reads them, so the same word is not asked for twice.
     words = _words(question)
     named = named_identifiers(question)
-    groups = [" AND ".join(f'"{word}"' for word in group) for group in (words, named) if group]
+    groups = [" AND ".join(_held(word) for word in group) for group in (words, named) if group]
     return " OR ".join(f"({group})" for group in dict.fromkeys(groups))
+
+
+def any_named(named: Sequence[str]) -> str:
+    """A Lucene query for the passages holding any of these identifiers (`_held`)."""
+    return " OR ".join(_held(word) for word in named)
+
+
+def _held(word: str) -> str:
+    """A word as the index holds it: the phrase -- or, for one ending in Latin letters or
+    digits, the same pieces with Hangul run on after the last. The `cjk` analyzer keeps a
+    particle on what it follows ("QP-210의" is the token "210의"), so the phrase alone missed
+    every Korean sentence naming the number; only Hangul may run on, so 210 is not 2100."""
+    pieces = re.findall(r"[^\W_]+", word)
+    if not pieces or not re.fullmatch(r"[a-z0-9]+", pieces[-1]):
+        return f'"{word}"'
+    run_on = " AND ".join([*pieces[:-1], f"/{pieces[-1]}[가-힣]+/"])
+    return f'("{word}" OR ({run_on}))'
 
 
 def _words(question: str) -> list[str]:

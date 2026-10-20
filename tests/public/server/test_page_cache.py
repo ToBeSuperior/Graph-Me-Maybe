@@ -119,3 +119,25 @@ def test_another_browser_is_another_key(tmp_path: Path) -> None:
     (chrome.parent / "149.0.1").mkdir()  # Windows' Chrome keeps each version in a folder
     page_cache.identity.cache_clear()  # asked once a run: this is the next start
     assert page_cache.key("content", tmp_path, str(chrome)) != first
+
+
+def test_a_document_drawn_once_opens_after_its_file_is_gone(tmp_path: Path) -> None:
+    # Its pages and graph were kept, yet opening it asked for the file first -- and read the
+    # whole file again to check the kept pages were still its own.
+    from graphme.application.corpus_build import content_hash
+    from tests.public.server.conftest import FakeSpace
+
+    source = _pdf(tmp_path / "invented.pdf", "An invented page")
+    digest = content_hash(source)
+    _opened(tmp_path / "server", source)
+    source.unlink()
+    counted = _Counted()
+    demo = Demo(SETTINGS, PageRenderer(browser=counted, pdf=counted), root=tmp_path / "server")
+    space = FakeSpace()
+    space.paths["doc-1"], space.content["doc-1"] = str(source), digest
+    demo.graph._space = space  # type: ignore[assignment]
+
+    doc = demo.pages_of_document("doc-1")
+
+    assert counted.drawn == 0
+    assert demo.sessions[doc].pages

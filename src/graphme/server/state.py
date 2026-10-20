@@ -31,7 +31,13 @@ from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import GraphRag
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
 from graphme.api import GraphMe
-from graphme.application.corpus_build import BuildReport, BuildStep, build_graph, content_hash
+from graphme.application.corpus_build import (
+    BuildReport,
+    BuildStep,
+    build_graph,
+    content_hash,
+    relocated,
+)
 from graphme.application.document_graph import DocumentGraphBuilder
 from graphme.application.embedded_documents import (
     embedded_in,
@@ -57,6 +63,15 @@ READERS = 8
 
 Placed = dict[str, tuple[int, tuple[int, int, int, int]]]
 """Where each node is drawn: its page and its pixel box there (`placed_units`)."""
+
+
+def _stamp(path: str | Path) -> tuple[int, int] | None:
+    """A file's size and modification time, or None when it is not there."""
+    try:
+        status = os.stat(path)
+    except OSError:
+        return None
+    return status.st_size, status.st_mtime_ns
 
 
 class GraphStarting(RuntimeError):
@@ -116,6 +131,7 @@ def _since(started: float) -> float:
 # is in the server's log, printed where it happened.
 IN_LOG = "(details in the server log)"
 SPACE_WAIT = 2.0
+GONE = "this document's source file cannot be found"
 STARTING = "the graph DB is starting -- this carries on by itself once it is ready."
 UNREAD = f"could not be read -- the file may be damaged or hold nothing readable {IN_LOG}"
 PAGE_UNREAD = f"this page could not be read {IN_LOG}"
@@ -160,6 +176,11 @@ class Session:
     # answer is applied to whatever the others left.
     lock: threading.Lock = field(default_factory=threading.Lock)
     preparing: threading.Lock = field(default_factory=threading.Lock)
+    content: str | None = None
+    """The content hash the graph space holds for it, when it was opened from there: what its
+    kept pages are found by, without the file."""
+    stamp: tuple[int, int] | None = None
+    """The file's size and time when this reading began: another means the file changed."""
     """Its pages are drawn by one request; another asking meanwhile waits for those pages
     instead of drawing its own. Another document's pages are not held up by them."""
 
@@ -278,7 +299,8 @@ class Demo:
         self.catalog: dict[str, str] = {}
         self.readers = ThreadPoolExecutor(max_workers=READERS, thread_name_prefix="read")
         """Documents read at once: a folder of thousands queues here, not in a thread each."""
-        self.hashes: dict[str, str] = {}
+        self.hashes: dict[str, tuple[tuple[int, int] | None, str]] = {}
+        """Each document's file hash, beside the size and time it was worked out at."""
         """Each document's content hash, worked out once (`content_hash`)."""
         self.build = CorpusBuild()
         self.export = ExportJob()
@@ -431,20 +453,23 @@ class Demo:
     def pages_of_document(self, document_id: str) -> str:
         """The id of the file that draws the pages of a document in the graph space.
 
-        A document read in this run already has them. One read before a restart is found
-        by the file the space remembers and drawn again -- rendering only, no model call:
-        its outline is the one in the space.
+        A document read in this run already has them. One read before a restart opens from
+        the pages kept for its content -- the file is not asked for, nor read to be hashed --
+        and only pages never kept are drawn again from the file the space remembers:
+        rendering only, no model call, its outline is the one in the space.
         """
         for doc, session in list(self.sessions.items()):
             if session.pages and session.extracted is not None and (
                 session.extracted.document.id == document_id
             ):
                 return doc
-        path = self.space().source_path(document_id)
-        if not path or not Path(path).is_file():
-            raise LookupError("this document's source file cannot be found")
+        space = self.space()
+        path = space.source_path(document_id)
+        if not path:
+            raise LookupError(GONE)
         doc = self.open_path(path)
         session = self.session(doc)
+        session.content = space.content_of(document_id)
         with session.lock:
             # Being read already: its own reading draws the pages, which the page waits for.
             if session.state not in ("idle", "error", "cancelled"):
@@ -456,6 +481,10 @@ class Demo:
                 session.state = "rendering"
             try:
                 self._prepare(session)
+            except FileNotFoundError as error:
+                with session.lock:
+                    session.state, session.error = "error", GONE
+                raise LookupError(GONE) from error
             except Exception as error:  # noqa: BLE001 -- said on the page
                 traceback.print_exc(file=sys.stderr)
                 with session.lock:
@@ -543,6 +572,9 @@ class Demo:
         # A file whose content the space already holds is not read again: reading costs a
         # model call a page. A reading alone never asks the space.
         known = set(self.already_in(docs)) if put else set()
+        if known:
+            relocated(self.space(), {self.catalog[doc]: self.content_hash(doc) for doc in known
+                                     if doc in self.catalog})
         build.carried = sum(doc not in known for doc in docs[len(given):])
         docs = [doc for doc in docs if doc not in known]
         build.known, build.total = len(known), len(docs)
@@ -648,13 +680,16 @@ class Demo:
         return [doc for doc, h in hashes.items() if h in held]
 
     def content_hash(self, doc: str) -> str | None:
-        """The SHA-256 of a document's file -- what the graph space knows it by -- read once."""
-        if doc not in self.hashes:
+        """The SHA-256 of a document's file -- what the graph space knows it by -- read again
+        only when the file's size or time says it changed."""
+        stamp = _stamp(self.catalog[doc])
+        kept = self.hashes.get(doc)
+        if kept is None or kept[0] != stamp:
             digest = content_hash(Path(self.catalog[doc]))
             if digest is None:
                 return None
-            self.hashes[doc] = digest
-        return self.hashes[doc]
+            kept = self.hashes[doc] = (stamp, digest)
+        return kept[1]
 
     @staticmethod
     def doc_id(path: str) -> str:
@@ -675,7 +710,6 @@ class Demo:
             raise ValueError("the file is empty")
         digest = sha256_bytes(content)
         doc = digest[:10]
-        self.hashes[doc] = digest
         with self.opening:
             if doc not in self.catalog:
                 # Kept under a name any file system takes: a browser sends whatever it was given.
@@ -687,6 +721,7 @@ class Demo:
                 self.catalog[doc] = str(target)
             if modified is not None:
                 os.utime(self.catalog[doc], (modified, modified))
+            self.hashes[doc] = (_stamp(self.catalog[doc]), digest)  # known: no second read
         return doc
 
     def session(self, doc: str) -> Session:
@@ -696,12 +731,17 @@ class Demo:
         # Two requests for a document nobody opened yet must end on one session; a second
         # one overwriting the first would leave its run going where no page can see it.
         with self.opening:
-            if doc not in self.sessions:
+            kept = self.sessions.get(doc)
+            # A file edited since it was read is read anew; one being read now is left to it.
+            stale = kept is not None and kept.stamp != _stamp(path) and (
+                kept.state in (*STARTABLE, "done"))
+            if kept is None or stale:
                 source = Path(path)
                 self.sessions[doc] = Session(
                     source=source,
                     workspace=self.root / doc,
                     format=format_of(source),
+                    stamp=_stamp(path),
                 )
             return self.sessions[doc]
 
@@ -815,11 +855,13 @@ class Demo:
         # under this reading's workspace: they outlive it, and they are named by content.
         session.store = LocalAssetStore(self.settings.asset_dir)
         # Drawn before this start and nothing that drew it changed: its pages as they were.
-        kept_under = page_cache.key(content_hash(session.source), self.settings.viewer_directory,
-                                    self.settings.chrome_executable)
+        kept_under = page_cache.key(session.content or content_hash(session.source),
+                                    self.settings.viewer_directory, self.settings.chrome_executable)
         kept = page_cache.load(session.workspace, kept_under)
         if kept is not None:
             session.pages = kept
+        elif not session.source.is_file():
+            raise FileNotFoundError(session.source)
         else:
             with self.drawing:
                 session.pages = self.renderer.render(session.source, session.format)

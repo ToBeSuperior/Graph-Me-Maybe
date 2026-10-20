@@ -40,6 +40,8 @@ SCHEMA = (
     "CREATE INDEX document_id IF NOT EXISTS FOR (d:Document) ON (d.id)",
     # A file already in the space is known by its content before it is read again.
     "CREATE INDEX document_content IF NOT EXISTS FOR (d:Document) ON (d.content_hash)",
+    # What was read from a file before, found when the file is read again.
+    "CREATE INDEX document_source IF NOT EXISTS FOR (d:Document) ON (d.source_path)",
 )
 """The constraints and indexes every graph space has, live or exported; the vector and fulltext
 indexes are added beside them at the size and analyzer they were made with."""

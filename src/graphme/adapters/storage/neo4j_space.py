@@ -155,6 +155,24 @@ class Neo4jGraphSpace:
         except (ServiceUnavailable, SessionExpired) as error:
             raise SpaceUnavailable(str(error)) from error
 
+    def read_from(self, source_path: str) -> set[str]:
+        records, _, _ = self.driver.execute_query(
+            "MATCH (d:Document {source_path: $path}) RETURN d.id AS id", path=source_path)
+        return {record["id"] for record in records}
+
+    def relocate(self, content_hash: str, source_path: str) -> None:
+        self.driver.execute_query(
+            "MATCH (d:Document {content_hash: $hash}) SET d.source_path = $path",
+            hash=content_hash, path=source_path)
+
+    def content_of(self, document_id: str) -> str | None:
+        """The content hash a document in the space was read from."""
+        records, _, _ = self.driver.execute_query(
+            "MATCH (d:Document {id: $document}) RETURN d.content_hash AS hash",
+            document=document_id,
+        )
+        return records[0]["hash"] if records else None
+
     def source_path(self, document_id: str) -> str | None:
         """The file a document in the space was read from, as it was put there."""
         records, _, _ = self.driver.execute_query(

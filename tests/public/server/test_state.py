@@ -471,3 +471,23 @@ def test_one_documents_drawing_does_not_hold_up_anothers_pages(
     drawing.join()
 
     assert took < 0.5
+
+
+def test_a_file_edited_while_the_app_runs_is_read_again(demo: Demo, tmp_path: Path) -> None:
+    # Its hash was worked out once and kept: built again, the edited file counted as known,
+    # and a finished reading of the old content was handed back as the new one.
+    source = tmp_path / "procedure.pdf"
+    source.write_bytes(b"%PDF-1.4 test pressure 1.5 MPa")
+    doc = demo.open_path(str(source))
+    before = demo.content_hash(doc)
+    session = demo.session(doc)
+    session.state = "done"
+    ran: list[Any] = []
+    demo._run = ran.append  # type: ignore[method-assign]
+
+    source.write_bytes(b"%PDF-1.4 test pressure 2.0 MPa, edited")
+    started = demo.start(doc)
+    demo.readers.shutdown(wait=True)
+
+    assert demo.content_hash(doc) != before
+    assert started is not session and ran == [started]

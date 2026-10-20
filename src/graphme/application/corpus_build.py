@@ -15,7 +15,7 @@ joined the moment the document it names arrives.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -68,6 +68,14 @@ class GraphSpace(Protocol):
         """Which of these file contents (SHA-256) the space already holds."""
         ...
 
+    def read_from(self, source_path: str) -> set[str]:
+        """The documents put from the file at `source_path`, whatever it held then."""
+        ...
+
+    def relocate(self, content_hash: str, source_path: str) -> None:
+        """The documents of this content are found at `source_path` now."""
+        ...
+
     def unlinked(self, rule: str) -> set[str]:
         """The documents whose mentions were not judged by `rule` -- put since, or never."""
         ...
@@ -109,6 +117,7 @@ def build_graph(
     hashes = {path: None if again else content_hash(path) for path in documents}
     held = set() if again else space.contents(sorted(h for h in hashes.values() if h))
     known = [path for path in documents if hashes[path] in held]
+    relocated(space, {str(path): hashes[path] for path in known})
     documents = [path for path in documents if hashes[path] not in held]
     put: set[str] = set()
     failed: list[tuple[Path, str]] = []
@@ -134,6 +143,11 @@ def build_graph(
             failed.append((path, str(error)))
             continue
         put.add(extracted.document.id)
+        # A file edited since it was read is a new document (its content, so its id, changed):
+        # what was read from it before goes, or the old values answer beside the new ones.
+        replaced = space.read_from(str(extracted.document.source_path)) - {extracted.document.id}
+        if replaced:
+            space.delete_documents(sorted(replaced))
     told(BuildStep.PUT, len(documents), len(documents))
 
     told(BuildStep.LINK, 0, 1)
@@ -146,6 +160,14 @@ def build_graph(
     told(BuildStep.LINK, 1, 1)
     return BuildReport(processed=len(put), failed=tuple(failed), links=len(links),
                        known=len(known))
+
+
+def relocated(space: GraphSpace, known: Mapping[str, str | None]) -> None:
+    """Content the space holds, found at a path nothing was read from: the folder moved, and
+    its pages and its download are to be found where it is now."""
+    for path, digest in known.items():
+        if digest and not space.read_from(path):
+            space.relocate(digest, path)
 
 
 def forget_documents(space: GraphSpace, document_ids: Sequence[str]) -> None:

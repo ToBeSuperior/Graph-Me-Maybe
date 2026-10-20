@@ -5,6 +5,18 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Fixed
+
+- A file edited and built again replaces what was read from it before: the old reading no longer
+  stays beside the new one, where answers wavered between the two values. With the app running,
+  an edited file is read again instead of counting as known.
+- A file moved to another folder is found where it is now, for its pages and its download.
+- A document drawn once opens from its kept pages after a restart without its file: a moved or
+  deleted original no longer stops its pages from opening, and opening it no longer reads the
+  whole file to check them.
+- A document number or code asked on its own (`QP-210`) finds the Korean sentences naming it with
+  a particle run on (`QP-210의`), which the search's analyzer had kept as one word.
+
 ## [0.1.18] - 2026-10-19
 
 ### Changed

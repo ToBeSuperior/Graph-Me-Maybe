@@ -29,6 +29,9 @@ class FakeSpace:
         """document id -> the file it was read from"""
         self.hashes: set[str] = set()
         self.deleted: list[list[str]] = []
+        self.relocated: list[tuple[str, str]] = []
+        self.content: dict[str, str] = {}
+        """document id -> the content hash it was read from"""
         self.asked: list[list[str] | None] = []
         """The documents each export asked for; None is all."""
         self.documents: list[dict[str, Any]] = []
@@ -38,6 +41,13 @@ class FakeSpace:
     def put_document(self, extracted: Any) -> None:
         self.put.append(extracted.document.id)
         self.held[extracted.document.id] = extracted.document.file_name
+        self.paths[extracted.document.id] = str(extracted.document.source_path)
+
+    def relocate(self, content_hash: str, source_path: str) -> None:
+        self.relocated.append((content_hash, source_path))
+
+    def read_from(self, source_path: str) -> set[str]:
+        return {i for i, path in self.paths.items() if path == source_path and i in self.held}
 
     def identities(self) -> tuple[()]:
         return ()
@@ -59,6 +69,9 @@ class FakeSpace:
 
     def source_path(self, document_id: str) -> str | None:
         return self.paths.get(document_id)
+
+    def content_of(self, document_id: str) -> str | None:
+        return self.content.get(document_id)
 
     def files(self, ids: Any) -> dict[str, str]:
         return {i: self.held[i] for i in ids if i in self.held}
