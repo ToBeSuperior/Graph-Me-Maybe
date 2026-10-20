@@ -31,6 +31,8 @@ BROWSER_FORMATS: dict[DocumentFormat, str] = {
 }
 DEFAULT_WIDTH = 1400
 DEFAULT_DEVICE_PIXEL_RATIO = 2.0
+PREVIEW_DEVICE_PIXEL_RATIO = 1.0
+"""A page drawn for a reader, not read: a quarter of the reading's pixels."""
 DEFAULT_TIMEOUT_SECONDS = 300.0
 DEFAULT_MARGIN_PIXELS = 64
 """Real neighbouring cells drawn outside the measured range, so a range that
@@ -292,6 +294,18 @@ class BrowserOfficeRenderer:
         )
 
     def render(self, source: Path, document_format: DocumentFormat) -> tuple[RenderedPage, ...]:
+        return self._draw(source, document_format, scale=self._device_pixel_ratio)
+
+    def preview(self, source: Path, document_format: DocumentFormat, index: int,
+                device_pixel_ratio: float = PREVIEW_DEVICE_PIXEL_RATIO) -> bytes:
+        """Page `index` (from 1) alone, for a reader to look at: drawn at `device_pixel_ratio`,
+        with nothing measured on it."""
+        view = {"only": index - 1, "dpr": device_pixel_ratio}
+        drawn = self._draw(source, document_format, scale=device_pixel_ratio, view=view)
+        return drawn[0].png
+
+    def _draw(self, source: Path, document_format: DocumentFormat, *, scale: float,
+              view: dict[str, float] | None = None) -> tuple[RenderedPage, ...]:
         kind = BROWSER_FORMATS.get(document_format)
         if kind is None:
             raise ValueError(
@@ -299,6 +313,8 @@ class BrowserOfficeRenderer:
             )
         with tempfile.TemporaryDirectory(prefix="graphme-browser-") as temporary:
             workspace = Path(temporary)
+            if view is not None:
+                (workspace / "view.json").write_text(json.dumps(view), encoding="utf-8")
             if document_format is DocumentFormat.XLSX:
                 # The viewer has no used-range; the plan carries what the file says.
                 (workspace / "plan.json").write_text(
@@ -306,8 +322,10 @@ class BrowserOfficeRenderer:
                         build_xlsx_plan(
                             source,
                             margin_pixels=self._margin_pixels,
-                            white_margin_pixels=self._white_margin_pixels,
-                            scale=self._device_pixel_ratio,
+                            # Stated at the reading's resolution; a preview's is smaller.
+                            white_margin_pixels=round(
+                                self._white_margin_pixels * scale / self._device_pixel_ratio),
+                            scale=scale,
                         ),
                         ensure_ascii=False,
                     ),

@@ -63,6 +63,13 @@ end to end, and the VLM hierarchy handles worksheets, slides, DOCX and PDF.
 
 ## 1.5 · Search and the web app
 
+- [ ] (Refinement) A preview still starts a process and a browser for each page drawn, and
+      the viewer reads the whole file again: a browser kept running for a few minutes after a
+      preview (with the document loaded) would take most of that away, at the memory a running
+      browser holds.
+- [ ] (Later) Draw a preview in the app's own window with the same viewer: no server render at
+      all, and sharp at any zoom. The boxes come from the server's Chromium, and macOS's window is
+      WebKit, so text measured differently would move them; check that first.
 - [ ] (Refinement) A question in one language finds little in documents written in another:
       an English question over Korean documents left them below the relevance floor, which
       was measured on English questions over English documents. One option is for the

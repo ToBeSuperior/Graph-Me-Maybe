@@ -22,6 +22,12 @@ class RendersPages(Protocol):
     ) -> tuple[RenderedPage, ...]: ...
 
 
+class PreviewsPages(RendersPages, Protocol):
+    """A renderer that can also draw one page for a reader to look at."""
+
+    def preview(self, source: Path, document_format: DocumentFormat, index: int) -> bytes: ...
+
+
 class PageRenderer:
     """Routes each format to the thing that can draw it, and draws each file once.
 
@@ -33,7 +39,7 @@ class PageRenderer:
     document's renderings stop fitting in memory.
     """
 
-    def __init__(self, *, browser: RendersPages, pdf: RendersPages | None = None) -> None:
+    def __init__(self, *, browser: PreviewsPages, pdf: PreviewsPages | None = None) -> None:
         self._browser = browser
         self._pdf = pdf or PdfPageRenderer()
         self._drawn: tuple[tuple[Any, ...], tuple[RenderedPage, ...]] | None = None
@@ -49,3 +55,8 @@ class PageRenderer:
         pages = tuple(drawn.render(source, document_format))
         self._drawn = (key, pages)
         return pages
+
+    def preview(self, source: Path, document_format: DocumentFormat, index: int) -> bytes:
+        """Page `index` (from 1) for a reader: that page alone, at a preview's resolution."""
+        drawn = self._pdf if document_format is DocumentFormat.PDF else self._browser
+        return drawn.preview(source, document_format, index)

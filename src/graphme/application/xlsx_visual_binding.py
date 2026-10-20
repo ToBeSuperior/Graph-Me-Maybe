@@ -188,6 +188,8 @@ class VisualBinder(Protocol):
         self, *, extracted: ExtractedDocument, source: Path, figures: Sequence[Any]
     ) -> ExtractedDocument: ...
 
+    def drawn(self, *, extracted: ExtractedDocument, source: Path) -> ExtractedDocument: ...
+
 
 class RenderedSheet(Protocol):
     # Read-only, because a rendered page is frozen once drawn.

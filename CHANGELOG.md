@@ -5,6 +5,17 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-10-20
+
+### Changed
+
+- No page image is kept for every document. The build writes where each node is drawn on the
+  graph, a preview shows a document by that, and only the page looked at is drawn, when it is
+  looked at, at a lower resolution. Opening a large workbook no longer reads, binds and draws
+  all of it again. Page images and graphs kept by earlier versions are cleared at start.
+- A document built before this version is drawn and bound again when opened, as before; build it
+  again to open it the new way.
+
 ## [0.1.20] - 2026-10-20
 
 ### Fixed

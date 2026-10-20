@@ -144,14 +144,15 @@ out, silently — so a picture that renders as frames and arrows alone means the
 the file. Both viewer builds carry their own copy of it, so a fix is two patches
 (`viewer/patches/` for XLSX, `viewer/dist-patches/` for DOCX and PPTX).
 
-A document's pages are drawn once, not once a start: `_prepare` keeps what the renderer
-measured beside the page images (`pages.json`) and the graph as binding left it (`bound.json`),
-keyed by the file's content hash and `page_cache.identity` -- the code that draws, reads and
-binds (`code_files`: `domain/`, `adapters/rendering/`, `adapters/extractors/`, `application/`),
-the viewer bundle's files and the browser -- and takes them back while the key matches and every
-asset the graph names is still stored. Reopened after a restart, a DOCX, PPTX or XLSX needed
-Chrome and its extraction again for a view nothing about had changed; keyed on the whole package,
-every release redrew every document once, though only those parts make what is kept.
+No page image is kept for every document. The build writes where each node is drawn on the
+graph (`with_geometry`: a node's `page` and `box`, the document node's `pages` -- index, name,
+width, height), and a preview of a document in the space is shown by those
+(`server/state.py` `kept_from`): no extraction, no binding, and only the page looked at drawn,
+when it is looked at, at a preview's resolution (`PageRenderer.preview`: one page, device pixel
+ratio 1, nothing measured), the latest `PREVIEWS_KEPT` held in memory. A reading's page files are
+removed when it ends (`_lighten`). A document built before geometry was written is drawn and
+bound again when opened. Keeping every page image and the bound graph across starts (an earlier
+page cache) grew with every document; the server clears what it left (`_forget_kept_pages`).
 
 ### One producer of a crop
 

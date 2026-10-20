@@ -30,8 +30,6 @@ class FakeSpace:
         self.hashes: set[str] = set()
         self.deleted: list[list[str]] = []
         self.relocated: list[tuple[str, str]] = []
-        self.content: dict[str, str] = {}
-        """document id -> the content hash it was read from"""
         self.asked: list[list[str] | None] = []
         """The documents each export asked for; None is all."""
         self.documents: list[dict[str, Any]] = []
@@ -69,9 +67,6 @@ class FakeSpace:
 
     def source_path(self, document_id: str) -> str | None:
         return self.paths.get(document_id)
-
-    def content_of(self, document_id: str) -> str | None:
-        return self.content.get(document_id)
 
     def files(self, ids: Any) -> dict[str, str]:
         return {i: self.held[i] for i in ids if i in self.held}

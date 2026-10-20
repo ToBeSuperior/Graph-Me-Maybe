@@ -39,12 +39,13 @@ from graphme.adapters.export.neo4j import graph_records, records_cypher, to_cyph
 from graphme.adapters.export.neo4j_admin import AURA_URI
 from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import PageRenderer
-from graphme.adapters.rendering.visual_binding import placed_units
+from graphme.adapters.rendering.visual_binding import page_name, placed_units
+from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import MAX_TOP_K, GraphNotEmbedded, GraphRag
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, modified_at
 from graphme.application.embedded_documents import name_part
 from graphme.application.ingest import documents_in
-from graphme.application.xlsx_visual_binding import CROP_ASSET_KEY, read_node_crop
+from graphme.application.xlsx_visual_binding import CROP_ASSET_KEY, read_crop, read_node_crop
 from graphme.config import Settings, load_settings
 from graphme.runtime import create_browser_renderer
 from graphme.server import models as api
@@ -60,7 +61,6 @@ from graphme.server.state import (
     GraphStarting,
     Session,
     Undrawn,
-    page_name,
 )
 
 WEB = Path(__file__).resolve().parents[3] / "frontend" / "dist"
@@ -384,7 +384,7 @@ def create_app(
     def ready(file_id: str) -> Session:
         with refused():
             session = demo.session(file_id)
-        if session.extracted is None or not session.pages:
+        if not session.pages or (session.extracted is None and session.kept is None):
             raise HTTPException(409, "the file is not ready yet")
         return session
 
@@ -438,7 +438,8 @@ def create_app(
     def pages(file_id: str) -> dict[str, Any]:
         with refused():
             session = demo.session(file_id)
-        prepared = session.extracted is not None and bool(session.pages)
+        prepared = bool(session.pages) and (
+            session.extracted is not None or session.kept is not None)
         return {
             "source": session.source.name,
             "format": session.format.value,
@@ -463,20 +464,29 @@ def create_app(
         }
 
     @v1.get("/files/{file_id}/pages/{index}/image")
-    def image(file_id: str, index: int) -> FileResponse:
+    def image(file_id: str, index: int) -> Response:
+        """The page while its document is read; drawn for the reader, now, after that."""
         session = ready(file_id)
         path = session.workspace / f"page-{page_of(session, index).index:02d}.png"
-        return FileResponse(path, media_type="image/png")
+        if path.is_file():
+            return FileResponse(path, media_type="image/png")
+        with refused():
+            return Response(demo.preview(file_id, index), media_type="image/png")
 
     @v1.get("/files/{file_id}/pages/{index}/crop")
     def crop(file_id: str, index: int, node: str) -> Response:
         """The crop the binding stored for this node -- never a fresh cut of the page."""
         session = ready(file_id)
-        found = next((n for n in session.read().nodes if n.id == node), None)
-        if found is None:
-            raise HTTPException(404, "this node cannot be found")
-        picture = (read_node_crop(found, asset_store=session.store)
-                   if session.store is not None else None)
+        if session.kept is not None:
+            stored = session.kept.crops.get(node)
+            assets = LocalAssetStore(demo.settings.asset_dir)
+            picture = read_crop(stored, assets) if stored else None
+        else:
+            found = next((n for n in session.read().nodes if n.id == node), None)
+            if found is None:
+                raise HTTPException(404, "this node cannot be found")
+            picture = (read_node_crop(found, asset_store=session.store)
+                       if session.store is not None else None)
         if picture is None:
             raise HTTPException(404, "this node has no stored image")
         return Response(picture, media_type="image/png")
@@ -485,6 +495,9 @@ def create_app(
     def file_graph(file_id: str) -> dict[str, Any]:
         """The file as it was read, as Neo4j records, with the page each node is drawn on."""
         session = ready(file_id)
+        if session.kept is not None:  # as the space holds it, outline and all
+            return {**session.kept.records, "pages": session.kept.page_of,
+                    "crops": list(session.kept.crops)}
         extracted = session.read()
         present = {n.id for n in extracted.nodes}
         return {
@@ -499,6 +512,9 @@ def create_app(
         """Where each node is drawn on its page -- what the page shows boxed when a passage
         or a node is pointed at."""
         session = ready(file_id)
+        if session.kept is not None:
+            return {"boxes": {node: {"page": page, "box": box}
+                              for node, (page, box) in session.kept.boxes.items()}}
         with session.lock:
             extracted, cached = session.read(), session.placed
         if cached is not None and cached[0] is extracted:
@@ -514,7 +530,8 @@ def create_app(
     def file_cypher(file_id: str) -> Response:
         session = ready(file_id)
         return Response(
-            to_cypher(session.read()),
+            records_cypher(session.kept.records, f"// {session.source.name}")
+            if session.kept is not None else to_cypher(session.read()),
             media_type="text/plain; charset=utf-8",
             # A Korean file name is not latin-1, which is all a plain header value can hold.
             headers={

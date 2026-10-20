@@ -23,6 +23,7 @@ from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import RendersPages
 from graphme.adapters.rendering.pdf_pages import page_ink
 from graphme.application.figure_groups import widen_figures
+from graphme.application.page_units import flow_pages
 from graphme.application.unit_placement import (
     CellRangePlacer,
     FlowPlacer,
@@ -31,7 +32,7 @@ from graphme.application.unit_placement import (
     home_pages,
 )
 from graphme.application.xlsx_visual_binding import bind_page_visuals, crop_box
-from graphme.domain.enums import DocumentFormat
+from graphme.domain.enums import DocumentFormat, NodeType
 from graphme.domain.models import ExtractedDocument, GraphNode, HierarchyFigureGroup
 from graphme.ports.storage import AssetStore
 
@@ -52,6 +53,13 @@ class RenderedVisualBinder:
     ) -> None:
         self._renderer = renderer
         self._asset_store = asset_store
+
+    def drawn(self, *, extracted: ExtractedDocument, source: Path) -> ExtractedDocument:
+        """The graph with where each node is drawn written on it (`with_geometry`)."""
+        fmt = extracted.document.format
+        if fmt not in BINDABLE_FORMATS:
+            return extracted
+        return with_geometry(extracted, self._renderer.render(source, fmt), source)
 
     def widen(
         self,
@@ -223,3 +231,56 @@ def placed_units(
             if box is not None and node.id not in placed:
                 placed[node.id] = (page.index, box.rounded())
     return placed
+
+
+def page_name(page: RenderedPage, fmt: DocumentFormat) -> str | None:
+    """A sheet's own name. Any other page the page names by its number, in its own language."""
+    return page.label if fmt is DocumentFormat.XLSX and page.label else None
+
+
+def pages_of(
+    extracted: ExtractedDocument, pages: Sequence[RenderedPage], fmt: DocumentFormat
+) -> dict[str, int]:
+    """The page each node is drawn on -- a worksheet names it by sheet, a slide by number."""
+    if fmt is DocumentFormat.DOCX:
+        return dict(flow_pages(extracted, pages, fmt))
+    if fmt is DocumentFormat.XLSX:
+        by_sheet = {page.label: page.index for page in pages}
+        return {
+            n.id: by_sheet[n.locator.sheet] for n in extracted.nodes if n.locator.sheet in by_sheet
+        }
+    numbers = {page.index for page in pages}
+    found = {
+        n.id: n.locator.page if fmt is DocumentFormat.PDF else n.locator.slide
+        for n in extracted.nodes
+    }
+    return {node: number for node, number in found.items() if number is not None
+            and number in numbers}
+
+
+def with_geometry(
+    extracted: ExtractedDocument, pages: Sequence[RenderedPage], source: Path
+) -> ExtractedDocument:
+    """Where the document is drawn, written on its graph: each node's page and its box there
+    (`page`, `box`), and the pages themselves on the document node (`pages`: index, name,
+    width, height). A preview shows a document by these and draws only the page looked at;
+    no page image is kept."""
+    fmt = extracted.document.format
+    if fmt not in BINDABLE_FORMATS or not pages:
+        return extracted
+    page_of = pages_of(extracted, pages, fmt)
+    placed = placed_units(extracted, pages, source)
+    drawn = [{"index": page.index, "name": page_name(page, fmt), "width": page.width,
+              "height": page.height} for page in pages]
+    nodes = []
+    for node in extracted.nodes:
+        metadata = dict(node.metadata)
+        if node.type is NodeType.DOCUMENT:
+            metadata["pages"] = drawn  # type: ignore[assignment]
+        if node.id in page_of:
+            metadata["page"] = page_of[node.id]
+        if node.id in placed:
+            metadata["page"], metadata["box"] = placed[node.id][0], list(placed[node.id][1])
+        nodes.append(node if metadata == node.metadata
+                     else node.model_copy(update={"metadata": metadata}))
+    return extracted.model_copy(update={"nodes": tuple(nodes)})

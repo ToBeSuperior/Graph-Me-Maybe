@@ -16,6 +16,8 @@ from graphme.domain.enums import DocumentFormat
 
 RENDER_DPI = 144
 """Twice the 72 dpi a PDF states its own geometry in, so a point is two pixels."""
+PREVIEW_DPI = 96
+"""A page drawn for a reader to look at, not read."""
 
 
 class PdfPageRenderer:
@@ -43,6 +45,15 @@ class PdfPageRenderer:
                     )
                 )
         return tuple(pages)
+
+    def preview(self, source: Path, document_format: DocumentFormat, index: int) -> bytes:
+        """Page `index` (from 1) alone, at PREVIEW_DPI."""
+        if document_format is not DocumentFormat.PDF:
+            raise ValueError(f"{document_format} is not a PDF")
+        with pymupdf.open(source) as document:  # type: ignore[no-untyped-call]
+            pixmap = document.load_page(index - 1).get_pixmap(
+                dpi=PREVIEW_DPI, colorspace=pymupdf.csRGB, alpha=False)
+            return bytes(pixmap.tobytes("png"))
 
 
 INK_PAGE_SHARE = 0.1

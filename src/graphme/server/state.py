@@ -5,6 +5,7 @@ a refusal is `Busy`, `LookupError` or `ValueError`, and the route says what it m
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import sys
@@ -15,18 +16,20 @@ import traceback
 import uuid
 import weakref
 import zipfile
+from collections import OrderedDict
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 import httpx
 
 from graphme.adapters.export.neo4j_admin import LocalNeo4jAdmin
 from graphme.adapters.export.neo4j_import import write_import_bundle
-from graphme.adapters.rendering import page_cache
 from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import PageRenderer
+from graphme.adapters.rendering.visual_binding import pages_of, with_geometry
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import GraphRag
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
@@ -47,7 +50,7 @@ from graphme.application.embedded_documents import (
 )
 from graphme.application.hierarchy_decisions import apply_hierarchy_decisions
 from graphme.application.ingest import SUFFIX_FORMATS, format_of
-from graphme.application.page_units import flow_pages
+from graphme.application.xlsx_visual_binding import CROP_ASSET_KEY
 from graphme.config import Settings
 from graphme.domain.enums import DocumentFormat, EdgeType
 from graphme.domain.ids import sha256_bytes
@@ -74,6 +77,53 @@ def _stamp(path: str | Path) -> tuple[int, int] | None:
     return status.st_size, status.st_mtime_ns
 
 
+PREVIEWS_KEPT = 24
+
+
+@dataclass(frozen=True)
+class Kept:
+    """A document as the graph space holds it, with where its build drew each node."""
+
+    records: dict[str, Any]
+    page_of: dict[str, int]
+    boxes: dict[str, tuple[int, list[int]]]
+    crops: dict[str, str]
+
+
+def kept_from(records: dict[str, Any], fmt: DocumentFormat
+              ) -> tuple[Kept, tuple[RenderedPage, ...]] | None:
+    """A document of the space shown by what its build wrote (`with_geometry`), or None when
+    it was built before that and has to be drawn and bound again."""
+    root = next((n for n in records.get("nodes", ()) if "Document" in n["labels"]), None)
+    said = root["properties"].get("meta_pages") if root is not None else None
+    if not said:
+        return None
+    drawn = json.loads(said) if isinstance(said, str) else said
+    pages = tuple(RenderedPage(index=int(p["index"]), width=int(p["width"]),
+                               height=int(p["height"]), png=b"", label=p.get("name"))
+                  for p in drawn)
+    page_of: dict[str, int] = {}
+    boxes: dict[str, tuple[int, list[int]]] = {}
+    crops: dict[str, str] = {}
+    for node in records["nodes"]:
+        properties = node["properties"]
+        if isinstance(page := properties.get("meta_page"), int):
+            page_of[node["id"]] = page
+            if isinstance(box := properties.get("meta_box"), list) and len(box) == 4:
+                boxes[node["id"]] = (page, [int(v) for v in box])
+        if isinstance(crop := properties.get(f"meta_{CROP_ASSET_KEY}"), str):
+            crops[node["id"]] = crop
+    return Kept(records, page_of, boxes, crops), pages
+
+
+def _forget_kept_pages(root: Path) -> None:
+    """What earlier versions kept of every document drawn -- its page images, their measures
+    and its bound graph -- gone: a page is drawn when it is looked at."""
+    for kept in (*root.glob("*/page-*.png"), *root.glob("*/pages.json"),
+                 *root.glob("*/bound.json")):
+        kept.unlink(missing_ok=True)
+
+
 class GraphStarting(RuntimeError):
     """The graph DB is being fetched or started and is not up yet: ask again shortly."""
 
@@ -86,31 +136,6 @@ class Busy(Exception):
 class Undrawn(Exception):
     """A document's pages could not be drawn again. Said as 503: the file is there, the
     renderer is what failed."""
-
-
-def page_name(page: RenderedPage, fmt: DocumentFormat) -> str | None:
-    """A sheet's own name. Any other page the page names by its number, in its own language."""
-    return page.label if fmt is DocumentFormat.XLSX and page.label else None
-
-
-def pages_of(
-    extracted: ExtractedDocument, pages: Sequence[RenderedPage], fmt: DocumentFormat
-) -> dict[str, int]:
-    """The page each node is drawn on -- a worksheet names it by sheet, a slide by number."""
-    if fmt is DocumentFormat.DOCX:
-        return dict(flow_pages(extracted, pages, fmt))
-    if fmt is DocumentFormat.XLSX:
-        by_sheet = {page.label: page.index for page in pages}
-        return {
-            n.id: by_sheet[n.locator.sheet] for n in extracted.nodes if n.locator.sheet in by_sheet
-        }
-    numbers = {page.index for page in pages}
-    found = {
-        n.id: n.locator.page if fmt is DocumentFormat.PDF else n.locator.slide
-        for n in extracted.nodes
-    }
-    return {node: number for node, number in found.items() if number is not None
-            and number in numbers}
 
 
 @dataclass
@@ -176,9 +201,10 @@ class Session:
     # answer is applied to whatever the others left.
     lock: threading.Lock = field(default_factory=threading.Lock)
     preparing: threading.Lock = field(default_factory=threading.Lock)
-    content: str | None = None
-    """The content hash the graph space holds for it, when it was opened from there: what its
-    kept pages are found by, without the file."""
+    kept: Kept | None = None
+    """What the graph space holds of a document built earlier -- where each node is drawn,
+    its pages, its graph -- when it was opened from there: shown with no extraction, no
+    binding and no drawing but of the page looked at."""
     stamp: tuple[int, int] | None = None
     """The file's size and time when this reading began: another means the file changed."""
     """Its pages are drawn by one request; another asking meanwhile waits for those pages
@@ -301,7 +327,11 @@ class Demo:
         """Documents read at once: a folder of thousands queues here, not in a thread each."""
         self.hashes: dict[str, tuple[tuple[int, int] | None, str]] = {}
         """Each document's file hash, beside the size and time it was worked out at."""
-        """Each document's content hash, worked out once (`content_hash`)."""
+        self.previews: OrderedDict[tuple[str, int, tuple[int, int] | None], bytes] = OrderedDict()
+        """Pages drawn for a reader, the latest PREVIEWS_KEPT: nothing is kept across starts."""
+        self.previewing = threading.Lock()
+        if root is not None:
+            _forget_kept_pages(self.root)
         self.build = CorpusBuild()
         self.export = ExportJob()
         self.exporting = threading.Lock()
@@ -469,11 +499,17 @@ class Demo:
             raise LookupError(GONE)
         doc = self.open_path(path)
         session = self.session(doc)
-        session.content = space.content_of(document_id)
         with session.lock:
             # Being read already: its own reading draws the pages, which the page waits for.
             if session.state not in ("idle", "error", "cancelled"):
                 return doc
+        # Built with where each node is drawn: shown by that, drawing only the page looked at.
+        found = kept_from(space.document_graph(document_id), session.format)
+        if found is not None:
+            with session.lock:
+                session.kept, session.pages = found
+                session.state = "rendered"
+            return doc
         with session.preparing:
             if session.pages:
                 return doc
@@ -495,6 +531,28 @@ class Demo:
                     session.state = "rendered"
             self._lighten(session)
         return doc
+
+    def preview(self, doc: str, index: int) -> bytes:
+        """Page `index` of a document drawn for a reader, now: no page is kept for every
+        document, and only the latest PREVIEWS_KEPT for this start."""
+        session = self.session(doc)
+        key = (doc, index, session.stamp)
+        with self.previewing:
+            if key in self.previews:
+                self.previews.move_to_end(key)
+                return self.previews[key]
+        if not session.source.is_file():
+            raise LookupError(GONE)
+        with self.drawing:
+            try:
+                png = self.renderer.preview(session.source, session.format, index)
+            except Exception as error:
+                raise Undrawn(UNDRAWN) from error
+        with self.previewing:
+            self.previews[key] = png
+            while len(self.previews) > PREVIEWS_KEPT:
+                self.previews.popitem(last=False)
+        return png
 
     def open_path(self, path: str) -> str:
         """A document on this machine, opened by its path, and its id. One kept under
@@ -735,11 +793,12 @@ class Demo:
         # Two requests for a document nobody opened yet must end on one session; a second
         # one overwriting the first would leave its run going where no page can see it.
         with self.opening:
-            kept = self.sessions.get(doc)
+            open_ = self.sessions.get(doc)
             # A file edited since it was read is read anew; one being read now is left to it.
-            stale = kept is not None and kept.stamp != _stamp(path) and (
-                kept.state in (*STARTABLE, "done"))
-            if kept is None or stale:
+            # (One shown as the space holds it shows that version, whatever the file does now.)
+            stale = open_ is not None and open_.kept is None and open_.stamp != _stamp(path) and (
+                open_.state in (*STARTABLE, "done"))
+            if open_ is None or stale:
                 source = Path(path)
                 self.sessions[doc] = Session(
                     source=source,
@@ -761,18 +820,21 @@ class Demo:
                     session.stop = stop
                 return session
             session.state, session.error, session.stop = "rendering", None, stop
+            session.kept = None  # read now: the reading is what is shown, not the space's
             session.waiting = self.readers.submit(self._run, session)
         return session
 
     def _run(self, session: Session) -> None:
-        self._steps(session, self._prepare, self._read, self._enrich)
+        self._steps(session, self._prepare, self._read, self._enrich, self._drawn)
         self._lighten(session)
 
     @staticmethod
     def _lighten(session: Session) -> None:
-        """The pages' pictures let go once read: they are on disk, which is where the page
-        is served from, and a folder of thousands would otherwise hold every one."""
+        """The pages' pictures let go once read, in memory and on disk: a folder of thousands
+        would otherwise hold every one. A page looked at later is drawn then (`preview`)."""
         session.pages = tuple(replace(page, png=b"") for page in session.pages)
+        for page in session.pages:
+            (session.workspace / f"page-{page.index:02d}.png").unlink(missing_ok=True)
 
     @staticmethod
     def _steps(session: Session, *steps: Callable[[Session], None]) -> None:
@@ -856,38 +918,32 @@ class Demo:
             session.read(), session.source, session.format, on_phase=phase
         )
 
+    @staticmethod
+    def _drawn(session: Session) -> None:
+        """Where each node is drawn, written on the graph that goes into the space: a preview
+        needs nothing else of this reading, and draws only the page looked at."""
+        session.extracted = with_geometry(session.read(), session.pages, session.source)
+
     def _prepare(self, session: Session) -> None:
         session.workspace.mkdir(parents=True, exist_ok=True)
         # The crops go where the graph space's answers read them (`GraphRag._pictures`), not
         # under this reading's workspace: they outlive it, and they are named by content.
         session.store = LocalAssetStore(self.settings.asset_dir)
-        # Drawn before this start and nothing that drew it changed: its pages as they were.
-        kept_under = page_cache.key(session.content or content_hash(session.source),
-                                    self.settings.viewer_directory, self.settings.chrome_executable)
-        kept = page_cache.load(session.workspace, kept_under)
-        if kept is not None:
-            session.pages = kept
-        elif not session.source.is_file():
+        if not session.source.is_file():
             raise FileNotFoundError(session.source)
-        else:
-            with self.drawing:
-                try:
-                    session.pages = self.renderer.render(session.source, session.format)
-                except Exception as error:
-                    raise Undrawn(UNDRAWN) from error
-        bound = None if kept is None else page_cache.load_bound(
-            session.workspace, kept_under, session.store)
-        if bound is None:
-            builder = self._builder(session)
-            # Give tables their crop and let each own the pictures it encloses.
-            bound = builder.bind(builder.extract(session.source, session.format), session.source)
-            page_cache.save_bound(session.workspace, bound, kept_under)
+        with self.drawing:
+            try:
+                session.pages = self.renderer.render(session.source, session.format)
+            except Exception as error:
+                raise Undrawn(UNDRAWN) from error
+        builder = self._builder(session)
+        # Give tables their crop and let each own the pictures it encloses.
+        bound = builder.bind(builder.extract(session.source, session.format), session.source)
         session.extracted = bound
         session.page_of = pages_of(bound, session.pages, session.format)
-        if kept is None:
-            for page in session.pages:
-                (session.workspace / f"page-{page.index:02d}.png").write_bytes(page.png)
-            page_cache.save(session.workspace, session.pages, kept_under)
+        # Shown while the document is read; gone once it is (`_lighten`).
+        for page in session.pages:
+            (session.workspace / f"page-{page.index:02d}.png").write_bytes(page.png)
 
     @staticmethod
     def apply(

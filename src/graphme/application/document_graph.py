@@ -75,7 +75,15 @@ class DocumentGraphBuilder:
         extracted = self.bind(self.extract(source, document_format), source)
         extracted = self.group_text(self.read_figures(extracted, source), source)
         extracted = self.read_outline(extracted, source, on_page=on_page)
-        return self.enrich(extracted, source, document_format, on_phase=on_phase)
+        return self.drawn(self.enrich(extracted, source, document_format, on_phase=on_phase),
+                          source)
+
+    def drawn(self, extracted: ExtractedDocument, source: Path) -> ExtractedDocument:
+        """Where each node is drawn written on the graph, last: a preview draws only the page
+        looked at, and needs nothing else of the reading to know where things are."""
+        if self._binder is None:
+            return extracted
+        return self._binder.drawn(extracted=extracted, source=source)
 
     def extract(self, source: Path, document_format: DocumentFormat) -> ExtractedDocument:
         extractor = self._extractors.get(document_format)

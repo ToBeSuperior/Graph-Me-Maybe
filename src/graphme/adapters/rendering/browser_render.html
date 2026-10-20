@@ -4,6 +4,10 @@
 <script type="module">
 const qs = new URLSearchParams(location.search);
 const kind = qs.get('kind'), width = Number(qs.get('width') || 1400), dpr = Number(qs.get('dpr') || 2);
+// A preview: one page (`only`, from 0; a worksheet's own index), and no measuring of where things
+// landed (`geometry=0`) -- that is the reading's question, and the slowest part of drawing.
+const only = qs.has('only') ? Number(qs.get('only')) : null;
+const geometry = qs.get('geometry') !== '0';
 const stage = document.querySelector('#stage');
 // Browsers blank a canvas past these caps, so shrink the raster, never the layout.
 const MAX_DIM = 32767, MAX_AREA = 1 << 24;
@@ -19,11 +23,15 @@ try {
     const m = await import('./xlsx/index.mjs');
     const plan = await fetch('./plan.json').then(r => r.json());
     const margin = Math.max(0, Math.round(plan.margin_pixels || 0));
-    const white = Math.max(0, Math.round(plan.white_margin_pixels || 0));
+    // The blank border is stated in the plan's pixels (at its render_scale) and kept in
+    // proportion to the page: a preview drawn at fewer pixels has the same page, smaller.
+    const whitePlan = Math.max(0, Number(plan.white_margin_pixels) || 0);
+    const planScale = Number(plan.render_scale) || dpr;
     const open = () => m.XlsxWorkbook.load('./sample.xlsx', {mode: 'main', cjkFallback: 'kr'});
     let wb = await open();
 
     for (const sheet of plan.sheets) {
+      if (only !== null && sheet.index !== only) continue;
       let ws;
       try {
         ws = await wb.getWorksheet(sheet.index);
@@ -55,7 +63,8 @@ try {
       const nh = ax.row.offsetOf(drawn.max_row + 1) - ax.row.offsetOf(drawn.min_row) + m.HEADER_H;
       const scale = Math.min(1, 2200 / Math.max(1, nw), 1600 / Math.max(1, nh));
       const cw = Math.max(1, Math.ceil(nw * scale)), ch = Math.max(1, Math.ceil(nh * scale));
-      const sheetDpr = fitScale(Number(plan.render_scale) || dpr, cw + white * 2, ch + white * 2);
+      const sheetDpr = fitScale(planScale, cw + whitePlan * 2, ch + whitePlan * 2);
+      const white = Math.round(whitePlan * sheetDpr / planScale);
 
       const inner = document.createElement('canvas');
       inner.width = cw; inner.height = ch;
@@ -102,14 +111,14 @@ try {
     // The viewer draws; a second document of its own is what can say where things
     // landed. Both formats need it and both viewers take ownership of their buffer.
     let presentation = null, flow = null, flowSize = null;
-    if (kind === 'pptx' && m.PptxPresentation) {
+    if (geometry && kind === 'pptx' && m.PptxPresentation) {
       try {
         const own = await fetch(`./sample.${kind}`).then(r => r.arrayBuffer());
         presentation = await m.PptxPresentation.load(own);
         if (presentation.waitUntilLayoutComplete) await presentation.waitUntilLayoutComplete();
       } catch (e) { presentation = null; }
     }
-    if (kind === 'docx' && m.DocxDocument) {
+    if (geometry && kind === 'docx' && m.DocxDocument) {
       try {
         const own = await fetch(`./sample.${kind}`).then(r => r.arrayBuffer());
         flow = await m.DocxDocument.load(own);
@@ -120,6 +129,7 @@ try {
     if (v.waitUntilLayoutComplete) await v.waitUntilLayoutComplete();
     const count = kind === 'docx' ? v.pageCount : v.slideCount;
     for (let i = 0; i < count; i++) {
+      if (only !== null && i !== only) continue;
       if (kind === 'docx') await v.goToPage(i); else await v.goToSlide(i);
       await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
       // Where the glyphs actually landed. A text box is sized for the words it could

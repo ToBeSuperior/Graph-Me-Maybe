@@ -91,7 +91,10 @@ def _say_warnings(message: ConsoleMessage) -> None:
 
 def capture(kind: str, source: Path, workspace: Path, *, width: int, dpr: float,
             bundle: Path, browser_path: str | None) -> None:
-    """Draw `source` and write each page as `page-NNN.png`, with `manifest.json` beside them."""
+    """Draw `source` and write each page as `page-NNN.png`, with `manifest.json` beside them.
+
+    A `view.json` in the workspace asks for a preview instead: one page (`only`, from 0) at
+    its own `dpr`, with nothing measured."""
     from playwright.sync_api import Error, sync_playwright
 
     part = bundle / ("xlsx" if kind == "xlsx" else "dist")
@@ -100,6 +103,12 @@ def capture(kind: str, source: Path, workspace: Path, *, width: int, dpr: float,
             f"no viewer bundle in {bundle} ({part.name}/) -- run the installer again, or build it "
             "with src/graphme/adapters/rendering/viewer/setup.sh; if it is elsewhere, point "
             "GRAPHME_VIEWER_DIR at it.")
+    view = (json.loads((workspace / "view.json").read_text(encoding="utf-8"))
+            if (workspace / "view.json").is_file() else {})
+    asked = ""
+    if "only" in view:
+        dpr = float(view.get("dpr", dpr))
+        asked = f"&only={int(view['only'])}&geometry=0"
     site = workspace / "site"
     site.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, site / f"sample.{kind}")
@@ -125,7 +134,7 @@ def capture(kind: str, source: Path, workspace: Path, *, width: int, dpr: float,
                     page = browser.new_page()
                     # What the page chose to leave out (a sheet past the viewer's limits).
                     page.on("console", _say_warnings)
-                    page.goto(f"{origin}/render.html?kind={kind}&width={width}&dpr={dpr}",
+                    page.goto(f"{origin}/render.html?kind={kind}&width={width}&dpr={dpr}{asked}",
                               wait_until="domcontentloaded", timeout=120_000)
                     page.wait_for_function("() => window.__ready === true", timeout=300_000)
                     failure = page.evaluate("() => window.__error || null")
