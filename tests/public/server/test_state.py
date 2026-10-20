@@ -491,3 +491,31 @@ def test_a_file_edited_while_the_app_runs_is_read_again(demo: Demo, tmp_path: Pa
 
     assert demo.content_hash(doc) != before
     assert started is not session and ran == [started]
+
+
+def test_an_uploaded_file_opened_again_by_its_path_is_the_same_document(
+    demo: Demo, tmp_path: Path
+) -> None:
+    # An upload or a carried file is kept by its content, and opened after a restart by its
+    # path: the two made two folders, and its pages were drawn again into the second.
+    doc = demo.add("invented.pdf", b"%PDF-1.4 invented")
+    path = demo.catalog[doc]
+
+    again = Demo(demo.settings, renderer=None, root=demo.root)  # type: ignore[arg-type]
+
+    assert again.open_path(path) == doc
+
+
+def test_a_page_drawing_that_fails_is_not_called_a_damaged_file(demo: Demo) -> None:
+    # The browser dropped a render while many documents were read at once; the reading said
+    # the file "may be damaged", and the same file read in twenty seconds the next time.
+    class _Dropped:
+        def render(self, source: Any, document_format: Any) -> Any:
+            raise RuntimeError("browser render failed: TypeError: Failed to fetch")
+
+    demo.renderer = _Dropped()  # type: ignore[assignment]
+    session = demo.session(demo.add("invented.pdf", b"%PDF-1.4 invented"))
+
+    demo._steps(session, demo._prepare)
+
+    assert session.state == "error" and session.error == state.UNDRAWN

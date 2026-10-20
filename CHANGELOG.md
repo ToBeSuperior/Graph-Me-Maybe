@@ -5,6 +5,14 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Fixed
+
+- A document uploaded or carried in another one opens from its kept pages after a restart,
+  instead of being drawn again into a second folder.
+- A page drawing that fails is said as such ("the pages could not be drawn"), not as a file that
+  may be damaged.
+- A text box drawn inside an Excel chart is read as text the chart holds, like one laid over it.
+
 ## [0.1.19] - 2026-10-20
 
 ### Fixed

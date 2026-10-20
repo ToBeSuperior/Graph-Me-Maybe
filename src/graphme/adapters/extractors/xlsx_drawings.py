@@ -15,6 +15,8 @@ _XDR = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
 _A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 _R = OFFICE_REL
 _MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_CHART = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+_USER_SHAPES = f"{OFFICE_REL}/chartUserShapes"
 
 
 def _local(tag: str) -> str:
@@ -86,6 +88,9 @@ class DrawingObject:
     media_hash: str | None
     media_bytes: bytes | None = field(repr=False)
     raw_xml_hash: str = ""
+    chart_shapes: tuple[str, ...] = ()
+    """For a chart's frame, the text of each box drawn inside the chart (`chartUserShapes`):
+    a drawing of the chart's own, which the sheet's drawing does not hold."""
 
     @property
     def is_picture(self) -> bool:
@@ -260,6 +265,22 @@ def _nonvisual(element: ET.Element) -> tuple[int | None, str | None]:
     return None, None
 
 
+def _chart_shapes(archive: ZipFile, chart_part: str) -> tuple[str, ...]:
+    """The text of each shape drawn inside the chart at `chart_part`, one string a shape."""
+    texts: list[str] = []
+    for target, kind in _relationships(archive, chart_part).values():
+        if kind != _USER_SHAPES or target not in archive.NameToInfo:
+            continue
+        for shape in ET.fromstring(archive.read(target)).iter():
+            if _local(shape.tag) != "sp":
+                continue
+            lines = ("".join(t.text or "" for t in p.iter(f"{{{_A}}}t"))
+                     for p in shape.iter(f"{{{_A}}}p"))
+            if text := "\n".join(line for line in lines if line.strip()).strip():
+                texts.append(text)
+    return tuple(texts)
+
+
 def _kind(element: ET.Element) -> str:
     name = _local(element.tag)
     return name if name in {"pic", "sp", "cxnSp", "grpSp", "graphicFrame"} else "unknown"
@@ -297,6 +318,10 @@ def _walk_objects(
             media_target = target
             if target in archive.NameToInfo:
                 media_bytes = archive.read(target)
+    chart_shapes: tuple[str, ...] = ()
+    chart = element.find(f".//{{{_CHART}}}chart") if kind == "graphicFrame" else None
+    if chart is not None and (chart_rid := chart.get(f"{{{_R}}}id")) in drawing_rels:
+        chart_shapes = _chart_shapes(archive, drawing_rels[chart_rid][0])
     raw = ET.tostring(element, encoding="utf-8")
     identity = ":".join(
         (
@@ -333,6 +358,7 @@ def _walk_objects(
         media_hash=_hash(media_bytes) if media_bytes is not None else None,
         media_bytes=media_bytes,
         raw_xml_hash=_hash(raw),
+        chart_shapes=chart_shapes,
     )
     result = [item]
     if kind == "grpSp":

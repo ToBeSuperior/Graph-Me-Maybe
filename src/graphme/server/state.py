@@ -497,8 +497,12 @@ class Demo:
         return doc
 
     def open_path(self, path: str) -> str:
-        """A document on this machine, opened by its path, and its id."""
-        doc = self.doc_id(path)
+        """A document on this machine, opened by its path, and its id. One kept under
+        `uploads/<id>/` -- uploaded, or carried in another document -- is that id: opened
+        again after a restart it is the same document, in the same folder."""
+        kept = Path(path)
+        uploads = self.root / "uploads"
+        doc = kept.parent.name if kept.parent.parent == uploads else self.doc_id(path)
         with self.opening:
             self.catalog.setdefault(doc, path)
         return doc
@@ -787,6 +791,9 @@ class Demo:
             session.state = "done"
         except Cancelled:
             session.state, session.error = "cancelled", CANCELLED
+        except Undrawn:  # the renderer failed, not the file
+            traceback.print_exc(file=sys.stderr)
+            session.state, session.error = "error", UNDRAWN
         except Exception:
             traceback.print_exc(file=sys.stderr)
             session.state, session.error = "error", UNREAD
@@ -864,7 +871,10 @@ class Demo:
             raise FileNotFoundError(session.source)
         else:
             with self.drawing:
-                session.pages = self.renderer.render(session.source, session.format)
+                try:
+                    session.pages = self.renderer.render(session.source, session.format)
+                except Exception as error:
+                    raise Undrawn(UNDRAWN) from error
         bound = None if kept is None else page_cache.load_bound(
             session.workspace, kept_under, session.store)
         if bound is None:

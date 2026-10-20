@@ -1083,6 +1083,17 @@ class ExcelExtractor:
                 locator,
             )
             edges.append(self._contains(content_hash, document_id, sheet_id, chart_id))
+            # A box drawn inside the chart is kept in the chart's own drawing: the chart
+            # holds it, natively, and it is placed where the chart is.
+            for number, text in enumerate(frame.chart_shapes if frame is not None else (), 1):
+                shape_id = node_id("chart_shape", {"chart": chart_id, "index": str(number)})
+                shape_locator = locator.model_copy(update={"label": text.splitlines()[0][:200]})
+                nodes.append(GraphNode(id=shape_id, document_id=document_id,
+                                       type=NodeType.TEXT_CHUNK, label=shape_locator.label,
+                                       text=text, locator=shape_locator))
+                add_evidence(shape_id, f"chart_shape:{sheet.title}:{index}:{number}",
+                             EvidenceKind.SOURCE_TEXT, text, shape_locator)
+                edges.append(self._contains(content_hash, document_id, chart_id, shape_id))
 
     def _extract_pivots(
         self,
