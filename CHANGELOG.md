@@ -5,6 +5,8 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-10-20
+
 ### Fixed
 
 - A document uploaded or carried in another one opens from its kept pages after a restart,
