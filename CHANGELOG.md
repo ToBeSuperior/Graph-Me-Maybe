@@ -7,6 +7,18 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ### Fixed
 
+- The app answers from the moment it starts: the startup check of the model and embedding
+  servers runs behind it instead of before it. The installers compile the app's Python once at
+  install, so the first start after an update does not.
+- Text boxes on a worksheet are read: one over a chart or a picture goes under it, and its words
+  are found by search. Only a box over a picture was kept before, inside the picture's metadata;
+  one over a chart or on its own was lost.
+- Two drawings that only graze at a corner -- a chart beside a table and a photo below it -- stay
+  two pictures. Merged, their rectangle took the table and the headings between them, and the
+  sheet's outline put every section under the table.
+- A `.dump` export works on Windows. Its scratch Neo4j is stopped by force there, and the dump
+  refused the database it left ("Active logical log detected"); the scratch Neo4j now checkpoints
+  every write before it is stopped. CI makes a `.dump` on Windows and macOS.
 - A file edited and built again replaces what was read from it before: the old reading no longer
   stays beside the new one, where answers wavered between the two values. With the app running,
   an edited file is read again instead of counting as known.

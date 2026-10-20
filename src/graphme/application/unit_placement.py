@@ -52,8 +52,9 @@ class UnitPlacer(Protocol):
 class CellRangePlacer:
     """A worksheet node, placed through the edges the renderer recorded.
 
-    A picture or chart is measured by its DrawingML extent rather than the cells it is anchored to:
-    it does not fill them, and `editAs="oneCell"` leaves the `to` marker stale.
+    A drawing (picture, chart, text box) is measured by its DrawingML extent rather than the
+    cells it is anchored to: it does not fill them, and `editAs="oneCell"` leaves the `to`
+    marker stale.
     """
 
     def __init__(
@@ -66,7 +67,8 @@ class CellRangePlacer:
         self._extents: Mapping[int, DrawingLike] = extents or {}
 
     def box(self, node: GraphNode) -> PixelBox | None:
-        if node.type in (NodeType.IMAGE, NodeType.CHART):
+        # A drawing -- a picture, a chart, a text box -- is where it is drawn, not in its cells.
+        if "xml_index" in node.locator.metadata:
             extent = self._drawing_extent(node)
             if extent is not None:
                 return extent

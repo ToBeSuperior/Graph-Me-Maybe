@@ -532,6 +532,55 @@ class ExcelExtractor:
             chart_sources=chart_sources,
             drawing_manifest=drawing_manifest,
         )
+        self._extract_text_boxes(
+            sheet=sheet, source=source, content_hash=content_hash, document_id=document_id,
+            sheet_id=sheet_id, nodes=nodes, edges=edges, node_id=node_id,
+            add_evidence=add_evidence, drawing_manifest=drawing_manifest,
+        )
+
+    def _extract_text_boxes(
+        self,
+        *,
+        sheet: Worksheet,
+        source: Path,
+        content_hash: str,
+        document_id: str,
+        sheet_id: str,
+        nodes: list[GraphNode],
+        edges: list[GraphEdge],
+        node_id: Callable[[str, dict[str, str]], str],
+        add_evidence: Callable[[str, str, EvidenceKind, str, SourceLocator], None],
+        drawing_manifest: DrawingManifest,
+    ) -> None:
+        """Every text box on the sheet as text the sheet holds, placed by its drawn extent.
+
+        Only one over a picture was kept, inside the picture's metadata, where no search found
+        it; one over a chart or on its own was dropped. What a box lies on is binding's
+        question, as for any text: one inside a chart or a picture goes under it there.
+        """
+        for item in drawing_manifest.objects:
+            if item.worksheet != sheet.title or item.kind != "sp" or not item.text_runs:
+                continue
+            paragraphs: dict[int, str] = {}
+            for run in item.text_runs:
+                paragraphs[run["paragraph"]] = paragraphs.get(run["paragraph"], "") + run["text"]
+            text = "\n".join(line for line in paragraphs.values() if line.strip()).strip()
+            if not text:
+                continue
+            box_id = node_id("text_box", {"sheet": sheet.title, "object": item.object_id})
+            locator = SourceLocator(
+                file_name=source.name,
+                label=item.name or "text box",
+                sheet=sheet.title,
+                cell_range=anchor_cell_range(item),
+                source_part=item.drawing_part,
+                metadata={"xml_index": item.xml_index},
+            )
+            nodes.append(GraphNode(id=box_id, document_id=document_id, type=NodeType.TEXT_CHUNK,
+                                   label=text.splitlines()[0][:200], text=text, locator=locator))
+            add_evidence(box_id, f"text_box:{sheet.title}:{item.object_id}",
+                         EvidenceKind.SOURCE_TEXT, text, locator)
+            edges.append(self._contains(content_hash, document_id, sheet_id, box_id))
 
     def _emit_table(
         self,

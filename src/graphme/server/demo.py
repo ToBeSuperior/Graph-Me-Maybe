@@ -20,7 +20,7 @@ from graphme.samples import write_samples
 from graphme.server import create_app
 from graphme.server.app import WEB, make_demo
 from graphme.server.models import BuildState
-from graphme.server.settings import preflight
+from graphme.server.settings import preflight_behind
 from graphme.server.state import BUILDING, Demo
 
 
@@ -71,8 +71,7 @@ def run(port: int, web: Path | None, *, on_ready: Callable[[], None] | None = No
     `.env`; `on_ready` is called once it answers."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     settings = demo_settings()
-    for problem in preflight(settings):
-        logging.warning("not ready: %s", problem)
+    preflight_behind(settings)
     demo = make_demo(settings)
 
     def warm() -> None:

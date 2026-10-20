@@ -150,6 +150,19 @@ class SheetPixelGrid:
             return None
 
 
+MEET_SHARE = 0.5
+"""How much of the narrower of two drawings their shared span has to cover, across or down,
+for them to meet along a side rather than at a corner."""
+
+
+def _meet(left: PixelBox, right: PixelBox) -> bool:
+    across = min(left.x1, right.x1) - max(left.x0, right.x0)
+    down = min(left.y1, right.y1) - max(left.y0, right.y0)
+    narrower = min(left.x1 - left.x0, right.x1 - right.x0)
+    shorter = min(left.y1 - left.y0, right.y1 - right.y0)
+    return across >= MEET_SHARE * narrower or down >= MEET_SHARE * shorter
+
+
 def _shares_area(left: PixelBox, right: PixelBox) -> bool:
     return (
         min(left.x1, right.x1) > max(left.x0, right.x0)
@@ -228,7 +241,10 @@ def _belong_together(
     if pair == ("table", "table"):
         return nested  # two tables side by side are a comparison, not one table
     if pair == ("drawing", "drawing"):
-        return True  # strips of one picture abut exactly and are one picture
+        # Strips of one picture abut along a side and are one picture; two pictures that
+        # graze at a corner are two, and one rectangle around both covered whatever lay
+        # between -- a table and the headings beside it.
+        return _meet(left, right)
     # Anything else has to actually share area. Merely stopping where the next thing
     # begins is how a page is laid out, and merging on that let a table below a diagram
     # swallow the diagram.

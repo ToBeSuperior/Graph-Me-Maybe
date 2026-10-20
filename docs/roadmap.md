@@ -63,6 +63,11 @@ end to end, and the VLM hierarchy handles worksheets, slides, DOCX and PDF.
 
 ## 1.5 · Search and the web app
 
+- [ ] (Refinement) A question in one language finds little in documents written in another:
+      an English question over Korean documents left them below the relevance floor, which
+      was measured on English questions over English documents. One option is for the
+      question split (`SPLIT_SYSTEM`) to also write each query in the language of the
+      documents it searches.
 - [ ] In a question that uses a document number together with a common word such as
       "document summary", the document with that number is pushed down from the top. When a
       number is present, the full-text side gets more weight, but the common word matches

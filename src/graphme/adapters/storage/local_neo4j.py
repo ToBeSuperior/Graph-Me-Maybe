@@ -30,7 +30,7 @@ import threading
 import time
 import urllib.request
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -216,9 +216,10 @@ def _data_folder(port: int) -> str | None:
         return None
 
 
-def conf(data: Path, port: int, memory: tuple[str, str]) -> str:
+def conf(data: Path, port: int, memory: tuple[str, str],
+         settings: Mapping[str, str] | None = None) -> str:
     heap, pagecache = memory
-    lines = {
+    lines: dict[str, object] = {
         "server.directories.data": data / "db",
         "server.directories.logs": data / "logs",
         "server.directories.run": data / "run",
@@ -230,6 +231,7 @@ def conf(data: Path, port: int, memory: tuple[str, str]) -> str:
         "dbms.usage_report.enabled": "false",
         "server.memory.heap.max_size": heap,
         "server.memory.pagecache.size": pagecache,
+        **(settings or {}),
     }
     # Forward slashes: Neo4j reads a backslash in its config as an escape.
     return "".join(f"{key}={str(value).replace(chr(92), '/')}\n" for key, value in lines.items())
@@ -254,11 +256,12 @@ def start(
     home: Neo4jHome, data: Path, port: int, memory: tuple[str, str], *,
     popen: Callable[..., subprocess.Popen[bytes]] = processes.popen,
     platform: str = sys.platform,
+    settings: Mapping[str, str] | None = None,
 ) -> subprocess.Popen[bytes]:
     """Neo4j on `port` over the graph in `data`, a child of this process with no window."""
     for part in ("conf", "db", "logs", "run", "import"):
         (data / part).mkdir(parents=True, exist_ok=True)
-    (data / "conf" / "neo4j.conf").write_text(conf(data, port, memory), encoding="utf-8")
+    (data / "conf" / "neo4j.conf").write_text(conf(data, port, memory, settings), encoding="utf-8")
     log = (data / "logs" / "console.log").open("ab")
     options: dict[str, Any] = {"env": home.environment(data / "conf"), "stdout": log,
                                "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL}

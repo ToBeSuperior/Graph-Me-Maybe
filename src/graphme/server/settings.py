@@ -2,7 +2,9 @@
 a secret only as set or not, a change tried before it is written to `.env`."""
 from __future__ import annotations
 
+import logging
 import os
+import threading
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -164,6 +166,16 @@ def write_env(path: Path, values: dict[str, str], drop: set[str] | None = None) 
     temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
     temporary.chmod(0o600)
     temporary.replace(path)
+
+
+def preflight_behind(settings: Settings) -> None:
+    """`preflight` logged from a thread of its own: it asks the model and embedding servers,
+    which can take seconds each, and the server is to answer from the moment it starts."""
+    def said() -> None:
+        for problem in preflight(settings):
+            logging.warning("not ready: %s", problem)
+
+    threading.Thread(target=said, daemon=True).start()
 
 
 def preflight(settings: Settings) -> list[str]:

@@ -98,6 +98,11 @@ jobs:
           python_dir="$tools/graph-me-maybe"
           py="$python_dir/bin/python"; [ -x "$py" ] || py="$python_dir/Scripts/python.exe"
           "$py" -m graphme.samples samples
+          # A .dump: its scratch Neo4j is stopped by force on Windows, which the dump once refused.
+          "$py" -c "import pathlib, graphme.api as a, graphme.adapters.extractors.excel as e; \
+          a.GraphMe().graph_space().put_document(e.ExcelExtractor().extract(sorted(pathlib.Path('samples').glob('*.xlsx'))[0]))"
+          "$bin/graphme" export-corpus dumped --dump || { cat app.log; exit 1; }
+          test -s dumped.dump
           xlsx=$(ls samples/*.xlsx | head -1)
           "$bin/graphme" xlsx-bundle "$xlsx" bundle --viewer "$GRAPHME_HOME/viewer" || { cat app.log; exit 1; }
           # The path most Windows users take: no Chrome, Playwright's own Chromium.

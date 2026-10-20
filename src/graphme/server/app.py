@@ -48,7 +48,7 @@ from graphme.application.xlsx_visual_binding import CROP_ASSET_KEY, read_node_cr
 from graphme.config import Settings, load_settings
 from graphme.runtime import create_browser_renderer
 from graphme.server import models as api
-from graphme.server.settings import changed, described, from_here, preflight
+from graphme.server.settings import changed, described, from_here, preflight_behind
 from graphme.server.state import (
     BUILDING,
     IN_LOG,
@@ -727,8 +727,7 @@ def serve(settings: Settings, *, host: str, port: int, web: Path | None) -> None
     import uvicorn
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    for problem in preflight(settings):
-        logging.warning("not ready: %s", problem)
+    preflight_behind(settings)
     demo = make_demo(settings)
     if web is None and WEB.is_dir():
         web = WEB

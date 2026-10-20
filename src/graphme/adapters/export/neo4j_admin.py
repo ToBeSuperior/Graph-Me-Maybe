@@ -13,11 +13,13 @@ into a message.
 """
 from __future__ import annotations
 
+import contextlib
 import re
 import shutil
 import socket
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -33,6 +35,11 @@ DATABASE = "neo4j"
 WAIT_SECONDS = 1800
 SMALL = ("512m", "256m")
 """The scratch Neo4j only makes indexes: a small heap does."""
+CHECKPOINT_OFTEN = {"db.checkpoint.interval.time": "1s", "db.checkpoint.interval.tx": "1"}
+"""Windows stops the scratch Neo4j by force (`local_neo4j.stop`), and `neo4j-admin database
+dump` refuses a database whose log runs past its last checkpoint ("Active logical log
+detected"). Community has no procedure to ask for one, so it is made to take them often."""
+CHECKPOINT_WAIT = 120
 
 Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 
@@ -53,6 +60,29 @@ def _indexed(port: int, schema: Path) -> None:
     with GraphDatabase.driver(f"bolt://127.0.0.1:{port}", auth=None) as driver:
         for statement in [*statements, "CALL db.awaitIndexes(600)"]:
             driver.execute_query(statement, database_=DATABASE)
+
+
+def _checkpointed(port: int, log: Path, seconds: int = CHECKPOINT_WAIT) -> None:
+    """Back once a checkpoint has covered every write. One more write is made, and a checkpoint
+    that starts after it covers it: its completion is read from the log. One that started
+    before it and completed after covers it not."""
+    from neo4j import GraphDatabase
+
+    with GraphDatabase.driver(f"bolt://127.0.0.1:{port}", auth=None) as driver:
+        driver.execute_query("CREATE (n:GraphmeCheckpoint) DELETE n", database_=DATABASE)
+    seen = log.stat().st_size if log.is_file() else 0
+    for _ in range(seconds * 2):
+        with contextlib.suppress(OSError), log.open("rb") as said:
+            said.seek(seen)
+            told = said.read().decode("utf-8", "replace")
+            started = set(CHECKPOINT_STARTED.findall(told))
+            if started & set(CHECKPOINT_DONE.findall(told)):
+                return
+        time.sleep(0.5)
+
+
+CHECKPOINT_STARTED = re.compile(rf"\[{DATABASE}/[^\]]*\].*txId: (\d+),.*checkpoint started")
+CHECKPOINT_DONE = re.compile(rf"\[{DATABASE}/[^\]]*\].*txId: (\d+),.*checkpoint completed")
 
 
 class LocalNeo4jAdmin:
@@ -94,11 +124,12 @@ class LocalNeo4jAdmin:
 
     def _index_with_neo4j(self, home: Neo4jHome, data: Path, schema: Path) -> None:
         port = _free_port()
-        child = local_neo4j.start(home, data, port, SMALL)
+        child = local_neo4j.start(home, data, port, SMALL, settings=CHECKPOINT_OFTEN)
         try:
             if not local_neo4j.came_up(port, child):
                 raise RuntimeError("the scratch Neo4j did not start")
             _indexed(port, schema)
+            _checkpointed(port, data / "logs" / "debug.log")
         finally:
             local_neo4j.stop(child)
 

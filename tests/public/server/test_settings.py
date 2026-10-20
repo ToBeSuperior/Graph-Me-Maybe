@@ -326,3 +326,20 @@ def test_switching_provider_under_a_config_file_model_is_refused(
     assert said.status_code == 400 and "GRAPHME_MODEL" in said.json()["detail"]
     assert "GRAPHME_CONFIG" in said.json()["detail"]
     assert demo.settings.provider != "other"
+
+
+def test_the_startup_check_does_not_hold_the_server_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The check asks the model and embedding servers, seconds each on a slow network; done
+    # before the server listened, the first page waited for all of it.
+    import threading
+    import time
+
+    from graphme.server import settings as checks
+
+    told = threading.Event()
+    monkeypatch.setattr(checks, "preflight",
+                        lambda _settings: (time.sleep(1), told.set(), ["invented problem"])[2])
+    started = time.monotonic()
+    checks.preflight_behind(None)  # type: ignore[arg-type]  # the check is replaced above
+    assert time.monotonic() - started < 0.5
+    assert told.wait(5)

@@ -167,7 +167,7 @@ install() {
   fi
 
   say "installing Graph-Me-Maybe $tag"
-  uv tool install --force --python 3.11 "$work/$wheel"
+  uv tool install --force --compile-bytecode --python 3.11 "$work/$wheel"
   [ -n "${UV_NO_MODIFY_PATH:-}" ] || uv tool update-shell >/dev/null 2>&1 || true
   bin=$(uv tool dir --bin)
   python="$(uv tool dir)/$TOOL/bin/python"
