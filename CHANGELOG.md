@@ -5,6 +5,8 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-10-20
+
 ### Fixed
 
 - The app answers from the moment it starts: the startup check of the model and embedding
