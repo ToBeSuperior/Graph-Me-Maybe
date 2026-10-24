@@ -221,3 +221,27 @@ test('Google Drive is connected in the browser, then its picked files are built'
   await page.getByRole('button', { name: '연결 해제' }).click();
   await expect(page.getByText('연결되지 않았습니다.')).toBeVisible();
 });
+
+test('a file read and waiting for its turn in the build is not shown as left out', async ({ page }) => {
+  await fakeApi(page, {
+    jobs: [{ id: 'b', kind: 'build', state: 'reading', done: 1, total: 2, source: 'Google Drive', failed: [] }],
+    reading: [{ name: '가상 점검표.pdf', format: 'pdf', in_space: false, document_id: null, file_id: 'f1',
+      state: 'queued', modified: 1767225600 }],
+  });
+  await page.goto('/manage');
+  const row = page.getByRole('link', { name: /가상 점검표/ }).locator('..');
+  await expect(row.getByText('추가 대기')).toBeVisible();
+  await expect(row.getByText('그래프 밖', { exact: true })).toHaveCount(0);
+  await expect(row.getByRole('button', { name: '다시 읽기' })).toHaveCount(0); // nothing to redo
+});
+
+test('while a build runs the Drive page says so and does not start another', async ({ page }) => {
+  const fake = await fakeApi(page, {
+    jobs: [{ id: 'b', kind: 'build', state: 'reading', done: 1, total: 2, source: 'Google Drive', failed: [] }],
+  });
+  fake.drive.connected = true;
+  fake.drive.picked = 2;
+  await page.goto('/manage/drive');
+  await expect(page.getByRole('button', { name: 'Drive에서 그래프 만들기' })).toBeDisabled();
+  await expect(page.getByText('고른 파일을 읽고 있습니다', { exact: false })).toBeVisible();
+});

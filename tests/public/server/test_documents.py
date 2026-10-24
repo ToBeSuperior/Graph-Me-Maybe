@@ -315,3 +315,21 @@ def test_a_zips_folder_and_name_carry_no_control_or_turning_marks(
     assert "%E2%80%AE" not in got.headers["content-disposition"].upper()
     with zipfile.ZipFile(io.BytesIO(got.content)) as archive:
         assert archive.namelist() == ["1 found/spec.docx"]
+
+
+def test_a_document_read_and_waiting_for_its_turn_in_a_build_is_not_outside(
+    demo: Demo, space: FakeSpace, client: TestClient, tmp_path: Path
+) -> None:
+    """A build reads its documents side by side and puts each once it is read: one read and
+    not put yet is waiting to be put, not left out of the graph."""
+    waiting, left = tmp_path / "waiting.pdf", tmp_path / "left.pdf"
+    for path in (waiting, left):
+        path.write_bytes(b"%PDF-1.4")
+    queued, read_alone = demo.open_path(str(waiting)), demo.open_path(str(left))
+    for doc in (queued, read_alone):
+        demo.session(doc).state = "done"
+    demo.putting = {queued}  # read, not put yet
+
+    items = {i["name"]: i["state"] for i in client.get("/v1/documents").json()["items"]}
+
+    assert items == {"waiting.pdf": "queued", "left.pdf": "done"}

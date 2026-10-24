@@ -8,6 +8,11 @@ class DocumentFormat(StrEnum):
     PDF = "pdf"
 
 
+FLOW_FORMATS = (DocumentFormat.DOCX, DocumentFormat.PDF)
+"""Formats whose pages are where the paper ran out rather than a unit the author worked
+in. Their pages are read as one document; a sheet or a slide is a tree of its own."""
+
+
 class NodeType(StrEnum):
     DOCUMENT = "document"
     WORKBOOK = "workbook"

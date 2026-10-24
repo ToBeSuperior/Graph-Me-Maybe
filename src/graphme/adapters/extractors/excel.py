@@ -53,10 +53,12 @@ from graphme.domain.models import (
 from graphme.ports.storage import AssetStore
 
 # A direct A1-style reference: optional quoted or bare sheet name + $-absolute
-# cell or range. Deliberately excludes function calls (INDIRECT/OFFSET) and
-# external-workbook references ([...]) — those are skipped with a warning.
+# cell or range. A bare name starts with a letter of any script: Excel quotes a sheet
+# name only for spaces and punctuation, not for being Korean. Deliberately excludes
+# function calls (INDIRECT/OFFSET) and external-workbook references ([...]) — those are
+# skipped with a warning.
 _REF_RE = re.compile(
-    r"(?:'(?P<qsheet>[^']+)'|(?P<sheet>[A-Za-z_][\w.]*))!"
+    r"(?:'(?P<qsheet>[^']+)'|(?P<sheet>[^\W\d][\w.]*))!"
     r"\$?(?P<c1>[A-Z]{1,3})\$?(?P<r1>\d+)"
     r"(?::\$?(?P<c2>[A-Z]{1,3})\$?(?P<r2>\d+))?"
 )
@@ -1336,7 +1338,7 @@ class ExcelExtractor:
             token = match.group(0)
             return defined_ranges.get(token.upper(), token)
 
-        return re.sub(r"[A-Za-z_][\w.]*", repl, formula)
+        return re.sub(r"[^\W\d][\w.]*", repl, formula)
 
     def _formula_source_id(
         self,

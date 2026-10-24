@@ -46,6 +46,7 @@ class HierarchyScopeProvider(Protocol):
         extracted: ExtractedDocument,
         source_path: str,
         on_page: Callable[[int, tuple[HierarchyDecision, ...] | None], None] | None = None,
+        ready: Callable[[int], ExtractedDocument] | None = None,
     ) -> HierarchyDerivation: ...
 
 

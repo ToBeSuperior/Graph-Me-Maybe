@@ -29,7 +29,7 @@ from graphme.application.hierarchy_decisions import (
     note_unread_pages,
 )
 from graphme.application.page_enrichment import PageEnricher
-from graphme.application.xlsx_visual_binding import VisualBinder
+from graphme.application.visual_crops import VisualBinder
 from graphme.domain.enums import DocumentFormat
 from graphme.domain.models import ExtractedDocument, HierarchyDecision
 from graphme.ports.extractor import DocumentExtractor
@@ -44,7 +44,12 @@ PhaseListener = Callable[[str], None]
 class UnitGrouper(Protocol):
     """Joins the pieces of text each page says are one unit."""
 
-    def group(self, *, extracted: ExtractedDocument, source: Path) -> ExtractedDocument: ...
+    def group(
+        self,
+        *,
+        extracted: ExtractedDocument,
+        source: Path,
+    ) -> ExtractedDocument: ...
 
 
 class DocumentGraphBuilder:
@@ -121,6 +126,22 @@ class DocumentGraphBuilder:
             extracted=extracted, source=source
         ).validate_canonical_semantic_graph()
 
+    def group_and_read_outline(
+        self,
+        extracted: ExtractedDocument,
+        source: Path,
+        *,
+        on_page: PageListener | None = None,
+        on_grouped: Callable[[ExtractedDocument], None] | None = None,
+    ) -> ExtractedDocument:
+        """`group_text` then `read_outline`. Every page is read once the text is grouped --
+        a flowing document's pages side by side, against its headings -- so nothing is gained
+        by reading behind the grouping. `on_grouped` hears the document once it is joined."""
+        grouped = self.group_text(extracted, source)
+        if on_grouped is not None:
+            on_grouped(grouped)
+        return self.read_outline(grouped, source, on_page=on_page)
+
     def read_outline(
         self,
         extracted: ExtractedDocument,
@@ -161,3 +182,4 @@ class DocumentGraphBuilder:
                 on_phase=on_phase,
             )
         return extracted.validate_canonical_semantic_graph()
+

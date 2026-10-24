@@ -14,8 +14,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
+from graphme.application.page_regions import PixelBox, SheetPixelGrid
 from graphme.application.reading_order import stated_box
-from graphme.application.xlsx_crop_regions import PixelBox, SheetPixelGrid
 from graphme.domain.enums import NodeType
 from graphme.domain.models import GraphNode
 
@@ -169,10 +169,16 @@ class FlowPlacer:
         self,
         boxes: Mapping[tuple[str, str, int], PixelBox],
         drawings: Mapping[tuple[str, str, int], Sequence[PixelBox]] | None = None,
+        charts: Mapping[tuple[str, str, int], Sequence[PixelBox]] | None = None,
     ) -> None:
         self._drawings = {
             index: list(items)
             for (story, _instance, index), items in (drawings or {}).items()
+            if story == "body"
+        }
+        self._charts = {
+            index: list(items)
+            for (story, _instance, index), items in (charts or {}).items()
             if story == "body"
         }
         self._body: dict[int, PixelBox] = {}
@@ -198,9 +204,18 @@ class FlowPlacer:
         # What the renderer drew hanging off each body element, words aside: a table's
         # cells hold pictures and text boxes that its runs alone do not reach.
         self._drawn_in: dict[int, list[PixelBox]] = {
-            index: [*self._drawings.get(index, ()), *anchored.get(index, {}).values()]
-            for index in {*self._drawings, *anchored}
+            index: [
+                *self._drawings.get(index, ()),
+                *self._charts.get(index, ()),
+                *anchored.get(index, {}).values(),
+            ]
+            for index in {*self._drawings, *self._charts, *anchored}
         }
+
+    @classmethod
+    def of(cls, page: Any) -> FlowPlacer:
+        """The placer for one laid-out page: its words, its pictures and its charts."""
+        return cls(page.flow_boxes(), page.flow_drawings(), page.flow_drawings("chart"))
 
     def box(self, node: GraphNode) -> PixelBox | None:
         body_index = node.metadata.get("body_index")
@@ -208,10 +223,11 @@ class FlowPlacer:
             return None
         # The extraction counts body elements from one and the renderer from zero.
         index = body_index - 1
-        if node.type is NodeType.IMAGE:
-            # A picture hangs off a paragraph but is not part of its words.
-            drawn = self._drawings.get(index, [])
-            order = node.metadata.get("image_index")
+        if node.type in (NodeType.IMAGE, NodeType.CHART):
+            # A picture or a chart hangs off a paragraph but is not part of its words.
+            chart = node.type is NodeType.CHART
+            drawn = (self._charts if chart else self._drawings).get(index, [])
+            order = node.metadata.get("chart_index" if chart else "image_index")
             place = order - 1 if isinstance(order, int) and not isinstance(order, bool) else 0
             return drawn[place] if 0 <= place < len(drawn) else None
         if node.metadata.get("story") == "textbox":

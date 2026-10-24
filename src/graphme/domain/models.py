@@ -392,6 +392,47 @@ class HierarchyDerivation(DomainModel):
     unread_pages: tuple[int, ...] = ()
 
 
+class JoinPlace(DomainModel):
+    """A unit a page may attach to, or one of the page's own tops: what it says and what it
+    holds -- the start of a few of the units under it, and how many there are."""
+
+    unit_id: str = Field(min_length=1)
+    label: str
+    holds: tuple[str, ...] = ()
+    held: int = Field(default=0, ge=0)
+    indent: int | None = Field(default=None, ge=0)
+
+
+class PageJoinRequest(DomainModel):
+    """Where a page's top units go in the outline of the pages before it.
+
+    `places` are the sections open where the page begins, outermost first and the document's
+    top first of all, then how the page before ended. `tops` are the page's units with
+    nothing above them on the page, in reading order."""
+
+    page_index: int = Field(ge=0)
+    places: tuple[JoinPlace, ...] = Field(min_length=1)
+    tops: tuple[JoinPlace, ...] = Field(min_length=1)
+
+
+class JoinPlacement(DomainModel):
+    """One top unit's answer: under a place, or beside it -- the next item of its kind, which
+    closes it. The place is one of the places, or an earlier top of the same page."""
+
+    subject_id: str = Field(min_length=1)
+    place_id: str = Field(min_length=1)
+    how: Literal["under", "beside"]
+
+
+class HeadingLine(DomainModel):
+    """One text unit of a document as the headings question sees it."""
+
+    unit_id: str = Field(min_length=1)
+    page: int = Field(ge=0)
+    indent: int = Field(default=0, ge=0)
+    label: str
+
+
 class HierarchyChoice(DomainModel):
     """Which of two readings of the same page is the one to keep.
 

@@ -3,8 +3,11 @@
 Neo4j Community and a Java runtime are kept in the app's home (`neo4j/`, `jre/`), fetched from
 their publishers and checked against their checksums -- by the installer, or on first use. The
 graph lives beside them in `neo4j-data/`, so an update replaces the programs and keeps the
-graph. It runs as a child of whatever needed it -- the app, a command -- with no password, on
-this machine's loopback only, and is stopped when that ends. Docker Desktop was dropped: with
+graph. It runs as a child of whatever needed it -- the app, a command -- on this machine's
+loopback only, and is stopped when that ends. It asks for a password kept in the graph's folder
+for this user alone: Bolt takes WebSocket connections too, so with none any page open in a
+browser here could read or wipe the graph. A graph made before that is given one the first
+time it is started or found running. Docker Desktop was dropped: with
 any container running it runs dozens of CLI plugins every twelve seconds, and on Windows the PC
 stalls each time.
 
@@ -19,6 +22,7 @@ import json
 import logging
 import os
 import platform as platforms
+import secrets
 import shutil
 import signal
 import socket
@@ -65,6 +69,10 @@ class Neo4jHome:
     @property
     def data(self) -> Path:
         return self.root / "neo4j-data"
+
+    @property
+    def password_file(self) -> Path:
+        return self.data / "password"
 
     def java_home(self) -> Path:
         # macOS's runtime is a bundle: its home is inside.
@@ -202,12 +210,53 @@ def _free(port: int) -> bool:
     return True
 
 
-def _data_folder(port: int) -> str | None:
+USER = "neo4j"
+
+
+def password(root: Path) -> str | None:
+    """The password this home's Neo4j asks for, or None for one that asks for none yet."""
+    try:
+        return Neo4jHome(root).password_file.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def _keep(path: Path, secret: str) -> None:
+    """`secret` written for this user alone (on Windows the folder's own rights hold)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(handle, "w", encoding="utf-8") as out:
+        out.write(secret)
+
+
+def _set_password(port: int, secret: str) -> None:
+    """The password set on the Neo4j on `port`, which asks for none yet. Sent as a parameter,
+    never on a command line."""
+    from neo4j import GraphDatabase
+
+    with GraphDatabase.driver(f"bolt://127.0.0.1:{port}", auth=None) as driver:
+        driver.execute_query(f"ALTER USER {USER} SET PASSWORD $secret CHANGE NOT REQUIRED",
+                             secret=secret, database_="system")
+
+
+def _given_password(home: Neo4jHome, port: int, secure: Callable[[int, str], None]) -> None:
+    """A password kept, then set on the Neo4j on `port`. Kept first: a password set and then
+    lost would lock the graph; one kept and not set is undone here, or by deleting the file."""
+    secret = secrets.token_urlsafe(24)
+    _keep(home.password_file, secret)
+    try:
+        secure(port, secret)
+    except Exception:
+        home.password_file.unlink(missing_ok=True)
+        raise
+
+
+def _data_folder(port: int, auth: tuple[str, str] | None = None) -> str | None:
     """The data folder the Neo4j on `port` says it keeps: who it belongs to."""
     from neo4j import GraphDatabase
 
     try:
-        with GraphDatabase.driver(f"bolt://127.0.0.1:{port}", auth=None) as driver:
+        with GraphDatabase.driver(f"bolt://127.0.0.1:{port}", auth=auth) as driver:
             records, _, _ = driver.execute_query(
                 "SHOW SETTINGS YIELD name, value WHERE name = 'server.directories.data' "
                 "RETURN value", database_="system")
@@ -217,14 +266,14 @@ def _data_folder(port: int) -> str | None:
 
 
 def conf(data: Path, port: int, memory: tuple[str, str],
-         settings: Mapping[str, str] | None = None) -> str:
+         settings: Mapping[str, str] | None = None, *, auth: bool = False) -> str:
     heap, pagecache = memory
     lines: dict[str, object] = {
         "server.directories.data": data / "db",
         "server.directories.logs": data / "logs",
         "server.directories.run": data / "run",
         "server.directories.import": data / "import",
-        "dbms.security.auth_enabled": "false",
+        "dbms.security.auth_enabled": "true" if auth else "false",
         "server.bolt.listen_address": f"127.0.0.1:{port}",
         "server.http.enabled": "false",
         "server.https.enabled": "false",
@@ -248,7 +297,8 @@ def _record(data: Path) -> dict[str, int] | None:
 def _is_ours(data: Path, port: int) -> bool:
     if not _answers(port):
         return False
-    said = _data_folder(port)
+    secret = password(data.parent)
+    said = _data_folder(port, (USER, secret) if secret else None)
     return said is not None and Path(said).resolve() == (data / "db").resolve()
 
 
@@ -257,11 +307,13 @@ def start(
     popen: Callable[..., subprocess.Popen[bytes]] = processes.popen,
     platform: str = sys.platform,
     settings: Mapping[str, str] | None = None,
+    auth: bool = False,
 ) -> subprocess.Popen[bytes]:
     """Neo4j on `port` over the graph in `data`, a child of this process with no window."""
     for part in ("conf", "db", "logs", "run", "import"):
         (data / part).mkdir(parents=True, exist_ok=True)
-    (data / "conf" / "neo4j.conf").write_text(conf(data, port, memory, settings), encoding="utf-8")
+    (data / "conf" / "neo4j.conf").write_text(conf(data, port, memory, settings, auth=auth),
+                                              encoding="utf-8")
     log = (data / "logs" / "console.log").open("ab")
     options: dict[str, Any] = {"env": home.environment(data / "conf"), "stdout": log,
                                "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL}
@@ -322,24 +374,40 @@ def ensure_local_neo4j(
     answers: Callable[[int], bool] = _answers,
     free: Callable[[int], bool] = _free,
     sleep: Callable[[float], None] = time.sleep,
+    secure: Callable[[int, str], None] = _set_password,
 ) -> str:
     """The address of this home's Neo4j: the one running, else one started -- fetched first if
-    it is not installed yet."""
+    it is not installed yet. Its password is `password(root)`."""
     with _starting:  # the page asks for the list and the map at once: one start
         home = Neo4jHome(root)
         record = _record(home.data)
         if record is not None and is_ours(home.data, record["port"]):
+            if password(root) is None:  # asks for one from its next start
+                _given_password(home, record["port"], secure)
             return f"bolt://127.0.0.1:{record['port']}"
         if not home.installed():
             home = installing(root)
         port = next(p for p in range(FIRST_PORT, FIRST_PORT + 100) if free(p))
         _log.warning("starting the graph DB (Neo4j) on 127.0.0.1:%s", port)
-        child = starting(home, home.data, port, memory)
-        if not _started:
-            atexit.register(stop_started)
-        _started.append((home, child))
-        if came_up(port, child, answers=answers, sleep=sleep):
-            return f"bolt://127.0.0.1:{port}"
-        said = (home.data / "logs" / "console.log")
-        tail = said.read_text(encoding="utf-8", errors="replace")[-600:] if said.is_file() else ""
-        raise RuntimeError(f"the graph DB (Neo4j) did not start: {tail.strip()}")
+        child = _up(home, port, memory, starting, answers, sleep)
+        if password(root) is None:
+            _given_password(home, port, secure)
+            stop(child)
+            _started.remove((home, child))
+            _up(home, port, memory, starting, answers, sleep)
+        return f"bolt://127.0.0.1:{port}"
+
+
+def _up(home: Neo4jHome, port: int, memory: tuple[str, str],
+        starting: Callable[..., subprocess.Popen[bytes]], answers: Callable[[int], bool],
+        sleep: Callable[[float], None]) -> subprocess.Popen[bytes]:
+    """This home's Neo4j started on `port`, asking for its password if it has one."""
+    child = starting(home, home.data, port, memory, auth=password(home.root) is not None)
+    if not _started:
+        atexit.register(stop_started)
+    _started.append((home, child))
+    if came_up(port, child, answers=answers, sleep=sleep):
+        return child
+    said = (home.data / "logs" / "console.log")
+    tail = said.read_text(encoding="utf-8", errors="replace")[-600:] if said.is_file() else ""
+    raise RuntimeError(f"the graph DB (Neo4j) did not start: {tail.strip()}")

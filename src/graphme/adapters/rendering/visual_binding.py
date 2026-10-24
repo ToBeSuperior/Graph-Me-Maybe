@@ -31,7 +31,7 @@ from graphme.application.unit_placement import (
     UnitPlacer,
     home_pages,
 )
-from graphme.application.xlsx_visual_binding import bind_page_visuals, crop_box
+from graphme.application.visual_crops import bind_page_visuals, crop_box
 from graphme.domain.enums import DocumentFormat, NodeType
 from graphme.domain.models import ExtractedDocument, GraphNode, HierarchyFigureGroup
 from graphme.ports.storage import AssetStore
@@ -161,7 +161,7 @@ def home_pages_of(
         return None
     return home_pages(
         extracted.nodes,
-        {page.index: FlowPlacer(page.flow_boxes(), page.flow_drawings()) for page in pages},
+        {page.index: FlowPlacer.of(page) for page in pages},
     )
 
 
@@ -173,7 +173,7 @@ def page_members(
     home: dict[str, int] | None = None,
 ) -> tuple[list[GraphNode], UnitPlacer] | None:
     if fmt is DocumentFormat.DOCX:
-        flow: UnitPlacer = FlowPlacer(page.flow_boxes(), page.flow_drawings())
+        flow: UnitPlacer = FlowPlacer.of(page)
         members = [
             node
             for node in extracted.nodes

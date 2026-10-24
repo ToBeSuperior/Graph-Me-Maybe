@@ -17,15 +17,17 @@ from typing import Any
 
 from graphme.adapters.extractors.pdf import printed_pieces
 from graphme.adapters.rendering.page_renderer import RendersPages
+from graphme.application.page_units import flow_pages
 from graphme.application.unit_grouping import explode_text, group_document_units
 from graphme.domain.enums import DocumentFormat
 from graphme.domain.models import ExtractedDocument
 from graphme.ports.vision import VisionProvider
 
-GROUPING_FORMATS = (DocumentFormat.PDF, DocumentFormat.PPTX)
-"""Where a unit can be broken by the printing. These say which page a unit is on and where
-on it, which is what a window is cut from. A document or a sheet hands over whole
-paragraphs and whole cells and has no page to break them across."""
+GROUPING_FORMATS = (DocumentFormat.PDF, DocumentFormat.PPTX, DocumentFormat.DOCX)
+"""Where one thought can arrive as several units. A PDF prints lines and a slide splits a
+thought over shapes. A Word file hands over whole paragraphs, but an author who wraps a
+sentence by hand writes one sentence as two of them -- and at a page break the outline
+read the second half as a heading of its own. A sheet's cells are values of their own."""
 
 
 class RenderedUnitGrouper:
@@ -43,23 +45,33 @@ class RenderedUnitGrouper:
         self._limiter = limiter if limiter is not None else nullcontext()
 
     def group(
-        self, *, extracted: ExtractedDocument, source: Path
+        self,
+        *,
+        extracted: ExtractedDocument,
+        source: Path,
     ) -> ExtractedDocument:
         """The document with every unit the page says is one unit made into one."""
         document_format = extracted.document.format
         if document_format not in GROUPING_FORMATS:
             return extracted
         pieces, join = self._pieces(source, extracted, document_format)
-        exploded = explode_text(extracted, pieces=pieces)
-        pages = {
-            page.index: page.png
-            for page in self._renderer.render(source, document_format)
-        }
+        # A Word paragraph is already whole: what may belong together is two of them.
+        exploded = (
+            extracted
+            if document_format is DocumentFormat.DOCX
+            else explode_text(extracted, pieces=pieces)
+        )
+        rendered = self._renderer.render(source, document_format)
+        pages = {page.index: page.png for page in rendered}
         if not pages:
             return extracted
         with self._limiter:
             return group_document_units(
-                exploded, pages=pages, vision=self._vision, join=join
+                exploded,
+                pages=pages,
+                vision=self._vision,
+                join=join,
+                page_of=flow_pages(exploded, rendered, document_format),
             )
 
     @staticmethod

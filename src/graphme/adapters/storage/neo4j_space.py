@@ -103,7 +103,7 @@ class Neo4jGraphSpace:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> Neo4jGraphSpace:
-        # No password is the local Neo4j this project starts itself, with authentication off.
+        # No password is a Neo4j asking for none: the app's own, from before it had one.
         auth = (settings.neo4j_user, settings.neo4j_password) if settings.neo4j_password else None
         driver = GraphDatabase.driver(
             settings.neo4j_uri,

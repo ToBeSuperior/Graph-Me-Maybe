@@ -12,7 +12,7 @@ import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -22,7 +22,15 @@ from PIL import Image
 from graphme.adapters.extractors.xlsx_drawings import DrawingObject, parse_xlsx_drawings
 from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import RendersPages
-from graphme.application.hierarchy_decisions import dropped_subjects
+from graphme.adapters.vision.carried_outline import Carried, Placements
+from graphme.application.outline_join import (
+    JOIN_READINGS,
+    MAX_HEADING_LINES,
+    Answer,
+    Joining,
+    PageTree,
+    headings,
+)
 from graphme.application.page_hierarchy_scope import (
     HierarchyScopeUnits,
     build_placed_scope,
@@ -34,11 +42,12 @@ from graphme.application.unit_placement import (
     NormalizedBoxPlacer,
     UnitPlacer,
 )
-from graphme.application.xlsx_visual_binding import VISUAL_TYPES, read_node_crop
-from graphme.domain.enums import DocumentFormat, NodeType
+from graphme.application.visual_crops import read_node_crop
+from graphme.domain.enums import FLOW_FORMATS, DocumentFormat, NodeType
 from graphme.domain.models import (
     ExtractedDocument,
     GraphNode,
+    HeadingLine,
     HierarchyDecision,
     HierarchyDerivation,
     HierarchyFigureGroup,
@@ -46,8 +55,9 @@ from graphme.domain.models import (
     HierarchyScopeRequest,
     HierarchyScopeResult,
     HierarchyUnit,
+    JoinPlacement,
+    PageJoinRequest,
 )
-from graphme.domain.text_match import estimated_tokens
 from graphme.ports.storage import AssetStore
 from graphme.ports.vision import VisionProvider
 
@@ -90,40 +100,10 @@ recorded, a slide through the rectangle each shape carries, and a page of flowin
 through where the layout drew each paragraph, and a PDF page through the rectangle the
 file states for each block; the question is the same for all four."""
 
-FLOW_FORMATS = (DocumentFormat.DOCX, DocumentFormat.PDF)
-"""Formats whose pages are where the paper ran out rather than a unit the author worked
-in. Their pages are read in order and each carries forward what it left open."""
-
 TAIL_FRACTION = 0.3
 """How much of the page before a continuation page is shown with it. The end of a page is
 what the next one carries on from; the whole page would cost a second page of tokens to
 say the same thing."""
-
-CARRY_TOKEN_BUDGET = 1200
-"""How much of the outline built so far travels to the next page. It is a reference the
-page reads its own units against, so it is worth twice a search unit: too little and the
-page sees a section it cannot recognise, too much and the model reaches past what the
-page can settle."""
-
-CARRY_LABEL_CHARS = 80
-"""A carried heading is there to be recognised, not read. Its opening words do that."""
-
-CARRY_ITEM_CHARS = 40
-"""A carried unit holding nothing -- a paragraph, a list item -- is there to show what kind
-of thing reads under its heading, and fewer words than a heading's do that."""
-
-SKELETON_SHARE = 0.5
-"""How much of the budget the document's headings may take, shallowest first. The rest
-goes to whole recent sections. A long document's headings alone can outgrow the budget,
-so its deepest levels are the first left out and its chapters the last."""
-
-ENTRY_TOKENS = 8
-"""What one carried line costs beyond its label: its id, its parent's id, the braces."""
-
-CHAIN_DEPTH = 24
-"""How far up the ancestry is walked to find the open chain. A guard against a cycle, not
-a budget -- what fits is decided by tokens."""
-
 
 class RenderedHierarchyScopeProvider:
     """Runs one scope pass per rendered page."""
@@ -141,8 +121,7 @@ class RenderedHierarchyScopeProvider:
         if readings < 1:
             raise ValueError("a scope needs at least one reading")
         self._workers = max(1, workers)
-        """How many pages of a document whose pages stand alone -- sheets, slides -- are read
-        at once. A flowing document's page waits for the one before; those never do."""
+        """How many pages, and page breaks, are asked at once."""
         self._limiter = limiter if limiter is not None else nullcontext()
         """Held around every model call, so a caller reading several documents at once caps
         the calls in flight across all of them."""
@@ -179,14 +158,14 @@ class RenderedHierarchyScopeProvider:
         if document_format not in SCOPE_FORMATS:
             return ()
         nodes = {node.id: node for node in extracted.nodes}
-        figures: list[HierarchyFigureGroup] = []
         pages = self._pages(source_path, document_format)
         home = flow_pages(extracted, pages, document_format)
         drawings = self._drawings(source_path, document_format)
-        for page in pages:
+
+        def read(page: RenderedPage) -> tuple[HierarchyFigureGroup, ...]:
             asked = self._asked(extracted, page, home, nodes, drawings)
             if asked is None:
-                continue
+                return ()
             scope, shown, crops = asked
             request = self._request(extracted, scope, shown)
             try:
@@ -198,9 +177,12 @@ class RenderedHierarchyScopeProvider:
                 # A page whose figures cannot be read keeps the territory measurement gave
                 # it. Nothing is grouped there, and the rest of the document still is.
                 _log.warning("%s: no usable figure answer -- %s", scope.scope, error)
-                continue
-            figures.extend(answered.figures)
-        return tuple(figures)
+                return ()
+            return answered.figures
+
+        # Nothing passes between pages here, so they are asked `workers` at a time.
+        with ThreadPoolExecutor(max_workers=min(self._workers, max(1, len(pages)))) as pool:
+            return tuple(group for found in pool.map(read, pages) for group in found)
 
     def derive(
         self,
@@ -209,11 +191,15 @@ class RenderedHierarchyScopeProvider:
         source_path: str,
         on_page: Callable[[int, tuple[HierarchyDecision, ...] | None], None] | None = None,
     ) -> HierarchyDerivation:
-        """Read every page's outline, in page order.
+        """Read every page's outline. Pages that stand alone -- sheets, slides -- are each
+        their own tree. A flowing document's pages are read side by side, each on its own
+        against the document's headings, and then every page break is joined
+        (`outline_join`): reading them in order, each page waiting for the one before, was
+        the slowest part of a build and no more right.
 
-        `on_page` hears each page as soon as it is settled -- its decisions, or None when the
+        `on_page` hears each page as its reading lands -- its decisions, or None when the
         page got no usable answer -- so a long document shows what is read while the rest is
-        still being read.
+        still being read. What the joins decide comes back in the derivation.
         """
         document_format = extracted.document.format
         if document_format not in SCOPE_FORMATS:
@@ -225,38 +211,114 @@ class RenderedHierarchyScopeProvider:
         flowing = document_format in FLOW_FORMATS
         if not flowing:
             return self._derive_apart(extracted, pages, home, nodes, drawings, on_page)
-        decisions: list[HierarchyDecision] = []
-        unread: list[int] = []
-        seen: dict[str, HierarchyUnit] = {}
-        placements = _Placements()
-        carried = _Carried()
-        tail: bytes | None = None
-        for page in pages:
-            asked = self._asked(extracted, page, home, nodes, drawings)
-            if asked is None:
-                continue
-            scope, shown, crops = asked
-            request = self._request(extracted, scope, shown, carried)
+        asked = {page.index: self._asked(extracted, page, home, nodes, drawings)
+                 for page in pages}
+        scopes = [(index, found[0]) for index, found in asked.items() if found is not None]
+        units = {unit.id: unit for _, scope in scopes for unit in scope.units}
+        order = {unit.id: (index, place) for index, scope in scopes
+                 for place, unit in enumerate(scope.units)}
+        heads = self._headings(scopes)
+        read = self._read_pages(extracted, pages, asked, heads, units, order, on_page)
+        root = next(node for node in extracted.nodes if node.type is NodeType.DOCUMENT)
+        joining = Joining(
+            root=root.id,
+            root_label=extracted.document.file_name or root.label,
+            trees=[PageTree.of(index, [unit.id for unit in scope.units], read[index] or ())
+                   for index, scope in scopes if read.get(index) is not None],
+            units=units,
+            order=order,
+            heads=heads,
+        )
+        requests = [request for index, _ in scopes
+                    if (request := joining.request(index)) is not None]
+        with ThreadPoolExecutor(max_workers=min(self._workers, max(1, len(requests)))) as pool:
+            joined = dict(zip((r.page_index for r in requests),
+                              pool.map(lambda r: self._join(joining, r), requests),
+                              strict=True))
+        return HierarchyDerivation(
+            decisions=joining.settle(joined),
+            unread_pages=tuple(index for index, _ in scopes if read.get(index) is None),
+        )
+
+    def _headings(
+        self, scopes: Sequence[tuple[int, HierarchyScopeUnits]]
+    ) -> tuple[HierarchyDecision, ...]:
+        """The document's headings, read off its text, or none: past `MAX_HEADING_LINES`, or
+        when the model gives no usable answer, the pages are read and joined without them."""
+        lines = [HeadingLine(unit_id=unit.id, page=index, indent=unit.indent or 0,
+                             label=unit.label)
+                 for index, scope in scopes for unit in scope.units
+                 if unit.node_type is NodeType.TEXT_CHUNK]
+        if not lines or len(lines) > MAX_HEADING_LINES:
+            return ()
+        try:
+            with self._limiter:
+                answered = self._vision.outline_headings(lines=lines)
+        except RuntimeError as error:
+            _log.warning("no usable headings, joined without them -- %s", error)
+            return ()
+        return headings(lines, answered)
+
+    def _read_pages(
+        self,
+        extracted: ExtractedDocument,
+        pages: Sequence[RenderedPage],
+        asked: Mapping[int, tuple[HierarchyScopeUnits, RenderedPage, dict[str, bytes] | None]
+                       | None],
+        heads: Sequence[HierarchyDecision],
+        units: Mapping[str, HierarchyUnit],
+        order: Mapping[str, tuple[int, int]],
+        on_page: Callable[[int, tuple[HierarchyDecision, ...] | None], None] | None,
+    ) -> dict[int, tuple[HierarchyDecision, ...] | None]:
+        """Every page read on its own, side by side, shown the headings before it and the
+        foot of the page before. Each is heard as it lands; None is a page left unread."""
+        ordered = sorted((d for d in heads if d.subject_id in units),
+                         key=lambda d: order[d.subject_id])
+
+        def read(page: RenderedPage) -> tuple[int, tuple[HierarchyDecision, ...] | None]:
+            found = asked[page.index]
+            assert found is not None
+            scope, shown, crops = found
+            before = [d for d in ordered if order[d.subject_id][0] < page.index]
+            carried = Carried()
+            if before:
+                placements = Placements()
+                placements.record(before)
+                seen = {d.subject_id: units[d.subject_id] for d in before}
+                carried = placements.carried(replace(scope, units=tuple(seen.values())), seen)
+            previous = asked.get(page.index - 1)
             try:
-                answered = self._read(request, shown.png, crops, tail)
+                answered = self._read(self._request(extracted, scope, shown, carried),
+                                      shown.png, crops,
+                                      _page_tail(previous[1].png) if previous else None)
             except RuntimeError as error:
-                # One page the model cannot answer is one page's outline, not the
-                # document's. The rest was read, and this page keeps the flat outline it
-                # already had rather than taking the whole pass down with it.
+                # One page the model cannot answer is one page's outline, not the document's.
                 _log.warning("%s: no usable answer, left as it was -- %s", scope.scope, error)
-                unread.append(page.index)
-                if on_page is not None:
-                    on_page(page.index, None)
-                continue
-            decisions.extend(answered.decisions)
-            placements.record(answered.decisions)
+                result: tuple[int, tuple[HierarchyDecision, ...] | None] = (page.index, None)
+            else:
+                result = (page.index, answered.decisions)
             if on_page is not None:
-                on_page(page.index, answered.decisions)
-            seen.update({unit.id: unit for unit in scope.units
-                         if unit.id not in placements.dropped})
-            carried = placements.carried(scope, seen)
-            tail = _page_tail(shown.png)
-        return HierarchyDerivation(decisions=tuple(decisions), unread_pages=tuple(unread))
+                on_page(*result)
+            return result
+
+        todo = [page for page in pages if asked.get(page.index) is not None]
+        with ThreadPoolExecutor(max_workers=min(self._workers, max(1, len(todo)))) as pool:
+            return dict(pool.map(read, todo))
+
+    def _join(self, joining: Joining, request: PageJoinRequest) -> dict[str, Answer]:
+        """One page break: `JOIN_READINGS` readings, a third where they differ, the vote."""
+        def once() -> tuple[JoinPlacement, ...]:
+            try:
+                with self._limiter:
+                    return self._vision.join_page(request=request)
+            except RuntimeError as error:
+                _log.warning("page %d: no usable join -- %s", request.page_index, error)
+                return ()
+
+        readings = [once() for _ in range(JOIN_READINGS)]
+        if joining.disagree(request, readings):
+            readings.append(once())
+        return joining.vote(request, readings)
 
     def _derive_apart(
         self,
@@ -418,9 +480,9 @@ class RenderedHierarchyScopeProvider:
         extracted: ExtractedDocument,
         scope: HierarchyScopeUnits,
         page: RenderedPage,
-        carried: _Carried | None = None,
+        carried: Carried | None = None,
     ) -> HierarchyScopeRequest:
-        carried = carried or _Carried()
+        carried = carried or Carried()
         unit_ids = tuple(unit.id for unit in scope.units)
         return HierarchyScopeRequest(
             request_id=f"{extracted.document.id}:{scope.scope}",
@@ -456,205 +518,6 @@ def _stated(result: HierarchyScopeResult) -> frozenset[tuple[str, str, str | Non
         (decision.subject_id, decision.status, decision.parent_id)
         for decision in result.decisions
     )
-
-
-@dataclass(frozen=True)
-class _Carried:
-    """The outline so far, as much of it as fits, and where this page attaches to it.
-
-    `units` is in reading order, `parents` says who holds whom inside it, `open` is the
-    path from the document down to where the page before stopped, and `omitted` counts the
-    subtrees dropped under a unit to make room.
-    """
-
-    units: tuple[HierarchyUnit, ...] = ()
-    parents: dict[str, str] = field(default_factory=dict)
-    open: tuple[str, ...] = ()
-    omitted: dict[str, int] = field(default_factory=dict)
-
-
-class _Placements:
-    """Where every unit read so far landed, kept as the pages are read.
-
-    The page turn hands the next page the outline built up to here, so it is written down
-    once as it is decided rather than rebuilt from every decision the document has made
-    each time a page ends.
-    """
-
-    def __init__(self) -> None:
-        self._parent: dict[str, str] = {}
-        self._children: dict[str, list[str]] = {}
-        self.dropped: set[str] = set()
-        """What a page dropped: never carried on, and never where a page stopped."""
-
-    def record(self, decisions: Iterable[HierarchyDecision]) -> None:
-        decisions = tuple(decisions)
-        # Every drop first: a unit placed under one reads at the root, whatever the order.
-        self.dropped |= dropped_subjects(decisions)
-        for decision in decisions:
-            if decision.status == "drop":
-                continue
-            parent = decision.parent_id
-            if parent in self.dropped:
-                continue  # placed under what was dropped: it reads at the root
-            if decision.status != "parent" or parent is None:
-                continue
-            self._parent[decision.subject_id] = parent
-            self._children.setdefault(parent, []).append(decision.subject_id)
-
-    def carried(
-        self, scope: HierarchyScopeUnits, seen: Mapping[str, HierarchyUnit]
-    ) -> _Carried:
-        """The outline so far, cut to the budget, still whole where it is kept.
-
-        Two things travel. The open chain -- the last thing this page decided and whatever
-        it reads under, up to the document -- is where the next page attaches, so it is
-        always here even where its own branches were dropped. Everything else travels as
-        complete subtrees: a unit comes with all of its descendants or it does not come at
-        all. A heading whose items were dropped says nothing the next page can use; it
-        reads as a section that started there and holds nothing.
-
-        What a picture holds is left out of the chain: a page often ends inside a figure,
-        and its last unit is then a word printed on that figure -- carried forward, the
-        innermost thing still open would be a label on a drawing nobody can see any more.
-
-        The newest subtrees are kept first. A section decided two pages ago is where this
-        page continues; one decided at the start of the document is not.
-        """
-        spine = self._open_chain(scope, seen)
-        kept = dict.fromkeys(spine)
-        room = CARRY_TOKEN_BUDGET - sum(self._cost(unit_id, seen) for unit_id in spine)
-
-        # The document's headings, shallowest first: without them a long document's early
-        # chapters dropped out of the reference altogether once whole recent sections
-        # filled it, and a late page was read with no idea its middle chapters existed.
-        shape = int(CARRY_TOKEN_BUDGET * SKELETON_SHARE)
-        depth = {unit_id: self._depth(unit_id, seen) for unit_id in seen}
-        for heading in sorted(
-            (unit_id for unit_id in seen if self._children.get(unit_id)),
-            key=lambda unit_id: depth[unit_id],
-        ):
-            parent = self._parent.get(heading)
-            if heading in kept or (parent in seen and parent not in kept):
-                continue  # already here, or its parent is not -- the shape stays connected
-            cost = self._cost(heading, seen)
-            if cost > min(shape, room):
-                continue
-            kept[heading] = None
-            shape -= cost
-            room -= cost
-
-        order = {unit_id: index for index, unit_id in enumerate(seen)}
-        for subtree in self._offered(spine, seen, order):
-            new = [unit_id for unit_id in subtree if unit_id not in kept]
-            cost = sum(self._cost(unit_id, seen) for unit_id in new)
-            if cost <= room:
-                kept.update(dict.fromkeys(new))
-                room -= cost
-
-        units = tuple(
-            # Sent at the length its cost was counted at.
-            seen[unit_id].model_copy(
-                update={"scope": scope.scope, "label": self._label(unit_id, seen)}
-            )
-            for unit_id in sorted(kept, key=lambda unit_id: order.get(unit_id, 0))
-        )
-        return _Carried(
-            units=units,
-            parents={
-                unit_id: self._parent[unit_id]
-                for unit_id in kept
-                if self._parent.get(unit_id) in kept
-            },
-            open=spine,
-            # What a carried unit holds and did not bring, so it does not read as a
-            # section that began here and holds nothing.
-            omitted={
-                unit_id: missing
-                for unit_id in kept
-                if (
-                    missing := sum(
-                        1 for child in self._children.get(unit_id, ()) if child not in kept
-                    )
-                )
-            },
-        )
-
-    def _depth(self, unit_id: str, seen: Mapping[str, HierarchyUnit]) -> int:
-        depth, node = 0, self._parent.get(unit_id)
-        while node is not None and node in seen and depth < CHAIN_DEPTH:
-            depth, node = depth + 1, self._parent.get(node)
-        return depth
-
-    def _label(self, unit_id: str, seen: Mapping[str, HierarchyUnit]) -> str:
-        limit = CARRY_LABEL_CHARS if self._children.get(unit_id) else CARRY_ITEM_CHARS
-        return seen[unit_id].label[:limit]
-
-    def _open_chain(
-        self, scope: HierarchyScopeUnits, seen: Mapping[str, HierarchyUnit]
-    ) -> tuple[str, ...]:
-        """The path from the document down to where this page stopped, outermost first."""
-        chain: list[str] = []  # innermost first, up to the document
-        # Where the page stopped is its last unit that was kept: a page number below the text
-        # is not what the next page continues.
-        node_id: str | None = next(
-            (unit.id for unit in reversed(scope.units) if unit.id in seen), None)
-        while node_id is not None and node_id not in chain and len(chain) < CHAIN_DEPTH:
-            chain.append(node_id)
-            node_id = self._parent.get(node_id)
-
-        def is_a_picture(unit_id: str) -> bool:
-            unit = seen.get(unit_id)
-            return unit is not None and unit.node_type in VISUAL_TYPES
-
-        # A picture closes at the page break, and so does everything printed on it. Cutting
-        # at the innermost one leaves the chain a reader would have: sections, not labels.
-        drawn = [index for index, unit_id in enumerate(chain) if is_a_picture(unit_id)]
-        still_open = chain[max(drawn) + 1 :] if drawn else chain
-        return tuple(unit_id for unit_id in reversed(still_open) if unit_id in seen)
-
-    def _offered(
-        self,
-        spine: Sequence[str],
-        seen: Mapping[str, HierarchyUnit],
-        order: Mapping[str, int],
-    ) -> list[tuple[str, ...]]:
-        """The complete subtrees that may travel beside the chain, newest first."""
-        on_spine = set(spine)
-        offered: list[tuple[str, ...]] = []
-        for holder in (*spine, None):
-            children = (
-                self._children.get(holder, ())
-                if holder is not None
-                else [
-                    unit_id
-                    for unit_id in seen
-                    if unit_id not in self._parent and unit_id not in on_spine
-                ]
-            )
-            offered.extend(
-                self._subtree(child)
-                for child in children
-                if child not in on_spine and child in seen
-            )
-        offered.sort(key=lambda subtree: order.get(subtree[0], 0), reverse=True)
-        return offered
-
-    def _subtree(self, root: str) -> tuple[str, ...]:
-        """A unit and everything under it -- what travels together or not at all."""
-        out: dict[str, None] = {}
-        stack = [root]
-        while stack:
-            unit_id = stack.pop()
-            if unit_id in out:
-                continue
-            out[unit_id] = None
-            stack.extend(reversed(self._children.get(unit_id, ())))
-        return tuple(out)
-
-    def _cost(self, unit_id: str, seen: Mapping[str, HierarchyUnit]) -> int:
-        label = self._label(unit_id, seen) if unit_id in seen else ""
-        return ENTRY_TOKENS + estimated_tokens(label)
 
 
 def _page_tail(png: bytes) -> bytes | None:
@@ -710,7 +573,7 @@ def flow_placer(page: RenderedPage, document_format: DocumentFormat) -> UnitPlac
     """Where this page's units sit: a PDF states it, a DOCX has to be measured."""
     if document_format is DocumentFormat.PDF:
         return NormalizedBoxPlacer(width=page.width, height=page.height)
-    return FlowPlacer(page.flow_boxes(), page.flow_drawings())
+    return FlowPlacer.of(page)
 
 
 def _flow_members(

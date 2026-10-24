@@ -1,6 +1,6 @@
-"""The app's own Neo4j, without Docker: fetched and checked, started on loopback with no
-password, known by its data folder, stopped with its server. Nothing is downloaded or started:
-the archives are invented and every process is a fake."""
+"""The app's own Neo4j, without Docker: fetched and checked, started on loopback asking for
+the password kept beside its graph, known by its data folder, stopped with its server.
+Nothing is downloaded or started: the archives are invented and every process is a fake."""
 from __future__ import annotations
 
 import io
@@ -16,6 +16,16 @@ import pytest
 
 from graphme.adapters.storage import local_neo4j
 from graphme.adapters.storage.local_neo4j import NEO4J_VERSION, Neo4jHome
+
+
+@pytest.fixture(autouse=True)
+def _no_real_signals(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every child here is a fake with an invented pid: stopping one must signal nothing real,
+    and nothing a test started is left for the interpreter's exit to stop."""
+    monkeypatch.setattr(local_neo4j.os, "killpg", lambda pid, sig: None, raising=False)
+    monkeypatch.setattr(local_neo4j.processes, "run",
+                        lambda args, **k: subprocess.CompletedProcess(args, 0, "", ""))
+    monkeypatch.setattr(local_neo4j, "_started", [])
 
 
 def _tar(top: str, files: dict[str, bytes]) -> bytes:
@@ -156,7 +166,8 @@ def test_the_one_running_for_this_home_is_used_and_nothing_started(tmp_path: Pat
 
     uri = local_neo4j.ensure_local_neo4j(
         tmp_path, ("1g", "512m"), is_ours=lambda data, port: port == 7690,
-        starting=lambda *a, **k: pytest.fail("started though one runs"))
+        starting=lambda *a, **k: pytest.fail("started though one runs"),
+        secure=lambda port, secret: None)
     assert uri == "bolt://127.0.0.1:7690"
 
 
@@ -170,15 +181,17 @@ def test_one_answering_that_is_not_this_home_s_is_left_and_ours_started_elsewher
     (home.data / "run" / "graphme.json").write_text(json.dumps({"pid": 1, "port": 7687}))
     began: list[int] = []
 
-    def starting(home: Neo4jHome, data: Path, port: int, memory: Any) -> _Child:
+    def starting(home: Neo4jHome, data: Path, port: int, memory: Any, **_: Any) -> _Child:
         began.append(port)
         return _Child()
 
     uri = local_neo4j.ensure_local_neo4j(
         tmp_path, ("1g", "512m"), is_ours=lambda data, port: False,
         installing=lambda root: home, starting=starting,  # type: ignore[arg-type]
-        free=lambda port: port != 7687, answers=lambda port: port == 7688)
-    assert began == [7688] and uri == "bolt://127.0.0.1:7688"
+        free=lambda port: port != 7687, answers=lambda port: port == 7688,
+        secure=lambda port, secret: None)
+    # Started, given its password, and started again asking for it.
+    assert began == [7688, 7688] and uri == "bolt://127.0.0.1:7688"
 
 
 def test_not_installed_it_is_fetched_first(tmp_path: Path,
@@ -193,7 +206,8 @@ def test_not_installed_it_is_fetched_first(tmp_path: Path,
     local_neo4j.ensure_local_neo4j(
         tmp_path, ("1g", "512m"), installing=installing, is_ours=lambda d, p: False,
         starting=lambda *a, **k: _Child(), free=lambda p: True,  # type: ignore[arg-type,return-value]
-        answers=lambda p: True)
+        answers=lambda p: True,
+        secure=lambda port, secret: None)
     assert fetched == [tmp_path]
 
 
@@ -207,7 +221,8 @@ def test_one_that_dies_on_start_says_what_it_wrote(tmp_path: Path,
         local_neo4j.ensure_local_neo4j(
             tmp_path, ("1g", "512m"), installing=lambda root: home, is_ours=lambda d, p: False,
             starting=lambda *a, **k: _Child(ends=True), free=lambda p: True,  # type: ignore[arg-type,return-value]
-            answers=lambda p: False, sleep=lambda s: None)
+            answers=lambda p: False, sleep=lambda s: None,
+        secure=lambda port, secret: None)
 
 
 @pytest.mark.parametrize("platform", ["win32", "darwin"])
@@ -261,3 +276,53 @@ def test_the_installer_s_fetch_never_fails_over_the_console_s_code_page(
     monkeypatch.setattr(local_neo4j, "install",
                         lambda root, say: said.append("ok") or say("그래프 · 준비"))
     assert neo4j_install.main([str(tmp_path)]) == 0 and said == ["ok"]
+
+
+def test_once_it_has_a_password_it_starts_asking_for_it() -> None:
+    # Bolt takes WebSocket connections too: with no password, any page open in a browser on
+    # this machine could read or wipe the graph through ws://127.0.0.1.
+    said = local_neo4j.conf(Path("/h/neo4j-data"), 7688, ("1g", "512m"), auth=True)
+    assert dict(line.split("=", 1) for line in said.splitlines())[
+        "dbms.security.auth_enabled"] == "true"
+
+
+def test_the_first_start_sets_a_password_kept_only_for_this_user_and_starts_again_asking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(local_neo4j, "_started", [])
+    home = Neo4jHome(tmp_path)
+    began: list[bool] = []
+    secured: list[tuple[int, str]] = []
+    monkeypatch.setattr(local_neo4j, "stop", lambda child, **k: None)
+
+    def starting(home: Neo4jHome, data: Path, port: int, memory: Any, *,
+                 auth: bool = False) -> _Child:
+        began.append(auth)
+        return _Child()
+
+    uri = local_neo4j.ensure_local_neo4j(
+        tmp_path, ("1g", "512m"), installing=lambda root: home, is_ours=lambda d, p: False,
+        starting=starting, free=lambda p: True, answers=lambda p: True,  # type: ignore[arg-type]
+        secure=lambda port, password: secured.append((port, password)))
+
+    assert uri == "bolt://127.0.0.1:7687"
+    assert began == [False, True]  # set once, then asked for from then on
+    (port, password), = secured
+    assert local_neo4j.password(tmp_path) == password and len(password) >= 24
+    assert (home.data / "password").stat().st_mode & 0o077 == 0
+
+
+def test_one_already_running_with_no_password_is_given_one_and_left_running(
+    tmp_path: Path,
+) -> None:
+    home = Neo4jHome(tmp_path)
+    (home.data / "run").mkdir(parents=True)
+    (home.data / "run" / "graphme.json").write_text(json.dumps({"pid": 1, "port": 7690}))
+    secured: list[int] = []
+
+    local_neo4j.ensure_local_neo4j(
+        tmp_path, ("1g", "512m"), is_ours=lambda data, port: True,
+        starting=lambda *a, **k: pytest.fail("started though one runs"),
+        secure=lambda port, password: secured.append(port))
+
+    assert secured == [7690] and local_neo4j.password(tmp_path) is not None

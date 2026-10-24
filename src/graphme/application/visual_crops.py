@@ -15,18 +15,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from graphme.application.unit_placement import UnitPlacer
-from graphme.application.xlsx_crop_regions import (
+from graphme.application.page_regions import (
     TOUCH_SLACK_PIXELS,
     PixelBox,
     SheetPixelGrid,
 )
-from graphme.application.xlsx_unit_regions import (
+from graphme.application.unit_placement import UnitPlacer
+from graphme.application.unit_regions import (
     PlacedUnit,
     RegionKind,
     build_unit_regions,
 )
-from graphme.domain.enums import EdgeType, NodeType
+from graphme.domain.enums import DocumentFormat, EdgeType, NodeType
 from graphme.domain.models import ExtractedDocument, GraphEdge, GraphNode
 from graphme.ports.storage import AssetStore
 
@@ -51,7 +51,20 @@ border drawn around them rather than a table of its own."""
 BACKGROUND_COVERAGE = 0.95
 """How much of the page a thing has to cover to be what the page is drawn on rather than
 something on it. A backdrop overlaps everything drawn over it, so under the rule that a
-figure owns what it covers, one picture would otherwise swallow the whole page."""
+figure owns what it covers, one picture would otherwise swallow the whole page.
+
+On paper a band laid edge to edge across the page -- its whole width or its whole height
+-- is the same thing over part of it: a cover printed its title on a coloured band, and the
+band took the title. It also runs off the page's edge the other way, as a printed band does:
+a screenshot the width of the page standing in the body is content, and keeps what is written
+on it. A sheet has no paper edge: it is as wide as what is drawn on it, so its widest picture
+always reaches both sides."""
+
+
+def _bleeds(a0: float, a1: float, b0: float, b1: float, across: float, along: float) -> bool:
+    """Edge to edge across the page (`a`), and off one of its edges the other way (`b`)."""
+    edge = (1 - BACKGROUND_COVERAGE) * along
+    return a1 - a0 >= BACKGROUND_COVERAGE * across and (b0 <= edge or b1 >= along - edge)
 
 
 def _borders(placed: Sequence[_Placed]) -> set[str]:
@@ -251,9 +264,12 @@ def bind_page_visuals(
             rect for rect in ink
             if not any(grid.contains(rect, slack=TOUCH_SLACK_PIXELS) for grid in grids)
         ]
+    paper = extracted.document.format is not DocumentFormat.XLSX
     for node, box in shown:
-        covered = (box.x1 - box.x0) * (box.y1 - box.y0) / page_area
-        if node.type is NodeType.IMAGE and covered >= BACKGROUND_COVERAGE:
+        covered = box.area / page_area
+        band = paper and (_bleeds(box.x0, box.x1, box.y0, box.y1, page.width, page.height)
+                          or _bleeds(box.y0, box.y1, box.x0, box.x1, page.height, page.width))
+        if node.type is NodeType.IMAGE and (covered >= BACKGROUND_COVERAGE or band):
             background.add(node.id)
             continue
         if node.type in FIGURE_TYPES and ink:

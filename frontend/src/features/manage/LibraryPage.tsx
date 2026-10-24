@@ -20,6 +20,7 @@ const BUSY = ['rendering', 'grouping', 'reading', 'captioning', 'referencing'];
 function stateOf(item: LibraryItem): { word: WordKey; tone: 'accent' | 'ok' | 'danger' | 'neutral' } {
   if (BUSY.includes(item.state)) return { word: 'stateReading', tone: 'accent' };
   if (item.in_space) return { word: 'stateInGraph', tone: 'ok' };
+  if (item.state === 'queued') return { word: 'stateQueued', tone: 'accent' }; // read, put in its turn
   if (item.state === 'error') return { word: 'stateFailed', tone: 'danger' };
   if (item.state === 'cancelled') return { word: 'stateCancelled', tone: 'neutral' };
   if (item.state === 'done') return { word: 'stateOutside', tone: 'neutral' };
@@ -121,7 +122,7 @@ export function LibraryPage() {
                           )}
                           {/* A row opens its document, whose page is where it is deleted: a bin
                               here sat where every other row offers its details. */}
-                          {item.in_space || BUSY.includes(item.state)
+                          {item.in_space || BUSY.includes(item.state) || item.state === 'queued'
                             ? <Link to={docLink(item)} className="text-faint hover:text-fg" aria-label={t('openInManage')} title={t('openInManage')}><ChevronRight className="size-4" /></Link>
                             : <OutsideActions item={item} />}
                         </span>

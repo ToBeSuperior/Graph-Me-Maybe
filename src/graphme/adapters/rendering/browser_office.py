@@ -20,7 +20,7 @@ from typing import Any
 
 from graphme import processes
 from graphme.adapters.rendering.xlsx_measurement import CellRange, measure_workbook
-from graphme.application.xlsx_crop_regions import PixelBox, SheetPixelGrid
+from graphme.application.page_regions import PixelBox, SheetPixelGrid
 from graphme.domain.enums import DocumentFormat
 from graphme.domain.models import SourceLocator
 
@@ -118,7 +118,7 @@ class RenderedPage:
             boxes[key] = box if key not in boxes else boxes[key].union(box)
         return boxes
 
-    def flow_drawings(self) -> dict[tuple[str, str, int], list[PixelBox]]:
+    def flow_drawings(self, kind: str = "image") -> dict[tuple[str, str, int], list[PixelBox]]:
         """Each drawing a flow document laid out, under the body element it hangs from.
 
         A drawing is a unit of its own and is kept apart from the words of the paragraph
@@ -129,10 +129,13 @@ class RenderedPage:
         as drawings the first of them became the picture's box -- a figure's node carried
         the rectangle of the label drawn under it, and the figure belonged to nothing. A
         box of words is found by the words in it, like any other text.
+
+        `kind` "chart" gives the charts instead, each counted among its own kind the way
+        the extraction counts them.
         """
         found: dict[tuple[str, str, int], list[tuple[int, PixelBox]]] = {}
         for item in self.elements:
-            if item.get("kind") != "image":
+            if item.get("kind") != kind:
                 continue
             key, box = _flow_item(item)
             path = item.get("path")

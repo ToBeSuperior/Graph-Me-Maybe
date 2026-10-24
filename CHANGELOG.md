@@ -5,12 +5,38 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-10-24
+
 ### Added
 
 - Google Drive as a source: connect with your own OAuth client, pick files (or folders) in
   Google's picker, and build them into the graph. Files stay in Drive -- the app fetches one only
   while it reads, draws or downloads it -- and only changed files are read again. The app reads
   only the files picked (`drive.file`); the sign-in is kept in the OS credential store.
+- A chart in a Word file is part of the graph, as a deck's chart is: its title, what it plots,
+  a crop and a caption.
+
+### Changed
+
+- A PDF or Word document's outline is read page by page side by side, then every page break
+  is joined on its own: where each page's top lines go under, or beside, what the page before
+  left open. A long document no longer waits for one page at a time, and one page read wrong
+  no longer carries into every page after it.
+- The app's own graph DB (Neo4j) asks for a password. The app makes it the first time and keeps
+  it in `neo4j-data/password`, readable by your user alone; a graph from an earlier version is
+  given one the next time it starts. Before, any page open in a browser on the same computer
+  could reach the graph.
+- Documents are put into the graph as each finishes reading, and one already put in no longer
+  shows as queued while the rest are read.
+
+### Fixed
+
+- A formula reading a sheet whose name is written in Korean (or any non-Latin script) links to
+  the table it reads.
+- Words in a PDF table's cells keep their spaces; a heading printed above a table is not taken
+  inside it; a coloured band across a cover no longer swallows the title printed on it, while a
+  picture the width of the page in the body keeps what is written on it.
+- Word paragraphs that the page shows as one are joined.
 
 ## [0.1.21] - 2026-10-20
 

@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from graphme.application.xlsx_crop_regions import (
+from graphme.application.page_regions import (
     PixelBox,
     merge_regions,
 )
@@ -30,10 +30,6 @@ own rectangle spans a diagonal and crosses whatever happens to lie between them.
 
 HOLDER_COVERAGE = 0.9
 """How much of a region one member has to fill to be the thing the region is called."""
-
-
-def _area(box: PixelBox) -> float:
-    return (box.x1 - box.x0) * (box.y1 - box.y0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +93,7 @@ def build_unit_regions(units: Sequence[PlacedUnit]) -> tuple[UnitRegion, ...]:
             and member.box.covered_fraction(claimed) >= HOLDER_COVERAGE
         ]
         if holders:
-            lead = max(holders, key=lambda unit: _area(unit.box))
+            lead = max(holders, key=lambda unit: unit.box.area)
         else:
             # Failing that a table names it, then the top-left drawing; text names one
             # only when it is alone, since enclosed text is part of what encloses it.

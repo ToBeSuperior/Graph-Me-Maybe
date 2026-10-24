@@ -27,7 +27,7 @@ const sources = [
 ];
 
 export async function fakeApi(page: Page,
-  { empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '' } = {}): Promise<Fake> {
+  { empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[] } = {}): Promise<Fake> {
   const fake: Fake = { reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0,
     drive: { configured: true, connected: false, picked: 0, built: 0 } };
   const json = (route: Route, body: unknown, status = 200) =>
@@ -77,7 +77,7 @@ export async function fakeApi(page: Page,
     if (path === '/v1/documents') {
       return json(route, { space_ok: true, items: empty || fake.reset ? [] : docs.map((d) => ({
         name: d.label, format: d.label.split('.').pop(), in_space: true, document_id: d.id, file_id: `file-${d.id}`,
-        state: 'idle', modified: d.modified_at })) });
+        state: 'idle', modified: d.modified_at })).concat(reading as never[]) });
     }
     if (path === '/v1/search') {
       fake.asked.push(route.request().postDataJSON().question);

@@ -172,9 +172,11 @@ A sheet and a slide are units the author worked in, so one page is one tree. A D
 is only where the paper ended, and the first line of a page is usually under a heading printed
 on the previous page. Deciding each page separately fragments the document.
 
-So pages are read in order without breaks. Each page scope is sent **the hierarchy built by the
-earlier pages** and **the bottom image of the previous page**. A unit carried over can only be
-named as a parent and is not decided again. The root is the document node, not a page.
+So pages were read in order without breaks. Each page scope was sent **the hierarchy built by
+the earlier pages** and **the bottom image of the previous page**. A unit carried over could only
+be named as a parent and was not decided again. The root is the document node, not a page. (The
+order was later given up for reading pages side by side and joining the breaks: see "Pages read
+on their own, joined at the breaks".)
 
 Labels alone were not enough. When the "open items from before" were passed by name only, the
 model put a table that fills the whole page at the root and answered that "no higher-level item
@@ -461,6 +463,39 @@ Also, when a page ended inside a figure, the innermost item of the chain became 
 printed on the figure**. The prompt says "it usually continues under the innermost", so this
 pushes the first line of the next page under a figure label. Whatever hangs on a figure closes
 with the page, so the chain is cut at the innermost figure.
+
+### Pages read on their own, joined at the breaks
+
+Reading in order made a document as slow as its chain of pages, and a page's mistake went on
+into every page after it as part of what it was handed. So a flowing document is now read in
+three steps. Its **headings** are asked once, on text alone, of every unit on a line. Every
+**page** is then read side by side, shown the headings before it and the foot of the page
+before. What a page decides inside itself is kept; a parent it names on another page is not,
+because that is the third step: every **page break** is a small text question of its own, all
+asked at once. The page's top units -- nothing above them on the page -- each answer a place and
+`under` (opens inside it) or `beside` (the next item of its kind, which closes it). Beside takes
+its neighbour's parent, which is known only when every break is answered.
+
+What a break is offered decides most of what it answers. Place 0 is the document's title, the
+first page's top that holds the most of it: taken from the skeleton instead, it once made the
+title and the organisation line each other's parent. Then the sections open where the page
+begins, walked up from where the page before stopped -- through that page's reading, then the
+headings. Built from the last heading alone, the frame offered a cover's subtitle as a section.
+Then how the page before ended: its last unit's chain and its other tops, since a page's later
+top may have been joined under its earlier one. And what the page before was offered: what is
+open where a page begins was open where the page before began, or that page opened it. Where a
+page's re-printed chapter header had been dropped, the headings' guess alone left the chapter
+out, and the next chapter went under a sub-item. A top with no heading above it takes the last
+heading before it -- once: guessing again walked back through every chapter of the document.
+
+Each place shows the first few things it holds, and how many. Without them a cover's date or
+organisation line read as a section, and a wrong `under` there carried every later chapter
+down through the beside chain. The prompt says so too (a byline, organisation, date or version
+is not a section), and a shorter wording of the same rules lost it again. Tables, pictures and
+dropped units are never places. A break is read twice, a third time where they differ, and the
+answer most readings gave is kept; with no majority, the shallower one. The answers are text
+and short, but the call reasons before it answers, and asked not to it put headings under
+headings of their own kind.
 
 ### A page is asked about in three passes
 

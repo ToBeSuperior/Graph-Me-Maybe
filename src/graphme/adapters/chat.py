@@ -48,6 +48,17 @@ def is_transient(error: httpx.HTTPError) -> bool:
     return error.response.status_code in TRANSIENT_STATUS
 
 
+REFUSED_STATUS = frozenset({400, 413, 422})
+"""Endpoint answers turning this one request down -- its content, its size. Another page is
+not turned down for it, so the page goes unanswered and the rest are read. A refused key or
+a missing model (401, 403, 404) would turn every page down, and stops the reading."""
+
+
+def refused(error: httpx.HTTPError) -> bool:
+    return (isinstance(error, httpx.HTTPStatusError)
+            and error.response.status_code in REFUSED_STATUS)
+
+
 def image_part(png: bytes) -> dict[str, Any]:
     """A PNG as one part of a chat message."""
     return {

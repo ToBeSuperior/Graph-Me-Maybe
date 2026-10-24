@@ -11,7 +11,7 @@ from pathlib import Path
 import pymupdf
 
 from graphme.adapters.rendering.browser_office import RenderedPage
-from graphme.application.xlsx_crop_regions import PixelBox
+from graphme.application.page_regions import PixelBox
 from graphme.domain.enums import DocumentFormat
 
 RENDER_DPI = 144

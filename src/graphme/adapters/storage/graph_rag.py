@@ -44,7 +44,7 @@ from graphme.adapters.strict_schema import strict_response_schema
 from graphme.application.corpus_links import document_numbers
 from graphme.application.graph_chunks import CHUNK_RULE, chunks
 from graphme.application.passage_scores import IMPORTANCE_RULE, centroid, importance
-from graphme.application.xlsx_visual_binding import CROP_ASSET_KEY, read_crop
+from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop
 from graphme.ports.storage import AssetStore
 
 VECTOR_INDEX = "chunk_embedding"

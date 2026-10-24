@@ -261,10 +261,9 @@ def test_a_cancel_stops_a_reading_between_its_pages(demo: Demo, tmp_path: Path) 
         def read_figures(self, extracted: Any, source: Any) -> Any:
             return extracted
 
-        def group_text(self, extracted: Any, source: Any) -> Any:
-            return extracted
-
-        def read_outline(self, extracted: Any, source: Any, on_page: Any) -> Any:
+        def group_and_read_outline(
+            self, extracted: Any, source: Any, on_page: Any, on_grouped: Any
+        ) -> Any:
             for index in (1, 2, 3):
                 heard.append(index)
                 stop.set()  # the cancel arrives while the first page is read
@@ -519,3 +518,61 @@ def test_a_page_drawing_that_fails_is_not_called_a_damaged_file(demo: Demo) -> N
     demo._steps(session, demo._prepare)
 
     assert session.state == "error" and session.error == state.UNDRAWN
+
+
+def test_a_document_read_first_is_put_first_without_waiting_for_the_ones_before_it(
+    demo: Demo, space: FakeSpace, tmp_path: Path
+) -> None:
+    """Documents are read side by side and finish in any order. A short one read while a long
+    one before it is still being read goes into the space then, not after the long one."""
+    gate = threading.Event()
+
+    def run(session: Any) -> None:
+        if session.source.name == "long.pdf":
+            gate.wait(10)
+            read_as("a", "long.pdf")(session)
+        else:
+            read_as("b", "short.pdf")(session)
+
+    demo._run = run  # type: ignore[method-assign]
+    docs = []
+    for name in ("long.pdf", "short.pdf"):
+        (tmp_path / name).write_bytes(b"%PDF-1.4 " + name.encode())
+        docs.append(demo.open_path(str(tmp_path / name)))
+
+    build = demo.build_corpus(docs, "test")
+
+    try:
+        assert until(lambda: space.put == ["b"]), space.put
+    finally:
+        gate.set()
+    assert until(lambda: build.state == "done"), build
+    assert space.put == ["b", "a"]
+
+
+
+def test_a_document_put_in_is_no_longer_shown_as_waiting_to_be_put(
+    demo: Demo, space: FakeSpace, tmp_path: Path
+) -> None:
+    """Documents are put as they finish reading. One already put is not "queued" while the
+    build puts the rest -- it is in the graph."""
+    def run(session: Any) -> None:
+        read_as("a" if session.source.name == "first.pdf" else "b", session.source.name)(session)
+
+    demo._run = run  # type: ignore[method-assign]
+    docs = []
+    for name in ("first.pdf", "second.pdf"):
+        (tmp_path / name).write_bytes(f"%PDF-1.4 {name}".encode())
+        docs.append(demo.open_path(str(tmp_path / name)))
+    waiting: list[set[str]] = []
+    put = space.put_document
+
+    def put_document(extracted: Any) -> None:
+        put(extracted)
+        waiting.append(set(demo.putting))
+
+    space.put_document = put_document  # type: ignore[method-assign]
+    build = demo.build_corpus(docs, "test")
+
+    assert until(lambda: build.state == "done"), build
+    assert len(waiting) == 2 and waiting[-1] == set()

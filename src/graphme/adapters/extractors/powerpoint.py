@@ -371,9 +371,9 @@ class PowerPointExtractor:
 
         if getattr(shape, "has_chart", False):
             chart = shape.chart
-            title = self._chart_title(chart) or label
+            title = chart_title(chart) or label
             node_id = self._node_id(content_hash, "chart", slide=str(slide_number), shape=shape_key)
-            metadata = {**geometry, **self._chart_metadata(chart)}
+            metadata = {**geometry, **chart_metadata(chart)}
             chart_locator = locator.model_copy(update={"label": title})
             nodes.append(
                 GraphNode(
@@ -573,38 +573,6 @@ class PowerPointExtractor:
     def _table_rows(table: Any) -> list[list[str]]:
         return [[cell.text.strip() for cell in row.cells] for row in table.rows]
 
-    def _chart_metadata(self, chart: Any) -> dict[str, JsonValue]:
-        series: list[JsonValue] = []
-        # python-pptx reads a fixed set of plot types; for another (a bar of pie, a stock
-        # chart, a surface) it fails on the series, and the chart keeps its frame and title.
-        with suppress(AttributeError, KeyError, NotImplementedError, ValueError):
-            for index, item in enumerate(chart.series, start=1):
-                name = str(item.name) if item.name is not None else f"Series {index}"
-                values: list[JsonValue] = [
-                    self._json_value(value) for value in item.values
-                ]
-                series.append({"name": name, "values": values})
-        categories: list[JsonValue] = []
-        with suppress(AttributeError, IndexError, TypeError, ValueError):
-            categories = [
-                self._json_value(category.label) for category in chart.plots[0].categories
-            ]
-        chart_type: JsonValue = None
-        with suppress(AttributeError, KeyError, NotImplementedError, ValueError):
-            chart_type = getattr(chart.chart_type, "name", str(chart.chart_type))
-        return {
-            "chart_type": chart_type,
-            "title": self._chart_title(chart),
-            "series": series,
-            "categories": categories,
-            "has_legend": bool(chart.has_legend),
-        }
-
-    def _chart_title(self, chart: Any) -> str | None:
-        if not chart.has_title:
-            return None
-        return self._shape_text(chart.chart_title) or None
-
     @staticmethod
     def _json_value(value: Any) -> JsonValue:
         if value is None or isinstance(value, (str, int, float, bool)):
@@ -677,3 +645,39 @@ class PowerPointExtractor:
                 mime_type=mime_type,
             )
         )
+
+
+def chart_metadata(chart: Any) -> dict[str, JsonValue]:
+    """What a chart plots, as its own part states it -- a slide's or a Word file's alike."""
+    series: list[JsonValue] = []
+    # python-pptx reads a fixed set of plot types; for another (a bar of pie, a stock
+    # chart, a surface) it fails on the series, and the chart keeps its frame and title.
+    with suppress(AttributeError, KeyError, NotImplementedError, ValueError):
+        for index, item in enumerate(chart.series, start=1):
+            name = str(item.name) if item.name is not None else f"Series {index}"
+            values: list[JsonValue] = [
+                PowerPointExtractor._json_value(value) for value in item.values
+            ]
+            series.append({"name": name, "values": values})
+    categories: list[JsonValue] = []
+    with suppress(AttributeError, IndexError, TypeError, ValueError):
+        categories = [
+            PowerPointExtractor._json_value(category.label)
+            for category in chart.plots[0].categories
+        ]
+    chart_type: JsonValue = None
+    with suppress(AttributeError, KeyError, NotImplementedError, ValueError):
+        chart_type = getattr(chart.chart_type, "name", str(chart.chart_type))
+    return {
+        "chart_type": chart_type,
+        "title": chart_title(chart),
+        "series": series,
+        "categories": categories,
+        "has_legend": bool(chart.has_legend),
+    }
+
+
+def chart_title(chart: Any) -> str | None:
+    if not chart.has_title:
+        return None
+    return PowerPointExtractor._shape_text(chart.chart_title) or None

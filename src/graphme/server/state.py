@@ -17,7 +17,7 @@ import uuid
 import weakref
 import zipfile
 from collections import OrderedDict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
@@ -57,7 +57,7 @@ from graphme.application.embedded_documents import (
 )
 from graphme.application.hierarchy_decisions import apply_hierarchy_decisions
 from graphme.application.ingest import SUFFIX_FORMATS, format_of
-from graphme.application.xlsx_visual_binding import CROP_ASSET_KEY
+from graphme.application.visual_crops import CROP_ASSET_KEY
 from graphme.config import Settings
 from graphme.domain.enums import DocumentFormat, EdgeType
 from graphme.domain.ids import sha256_bytes
@@ -69,7 +69,7 @@ VLM_CALLS_AT_ONCE = 24
 """Model calls in flight across every document, each reading and each settling call counted
 on its own. Lower it when the endpoint's rate limit turns calls away; a call turned away is
 retried, so too high costs time rather than pages."""
-READERS = 8
+READERS = 16
 """Documents read side by side; their model calls share VLM_CALLS_AT_ONCE besides."""
 
 Placed = dict[str, tuple[int, tuple[int, int, int, int]]]
@@ -172,6 +172,20 @@ class _Replay:
 
     def render(self, source: Path, document_format: DocumentFormat) -> tuple[RenderedPage, ...]:
         return self.pages
+
+
+def _standing(
+    was: ExtractedDocument, decisions: Sequence[HierarchyDecision]
+) -> tuple[HierarchyDecision, ...]:
+    """The decisions that still have a unit to decide. A unit placed under one an earlier page
+    dropped reads at the root, as the pipeline reads it; a unit itself gone is not decided
+    again."""
+    known = {n.id for n in was.nodes}
+    return tuple(
+        d if d.parent_id is None or d.parent_id in known
+        else d.model_copy(update={"status": "root", "parent_id": None})
+        for d in decisions if d.subject_id in known
+    )
 
 
 def _since(started: float) -> float:
@@ -344,6 +358,9 @@ class Demo:
         self.jobs: dict[str, CorpusBuild | ExportJob] = {}
         """Every job since this start, oldest first, by its id."""
         self.sessions: dict[str, Session] = {}
+        self.putting: set[str] = set()
+        """The running build's documents not in the space yet: one read and not put yet is
+        waiting to be put, not left out."""
         # One browser drawing at a time; the model calls are what run side by side.
         self.drawing = threading.Lock()
         self.vlm_slots = threading.Semaphore(VLM_CALLS_AT_ONCE)
@@ -769,22 +786,36 @@ class Demo:
             self.start(doc, stop)  # every document reads side by side, under the shared slots
 
         def finished() -> int:
-            # The documents are read side by side and finish in any order; the build puts them
-            # in the order given, so how far it is is how many are read, not where it is.
+            # The documents are read side by side and finish in any order, and are put in the
+            # order they finish, so how far it is is how many are read.
             return sum(self.sessions[doc].state in FINISHED for doc in docs)
+
+        def in_turn(paths: Sequence[Path]) -> Iterator[Path]:
+            """Each document once it is read; when a cancel or a reading that never ends stops
+            the wait, the rest, which `process` then says were not read."""
+            left = list(paths)
+            deadline = time.monotonic() + READ_TIMEOUT_SECONDS
+            while left:
+                read = [p for p in left if self.sessions[p.name].state in FINISHED]
+                if not read and (stop.is_set() or time.monotonic() > deadline):
+                    read = left
+                if not read:
+                    build.done = finished()
+                    time.sleep(1)
+                    continue
+                left = [p for p in left if p not in read]
+                deadline = time.monotonic() + READ_TIMEOUT_SECONDS
+                yield from read
 
         def process(handle: Path) -> ExtractedDocument:
             session = self.sessions[handle.name]
-            deadline = time.monotonic() + READ_TIMEOUT_SECONDS
-            while session.state not in FINISHED:
-                build.done = finished()
+            if session.state not in FINISHED:
                 if stop.is_set():
                     raise RuntimeError(f"{session.source.name}: {CANCELLED}")
-                if time.monotonic() > deadline:
-                    raise RuntimeError(f"{session.source.name}: not read in time")
-                time.sleep(1)
+                raise RuntimeError(f"{session.source.name}: not read in time")
             if session.state != "done" or session.extracted is None:
                 raise RuntimeError(f"{Path(session.source).name}: {session.error}")
+            self.putting.discard(handle.name)  # taken by the space now, not waiting for it
             if handle.name in self.origins:
                 return with_origin(session.extracted, *self.origins[handle.name])
             return session.extracted
@@ -795,22 +826,26 @@ class Demo:
 
         def read_only() -> BuildReport:
             failed = []
-            for doc in docs:
+            for path in in_turn([Path(doc) for doc in docs]):
                 try:
-                    process(Path(doc))
+                    process(path)
                 except RuntimeError as error:
-                    failed.append((Path(doc), str(error)))
+                    failed.append((path, str(error)))
             build.done = finished()
             return BuildReport(processed=len(docs) - len(failed), failed=tuple(failed), links=0)
 
+        self.putting = set(docs) if put else set()
         try:
             report = build_graph(
-                [Path(doc) for doc in docs], process=process, space=self.space(), on_step=step
+                [Path(doc) for doc in docs], process=process, space=self.space(), on_step=step,
+                in_turn=in_turn,
             ) if put else read_only()
         except Exception:  # noqa: BLE001 -- the build's state says what happened
             traceback.print_exc(file=sys.stderr)
             build.state, build.error = "error", f"the graph could not be built {IN_LOG}"
             return
+        finally:
+            self.putting = set()
         # What failed, said by file name -- the server's folders are this machine's, not the
         # reader's; what a cancel passed over is not a failure.
         build.failed = [reason.replace(str(path), path.name).replace(f"{self.root}/", "")
@@ -1001,17 +1036,22 @@ class Demo:
         )
 
     def _read(self, session: Session) -> None:
-        """Figures, then paragraphs, then the outline -- the builder's order. Each page's
-        outline is applied the moment it lands, so the view grows while the rest is read."""
+        """Figures, then paragraphs with the outline a page behind -- the builder's order. Each
+        page's outline is applied the moment it lands, so the view grows while the rest is read."""
         builder = self._builder(session)
         session.state = "grouping"
         started = time.monotonic()
-        session.extracted = builder.group_text(
-            builder.read_figures(session.read(), session.source), session.source
-        )
+        session.extracted = builder.read_figures(session.read(), session.source)
         session.state = "reading"
         session.pending = {page.index for page in session.pages}
         by_index = {page.index: page for page in session.pages}
+        # The grouping runs ahead of the outline; what lands is applied to the document joined
+        # as far as it has come, with every page's outline that landed before it.
+        grouped = [session.read()]
+        landed_so_far: list[HierarchyDecision] = []
+
+        def joined(so_far: ExtractedDocument) -> None:
+            grouped[0] = so_far
 
         def landed(index: int, decisions: tuple[HierarchyDecision, ...] | None) -> None:
             # The pages not yet asked are not asked: a flowing document's come one after
@@ -1021,11 +1061,17 @@ class Demo:
                 raise Cancelled
             unread = (index,) if decisions is None else ()
             derived = HierarchyDerivation(decisions=decisions or (), unread_pages=unread)
+            with session.lock:
+                session.extracted = apply_hierarchy_decisions(
+                    grouped[0], _standing(grouped[0], landed_so_far))
             self.apply(session, derived, by_index[index], _since(started))
+            landed_so_far.extend(derived.decisions)
             session.pending.discard(index)
 
         try:
-            outlined = builder.read_outline(session.read(), session.source, on_page=landed)
+            outlined = builder.group_and_read_outline(
+                session.read(), session.source, on_page=landed, on_grouped=joined
+            )
         except Cancelled:
             raise
         except Exception as error:  # noqa: BLE001 -- the pages say they failed; the rest goes on
@@ -1086,15 +1132,7 @@ class Demo:
             was = session.read()
             # Pages of a flowing document land one at a time, each read against the graph as
             # it was when the reading began; a node an earlier page dropped is simply gone.
-            known = {n.id for n in was.nodes}
-            # A unit placed under one an earlier page dropped reads at the root, as the
-            # pipeline reads it; a unit itself gone is not decided again.
-            decisions = tuple(
-                d if d.parent_id is None or d.parent_id in known
-                else d.model_copy(update={"status": "root", "parent_id": None})
-                for d in derived.decisions if d.subject_id in known
-            )
-            extracted = apply_hierarchy_decisions(was, decisions)
+            extracted = apply_hierarchy_decisions(was, _standing(was, derived.decisions))
             session.extracted = extracted
             labels = {n.id: n.label for n in was.nodes}
             session.derived[page.index] = [

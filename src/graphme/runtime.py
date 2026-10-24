@@ -20,7 +20,8 @@ from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.rendering.visual_binding import RenderedVisualBinder
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import GraphRag
-from graphme.adapters.storage.local_neo4j import ensure_local_neo4j, install
+from graphme.adapters.storage.local_neo4j import USER, ensure_local_neo4j, install
+from graphme.adapters.storage.local_neo4j import password as neo4j_password
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
 from graphme.adapters.vision.chat_completions import ChatCompletionsVLMAdapter
 from graphme.adapters.vision.hierarchy_scope import RenderedHierarchyScopeProvider
@@ -154,7 +155,9 @@ def create_graph_space(settings: Settings) -> Neo4jGraphSpace:
     if settings.local_neo4j is not None:
         uri = ensure_local_neo4j(settings.local_neo4j,
                                  (settings.neo4j_heap, settings.neo4j_pagecache))
-        settings = settings.model_copy(update={"neo4j_uri": uri})
+        settings = settings.model_copy(update={
+            "neo4j_uri": uri, "neo4j_user": USER,
+            "neo4j_password": neo4j_password(settings.local_neo4j)})
     return Neo4jGraphSpace.from_settings(settings)
 
 

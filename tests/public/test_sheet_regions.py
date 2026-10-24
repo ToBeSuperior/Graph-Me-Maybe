@@ -5,7 +5,7 @@ covered the table and the headings between them, and the table came to own the c
 photograph and both headings -- the sheet's outline read every section under the table."""
 from __future__ import annotations
 
-from graphme.application.xlsx_crop_regions import PixelBox, merge_regions
+from graphme.application.page_regions import PixelBox, merge_regions
 
 TABLE = PixelBox(130, 200, 530, 480)
 CHART = PixelBox(670, 150, 1670, 680)  # right of the table, reaching just below it

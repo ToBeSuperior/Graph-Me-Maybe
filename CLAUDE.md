@@ -156,9 +156,9 @@ page cache) grew with every document; the server clears what it left (`_forget_k
 
 ### One producer of a crop
 
-`application/xlsx_visual_binding.py` is the **only** thing that cuts a node's crop.
+`application/visual_crops.py` is the **only** thing that cuts a node's crop.
 Whatever overlaps or touches becomes one region (union-find in
-`application/xlsx_unit_regions.py`), the region is cut once, and the asset hash plus box
+`application/unit_regions.py`), the region is cut once, and the asset hash plus box
 go on the node that names it. Every reader calls `read_node_crop(node, asset_store=…)`
 from that same module and passes a **node id, never a box**.
 
@@ -190,40 +190,45 @@ each rendered run came from for DOCX (`FlowPlacer`), the normalized bbox the ext
 recorded for PDF.
 
 A sheet or a slide is a unit the author worked in, so its page is its own tree. A page of
-DOCX or PDF (`FLOW_FORMATS`) is where the paper ran out: the document node is the root, the
-pages are read in order, and each one is given the outline the pages before it built plus
-that page's bottom strip -- so the outline spans the document. A paragraph or table drawn
-on two pages is decided once, on the page showing most of it.
+DOCX or PDF (`FLOW_FORMATS`) is where the paper ran out: the document node is the root, and
+the outline spans the document. A paragraph or table drawn on two pages is decided once, on
+the page showing most of it.
 
-What travels is the outline itself, not a chain. Sent only the open ancestors, every page
-after the first decided the document's top level again from the picture, and the same kind
-of heading landed under the title on one page and under the line above it on the next; a
-heading arrives now with what reads under it, which is what says it is the same heading.
+A flowing document is read in three steps (`derive`, `application/outline_join.py`). First
+its headings, asked once of every text unit on a line (`outline_headings`, text only, skipped
+past `MAX_HEADING_LINES`). Then every page, side by side, each shown the headings before it
+and the previous page's bottom strip. A page's reading is kept **inside the page** only
+(`PageTree`): a parent it names on another page is dropped, because that is the next step's
+question. Then every page break is joined at once (`join_page`, text only): the page's top
+units -- nothing above them on the page -- each answer a place and `under` or `beside`.
+Beside takes the neighbour's parent, resolved when every page is joined (`Joining.settle`).
+Each break is read `JOIN_READINGS` times, a third time where they differ, and the answer most
+readings gave wins; with no majority the one opening fewer levels, because a wrong deep
+answer carries every later sibling down with it.
 
-Three things go out, in this order (`_Placements.carried`). The open chain -- the path
-from the document down to where the page before stopped, which is where this page attaches.
-The document's headings (every unit that holds something), shallowest first, up to
-`SKELETON_SHARE` of the budget, each only with its parent already carried. And whole recent
-subtrees in what is left: a subtree travels with every descendant or does not travel.
+What a page break is offered (`Joining.places`): place 0, the document's title -- the first
+page's top that holds the most of it -- then the sections open where the page begins, walked
+up from where the page before stopped (that page's reading first, then the headings), how
+the page before ended (its tops and its last unit's chain), and what the page before was
+offered: what is open where a page begins was open where the page before began or that page
+opened it, so the headings' guess is checked against both. A page whose headings leave a
+top unplaced takes the last heading before it, once; guessing again walked every page back.
+A table, a picture or a dropped unit is never a place. A top may also name an earlier top
+of its own page, never itself or a later one. Each place shows the first few things it holds
+and how many: that is what says a title holds a version line and a date, so a later page
+does not read under the date.
 
-The headings exist because carrying only whole subtrees, newest first, dropped a long
-document's early chapters out of the reference entirely: a late page had no idea what level
-the document's chapters stood at. A heading that arrives without its items carries how many
-it holds (`outline_omitted`), or it reads as a section that began there and holds nothing.
-A unit is never carried without its parent: it would read as a place to attach to and not
-be one. Headings are sent at `CARRY_LABEL_CHARS`, units that hold nothing at
-`CARRY_ITEM_CHARS`, and the budget is counted on what is actually sent.
+The join prompt is used as measured: a shorter wording of the same rules put chapters under
+the cover's organisation line. Reading the pages in order instead, each carrying the outline
+the pages before built, made a document only as fast as its slowest chain of pages, and let
+one page's mistake travel into every page after it.
 
-`CARRY_TOKEN_BUDGET` (1,200) decides how much fits -- twice a search unit, because this is
-a reference the page reads its own units against. Korean is about a token a character, so
-the estimate counts Hangul separately; bytes over four puts a Korean outline at a third of
-its size and the budget would never be reached. The newest subtrees are kept first: a
-section decided two pages ago is where this page continues, one from the first page is not.
-
-What a picture holds is kept out of the open chain: a page that ends inside a figure
-otherwise carries a word printed on the drawing as the innermost thing still open, which is
-what the next page is told to read under. The figure still travels as part of what its
-section holds.
+What the headings travel as is `carried_outline.Placements.carried`: the open chain down to the last
+heading before the page, the headings shallowest first up to `SKELETON_SHARE` of
+`CARRY_TOKEN_BUDGET`, each only with its parent already carried. A heading that arrives
+without its items carries how many it holds (`outline_omitted`). Headings are sent at
+`CARRY_LABEL_CHARS`. Korean is about a token a character, so the estimate counts Hangul
+separately.
 
 Text grouping (`application/unit_grouping.py`) explodes PDF blocks into printed lines and
 slide shapes into paragraphs, then asks `PIECES_PER_ASK` pieces at a time, carrying the last
@@ -244,11 +249,9 @@ every section -- and only furniture (running header, page number, watermark) sta
 it at the top. Short ids resolve an exact match, one character apart, or the last two
 characters wrong (`_tail_slipped`), each only when exactly one unit fits.
 
-Flowing pages are only read in order: reading them side by side and stitching the page
-breaks afterwards was faster but lost cross-page parents the ordered reading keeps. Sheets and
-slides are independent scopes, so those are what a caller reads in parallel. Every model call
-takes the provider's `limiter`, so a caller reading several documents caps the calls in flight
-across all of them.
+Every page of every format is read side by side, and every page break is joined side by
+side. Every model call takes the provider's `limiter`, so a caller reading several documents
+caps the calls in flight across all of them.
 
 Two measurements go out beside the labels, and both exist because the picture alone was not
 enough. `indent` ranks where each unit's words start (0 leftmost), counting the paragraph
@@ -435,8 +438,11 @@ container runs, and the PC stalls each time. Settings naming no `GRAPHME_NEO4J_U
 `local_neo4j` (the app's home), and `runtime.create_graph_space` runs that home's own Neo4j
 (`local_neo4j.py`): Neo4j Community `NEO4J_VERSION` and a Temurin JRE fetched into `neo4j/` and
 `jre/` (checksums checked; by the installer, or on first use), the graph in `neo4j-data/` so an
-update never touches it, started as a child (`neo4j console`, its own `NEO4J_CONF`, auth off,
-bolt on 127.0.0.1 at the first free port from 7687) and stopped when that process ends -- atexit,
+update never touches it, started as a child (`neo4j console`, its own `NEO4J_CONF`, bolt on
+127.0.0.1 at the first free port from 7687), asking for the password in `neo4j-data/password`
+(mode 600, made on first start and set over Bolt, never on a command line; a graph from
+before it is given one when next started or found running) -- Bolt takes WebSocket
+connections, so with none any page open in a browser could reach the graph and stopped when that process ends -- atexit,
 or `stop_started()` before the window app's `os._exit`. A Neo4j answering on the port the home
 recorded is adopted only if `server.directories.data` is this home's (WSL's app answers on
 Windows' loopback too). The server never opens it in a page's request: `Demo.space(wait=)` opens

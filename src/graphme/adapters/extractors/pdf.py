@@ -111,6 +111,26 @@ def page_text(page: pymupdf.Page, **options: Any) -> dict[str, Any]:
     return raw
 
 
+def table_cells(page: pymupdf.Page, table: Any) -> list[list[str | None]]:
+    """A found table's cells, row by row, each read the way the page's text is (`page_text`):
+    the table finder's own extraction ran a Korean cell's words together where the page only
+    moved the pen between them. A cell another one spans over is None, as the finder has it."""
+    return [
+        [None if cell is None else _text_in(page, pymupdf.Rect(cell))  # type: ignore[no-untyped-call]
+         for cell in row.cells]
+        for row in table.rows
+    ]
+
+
+def _text_in(page: pymupdf.Page, area: Any) -> str:
+    raw = page_text(page, clip=area)
+    return "\n".join(
+        "".join(span["text"] for span in line["spans"])
+        for block in raw.get("blocks", ()) if block.get("type") == 0
+        for line in block.get("lines", ())
+    )
+
+
 def _turn(raw: dict[str, Any], matrix: Any) -> None:
     """Every box, origin and writing direction in `raw`, carried by `matrix`."""
     turn = pymupdf.Matrix(matrix.a, matrix.b, matrix.c, matrix.d, 0, 0)  # type: ignore[no-untyped-call]
@@ -302,7 +322,7 @@ class PDFExtractor:
         units: list[_NativeUnit] = []
 
         for table_occurrence, table in enumerate(tables):
-            values = table.extract()
+            values = table_cells(page, table)
             rows = [
                 ["" if value is None else encodable(str(value)).strip() for value in row]
                 for row in values
@@ -800,9 +820,60 @@ _HANGUL_RUN_END = re.compile(r"[\uac00-\ud7a3]+$")
 _HANGUL_RUN_START = re.compile(r"^[\uac00-\ud7a3]+")
 
 
+APART = 100_000
+"""Added to a block's number for each further block its lines are split into, so every part
+keeps a number of its own and is found again by it (`printed_pieces`)."""
+
+
 def _text_blocks(page: pymupdf.Page) -> list[dict[str, Any]]:
-    """The page's text blocks, in reading order (`page_text`, sorted)."""
-    return [b for b in page_text(page, sort=True).get("blocks", ()) if b.get("type") == 0]
+    """The page's text blocks, in reading order (`page_text`, sorted), each split where its
+    lines share none of the page's width (`_apart`)."""
+    return [
+        part
+        for block in page_text(page, sort=True).get("blocks", ())
+        if block.get("type") == 0
+        for part in _apart(block)
+    ]
+
+
+def _apart(block: dict[str, Any]) -> list[dict[str, Any]]:
+    """A block as the runs of lines that share some of the page's width.
+
+    pymupdf gathers lines that are near each other. A slide's title at the left and a small
+    stamp at the far right of the header came as one block: one unit, so the stamp could not
+    be dropped without the title, and spanning the header it covered the icons drawn there.
+    Lines of one paragraph always share some width; lines that share none are not one."""
+    lines = list(block.get("lines", ()))
+    if len(lines) < 2:
+        return [block]
+    groups: list[tuple[float, float, list[int]]] = []
+    for index, line in enumerate(lines):
+        x0, x1 = float(line["bbox"][0]), float(line["bbox"][2])
+        hit = [g for g in groups if x0 <= g[1] and x1 >= g[0]]
+        groups = [g for g in groups if g not in hit]
+        groups.append((
+            min([x0, *(g[0] for g in hit)]),
+            max([x1, *(g[1] for g in hit)]),
+            sorted([index, *(i for g in hit for i in g[2])]),
+        ))
+    if len(groups) == 1:
+        return [block]
+    number = int(block.get("number", 0))
+    parts = []
+    for order, (_, _, members) in enumerate(sorted(groups, key=lambda g: g[2][0])):
+        kept = [lines[i] for i in members]
+        parts.append({
+            **block,
+            "lines": kept,
+            "bbox": (
+                min(float(line["bbox"][0]) for line in kept),
+                min(float(line["bbox"][1]) for line in kept),
+                max(float(line["bbox"][2]) for line in kept),
+                max(float(line["bbox"][3]) for line in kept),
+            ),
+            "number": number + APART * order,
+        })
+    return parts
 
 
 def _written_words(text_blocks: Iterable[dict[str, Any]]) -> Iterator[str]:

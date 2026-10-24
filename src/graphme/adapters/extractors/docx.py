@@ -9,7 +9,10 @@ from docx.document import Document as DocxDocument
 from docx.oxml.ns import qn
 from docx.table import Table, _Cell
 from docx.text.paragraph import Paragraph
+from pptx.chart.chart import Chart
+from pptx.oxml import parse_xml as parse_chart
 
+from graphme.adapters.extractors.powerpoint import chart_metadata
 from graphme.domain.enums import DocumentFormat, EdgeType, EvidenceKind, NodeType
 from graphme.domain.ids import canonical_locator, sha256_bytes, sha256_file, stable_id
 from graphme.domain.models import (
@@ -23,6 +26,9 @@ from graphme.domain.models import (
     native_edge,
 )
 from graphme.ports.storage import AssetStore
+
+CHART_TAG = "{http://schemas.openxmlformats.org/drawingml/2006/chart}chart"
+"""Where a run draws a chart: the graphic's reference to the chart's own part."""
 
 
 class DocxExtractor:
@@ -268,6 +274,59 @@ class DocxExtractor:
                 )
             )
             ordered_ids.append(image_id)
+
+        for chart_index, (relationship_id, chart_part) in enumerate(
+            self._charts(paragraph, document), start=1
+        ):
+            # A chart is a part of its own holding no picture: drawn by the layout, but
+            # read for pictures alone it was never a node, and had no crop and no caption.
+            chart = Chart(parse_chart(bytes(chart_part.blob)), chart_part)  # type: ignore[no-untyped-call]
+            chart_id = stable_id(
+                content_hash,
+                canonical_locator("chart", {"body": body_index, "chart": chart_index}),
+            )
+            values = chart_metadata(chart)
+            title = values.get("title")
+            locator = SourceLocator(
+                file_name=source.name,
+                label=f"chart {body_index}.{chart_index}",
+                relationship_id=relationship_id,
+                source_part=str(chart_part.partname),
+                metadata={"body_index": body_index, "chart_index": chart_index},
+            )
+            plotted: dict[str, JsonValue] = {
+                "body_index": body_index, "chart_index": chart_index, **values,
+            }
+            nodes.append(
+                GraphNode(
+                    id=chart_id,
+                    document_id=document_id,
+                    type=NodeType.CHART,
+                    label=title if isinstance(title, str) and title else f"Chart {chart_index}",
+                    locator=locator,
+                    metadata=plotted,
+                )
+            )
+            evidence.append(
+                EvidenceRecord(
+                    id=stable_id(content_hash, f"evidence:chart:{body_index}:{chart_index}"),
+                    document_id=document_id,
+                    node_id=chart_id,
+                    kind=EvidenceKind.SOURCE_METADATA,
+                    locator=locator,
+                    data=plotted,
+                )
+            )
+            ordered_ids.append(chart_id)
+
+    @staticmethod
+    def _charts(paragraph: Paragraph, document: DocxDocument) -> Iterable[tuple[str, Any]]:
+        for run in paragraph.runs:
+            for found in run._element.iter(CHART_TAG):
+                relationship_id = found.get(qn("r:id"))
+                part = document.part.related_parts.get(relationship_id or "")
+                if part is not None and hasattr(part, "blob"):
+                    yield relationship_id, part
 
     @staticmethod
     def _extract_table(

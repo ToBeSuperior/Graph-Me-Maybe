@@ -26,7 +26,7 @@ from graphme.application.page_units import (
     scope_of,
     units_by_page,
 )
-from graphme.application.xlsx_visual_binding import VISUAL_TYPES
+from graphme.application.visual_crops import VISUAL_TYPES
 from graphme.domain.enums import EdgeType, EvidenceKind, NodeType
 from graphme.domain.ids import stable_id
 from graphme.domain.models import (

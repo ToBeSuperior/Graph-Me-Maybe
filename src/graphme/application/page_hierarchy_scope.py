@@ -16,11 +16,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from graphme.application.page_regions import PixelBox, SheetPixelGrid
 from graphme.application.page_units import held_by_a_visual
 from graphme.application.reading_order import in_columns
 from graphme.application.unit_placement import CellRangePlacer, DrawingLike, UnitPlacer
-from graphme.application.xlsx_crop_regions import PixelBox, SheetPixelGrid
-from graphme.application.xlsx_visual_binding import crop_box
+from graphme.application.visual_crops import crop_box
 from graphme.domain.enums import NodeType
 from graphme.domain.models import ExtractedDocument, GraphNode, HierarchyUnit
 

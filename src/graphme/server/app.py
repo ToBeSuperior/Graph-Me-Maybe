@@ -47,7 +47,7 @@ from graphme.adapters.storage.graph_rag import MAX_TOP_K, GraphNotEmbedded, Grap
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, modified_at
 from graphme.application.embedded_documents import name_part
 from graphme.application.ingest import documents_in
-from graphme.application.xlsx_visual_binding import CROP_ASSET_KEY, read_crop, read_node_crop
+from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop, read_node_crop
 from graphme.config import Settings, load_settings
 from graphme.runtime import create_browser_renderer
 from graphme.server import models as api
@@ -286,6 +286,8 @@ def create_app(
 
         def state(doc: str | None) -> str:
             session = demo.sessions.get(doc) if doc else None
+            if session and session.state == "done" and doc in demo.putting:
+                return "queued"  # read, and put once the space takes it
             return session.state if session else "idle"
 
         try:

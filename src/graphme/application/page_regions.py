@@ -53,6 +53,10 @@ class PixelBox:
     x1: float
     y1: float
 
+    @property
+    def area(self) -> float:
+        return (self.x1 - self.x0) * (self.y1 - self.y0)
+
     def touches(self, other: PixelBox, *, slack: float = TOUCH_SLACK_PIXELS) -> bool:
         return not (
             self.x1 + slack < other.x0
@@ -67,8 +71,7 @@ class PixelBox:
         height = min(self.y1, other.y1) - max(self.y0, other.y0)
         if width <= 0 or height <= 0:
             return 0.0
-        area = (other.x1 - other.x0) * (other.y1 - other.y0)
-        return 0.0 if area <= 0 else (width * height) / area
+        return 0.0 if other.area <= 0 else (width * height) / other.area
 
     def contains(self, other: PixelBox, *, slack: float = TOUCH_SLACK_PIXELS) -> bool:
         return (
@@ -184,6 +187,11 @@ def _region_kind_of(kinds: set[str]) -> str:
     return "text" if "text" in kinds else "connector"
 
 
+def _runs_across(words: PixelBox, host: PixelBox) -> bool:
+    """Whether a line of text reaches past a picture on both its left and its right."""
+    return words.x0 < host.x0 and words.x1 > host.x1 and words.covered_fraction(host) > 0
+
+
 def _belong_together(
     left: PixelBox,
     right: PixelBox,
@@ -234,7 +242,14 @@ def _belong_together(
         # title. Text is inside something only when it is inside a table or the picture.
         words, hosts = (left, right_parts) if left_kind == "text" else (right, left_parts)
         held = max(
-            (max(host.covered_fraction(words), words.covered_fraction(host)) for host in hosts),
+            (
+                max(host.covered_fraction(words), words.covered_fraction(host))
+                for host in hosts
+                # A line that runs right across a picture is not written on it: the
+                # picture sits in the line. A header's title and a stamp at its far end,
+                # read as one line, covered the icons between them and was taken in.
+                if not _runs_across(words, host)
+            ),
             default=0.0,
         )
         return held >= TEXT_OVERLAP_THRESHOLD
@@ -291,7 +306,7 @@ def merge_regions(
         claimed: dict[int, PixelBox] = {}
         held: dict[int, set[str]] = {}
         tables: dict[int, list[PixelBox]] = {}
-        picture: dict[int, PixelBox] = {}
+        drawn: dict[int, list[PixelBox]] = {}
         for index in range(len(boxes)):
             root = find(index)
             claimed[root] = (
@@ -301,9 +316,18 @@ def merge_regions(
             if kinds[index] == "table":
                 tables.setdefault(root, []).append(boxes[index])
             elif kinds[index] == "drawing":
-                picture[root] = (
-                    boxes[index] if root not in picture else picture[root].union(boxes[index])
-                )
+                drawn.setdefault(root, []).append(boxes[index])
+        # The picture is what the region draws outside its tables. A photograph in a
+        # table's cell is the table's: taken into the picture as well, one rectangle ran
+        # from an icon over the table's edge down to the photographs, and the heading
+        # printed between them was read as lying inside a picture.
+        picture: dict[int, PixelBox] = {}
+        for root, pictures in drawn.items():
+            for box in pictures:
+                if any(table.covered_fraction(box) >= ENCLOSURE_THRESHOLD
+                       for table in tables.get(root, ())):
+                    continue
+                picture[root] = box if root not in picture else picture[root].union(box)
         parts = {
             root: [*tables.get(root, ()), *([picture[root]] if root in picture else [])]
             for root in claimed

@@ -5,10 +5,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, ExternalLink } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, call, ApiError } from '../../api/client';
+import { api, call, ApiError, isBuilding } from '../../api/client';
 import { Button, Spinner } from '../../components/ui';
 import { useT } from '../../lib/i18n';
-import { keys } from '../../lib/queries';
+import { keys, useBuild } from '../../lib/queries';
 import { PageHeader } from './ManageLayout';
 
 const driveKey = ['googleDrive'] as const;
@@ -26,6 +26,8 @@ export function DrivePage() {
     refetchInterval: opening ? 2000 : false,
   });
   const state = drive.data;
+  // One build at a time: while any runs, this page says so rather than asking for another.
+  const building = isBuilding(useBuild().data);
 
   const act = async (run: () => Promise<unknown>) => {
     setWorking(true);
@@ -44,7 +46,6 @@ export function DrivePage() {
   });
   const build = () => act(async () => {
     client.setQueryData(keys.build, await call(api.POST('/v1/cloud/google/build')));
-    setSaid(t('driveBuilding'));
   });
   const disconnect = () => act(async () => {
     client.setQueryData(driveKey, await call(api.DELETE('/v1/cloud/google')));
@@ -71,7 +72,7 @@ export function DrivePage() {
               </Button>
               {state.connected && (
                 <>
-                  <Button onClick={build} disabled={working || !state.picked}>
+                  <Button onClick={build} disabled={working || building || !state.picked}>
                     {t('driveBuild')}
                   </Button>
                   <Button variant="ghost" onClick={disconnect} disabled={working}>
@@ -90,6 +91,7 @@ export function DrivePage() {
             )}
           </>
         )}
+        {building && <p role="status" className="text-muted">{t('driveBuilding')}</p>}
         {said && <p role="status" className="text-muted">{said}</p>}
       </div>
     </div>

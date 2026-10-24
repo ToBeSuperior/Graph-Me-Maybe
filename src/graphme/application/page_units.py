@@ -13,7 +13,7 @@ from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Protocol, TypeVar
 
 from graphme.application.unit_placement import FlowPlacer, home_pages
-from graphme.application.xlsx_visual_binding import VISUAL_TYPES, read_node_crop
+from graphme.application.visual_crops import VISUAL_TYPES, read_node_crop
 from graphme.domain.enums import EdgeType, NodeType
 from graphme.domain.models import ExtractedDocument, GraphNode
 from graphme.ports.storage import AssetStore
@@ -47,7 +47,7 @@ def flow_pages(
         return {}
     return home_pages(
         extracted.nodes,
-        {page.index: FlowPlacer(page.flow_boxes(), page.flow_drawings()) for page in pages},
+        {page.index: FlowPlacer.of(page) for page in pages},
     )
 
 

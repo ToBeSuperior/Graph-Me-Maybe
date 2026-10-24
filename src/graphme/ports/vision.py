@@ -5,9 +5,12 @@ from graphme.domain.models import (
     DocumentReferenceRequest,
     DocumentReferenceResult,
     FigureGroupingResult,
+    HeadingLine,
     HierarchyChoice,
     HierarchyScopeRequest,
     HierarchyScopeResult,
+    JoinPlacement,
+    PageJoinRequest,
     UnitGroupingRequest,
     UnitGroupingResult,
     VisualCaptionRequest,
@@ -55,6 +58,12 @@ class VisionProvider(Protocol):
         image: bytes,
         unit_images: Mapping[str, bytes] | None = None,
     ) -> DocumentReferenceResult: ...
+
+    def join_page(self, *, request: PageJoinRequest) -> tuple[JoinPlacement, ...]: ...
+
+    def outline_headings(
+        self, *, lines: Sequence[HeadingLine]
+    ) -> tuple[tuple[str, str | None], ...]: ...
 
     def choose_hierarchy_scope(
         self,

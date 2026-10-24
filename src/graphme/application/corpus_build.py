@@ -15,7 +15,7 @@ joined the moment the document it names arrives.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -106,11 +106,16 @@ def build_graph(
     space: GraphSpace,
     on_step: StepListener | None = None,
     again: bool = False,
+    in_turn: Callable[[Sequence[Path]], Iterable[Path]] | None = None,
 ) -> BuildReport:
     """Read every document, put them all in `space`, then join the mentions there.
 
     `on_step` hears the step and how far it is ("read", done, total), so a caller can say
     which of the three a long build is in.
+
+    `in_turn` gives the documents in the order they are to be put, for a caller reading them
+    side by side: as each is read, so a short one is not held behind a long one. Without it
+    they are put in the order given.
     """
     told: StepListener = on_step or (lambda step, done, total: None)
     # Reading costs a model call a page: a file already in the space is passed over, unless
@@ -122,7 +127,7 @@ def build_graph(
     documents = [path for path in documents if hashes[path] not in held]
     put: set[str] = set()
     failed: list[tuple[Path, str]] = []
-    for index, path in enumerate(documents, start=1):
+    for index, path in enumerate(in_turn(documents) if in_turn else documents, start=1):
         told(BuildStep.READ, index - 1, len(documents))
         # One document that cannot be read is one document, not the folder -- whatever stopped
         # it: a file that does not parse, a provider that turned it away after its retries.

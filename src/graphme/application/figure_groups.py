@@ -18,7 +18,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from graphme.application.unit_placement import UnitPlacer
-from graphme.application.xlsx_visual_binding import CONTAINER_TYPES, CROP_ASSET_KEY, crop_box
+from graphme.application.visual_crops import CONTAINER_TYPES, CROP_ASSET_KEY, crop_box
 from graphme.domain.enums import NodeType
 from graphme.domain.models import ExtractedDocument, GraphNode, HierarchyFigureGroup
 from graphme.ports.storage import AssetStore
@@ -57,6 +57,21 @@ def widen_figures(
         box = crop_box(figure) or placer.box(figure)
         if box is None:
             continue
+        table = figure.type in CONTAINER_TYPES
+        # A table is its grid: its frame is what its own pieces cover, and words outside
+        # that frame are not in it, whatever the page grouped them with. A heading named
+        # with a table stretched it up to the heading, and every summary line in between
+        # was then taken as the table's -- the outline read them all under the table they
+        # introduce. A picture's labels are the other way round: they stand outside it.
+        frame = box
+        if table:
+            for member_id in group.member_ids:
+                member = nodes.get(member_id)
+                if (member is not None and member.type in CONTAINER_TYPES
+                        and page_of.get(member_id) == page
+                        and (piece := crop_box(member) or placer.box(member)) is not None):
+                    frame = frame.union(piece)
+        members: list[str] = []
         for member_id in group.member_ids:
             member = nodes.get(member_id)
             if member is None or page_of.get(member_id) != page:
@@ -64,6 +79,10 @@ def widen_figures(
             # The part's territory too: a photograph that took in the ones beside it
             # brings all of them, and adding only its own rectangle cut the rest in half.
             part = crop_box(member) or placer.box(member)
+            if (table and member.type is NodeType.TEXT_CHUNK
+                    and (part is None or not frame.contains(part))):
+                continue  # outside the grid: the outline places it
+            members.append(member_id)
             if part is not None:
                 box = box.union(part)
         rounded = box.rounded()
@@ -76,10 +95,9 @@ def widen_figures(
             _log.warning("figure %s could not be cut again -- %s", group.figure_id, error)
             continue
         widened[group.figure_id] = (asset_hash, rounded)
-        for member_id in group.member_ids:
-            if member_id in nodes:
-                part_of[member_id] = group.figure_id
-        if figure.type in CONTAINER_TYPES:
+        for member_id in members:
+            part_of[member_id] = group.figure_id
+        if table:
             # A table drawn with a band across it is measured as two tables with the
             # band's words standing between them. Once the page has said they are one
             # table, those words are its row -- the page named the tables and left the
@@ -92,7 +110,7 @@ def widen_figures(
                     and node.id not in part_of
                     and page_of.get(node.id) == page
                     and (where := placer.box(node)) is not None
-                    and box.contains(where)
+                    and frame.contains(where)
                 ):
                     part_of[node.id] = group.figure_id
     if not widened:

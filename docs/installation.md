@@ -70,8 +70,10 @@ rights).
 
 ## The graph database
 
-The app runs its own Neo4j Community as a child process: no password, listening on 127.0.0.1 only, at
-the first free port from 7687. It starts with the app (usually within ten seconds; the app shows
+The app runs its own Neo4j Community as a child process, listening on 127.0.0.1 only, at the first
+free port from 7687. It asks for a password the app makes the first time and keeps in
+`neo4j-data/password`, readable by your user alone; the app and `graphme` commands use it
+without asking you. It starts with the app (usually within ten seconds; the app shows
 "Preparing the graph DB" meanwhile) and stops when the app closes. A `graphme` command uses the app's
 Neo4j when the app is open, and otherwise starts one for the command and stops it afterwards.
 

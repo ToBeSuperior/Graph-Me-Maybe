@@ -40,11 +40,14 @@ JOINED_FROM = "joined_from"
 """The pieces a unit was printed in, in reading order, kept on the unit that holds them."""
 
 
-PIECES_PER_ASK = 40
+PIECES_PER_ASK = 80
 """How many pieces one answer has to carry. A dense page prints many times this many
 lines, and an answer naming every piece of every paragraph among them came back with a
 paragraph's first few lines and the rest abandoned -- a different few in each reading of
-the same page. Asked in shorter runs, an answer is short enough to finish."""
+the same page. Asked in shorter runs, an answer is short enough to finish.
+
+Pages that follow fill a run while they fit, so a page of a few lines is not an ask of its
+own. Twice this many, packed the same way, joined across what the page showed apart."""
 
 SMALL_PRINT_MARGIN = 0.5
 """How much smaller than the running text a piece has to be to be small print. A page's
@@ -63,8 +66,12 @@ def group_document_units(
     pages: Mapping[int, bytes],
     vision: Any,
     join: Callable[[Sequence[str]], str] = lambda texts: " ".join(texts),
+    page_of: Mapping[str, int] | None = None,
 ) -> ExtractedDocument:
     """Ask each page, a run of pieces at a time, which pieces are one unit, and join them.
+
+    `page_of` says where each unit was drawn when the units do not: a Word paragraph lands
+    on whatever page the layout puts it.
 
     Each ask carries the last few pieces of the one before, marked settled, and shows both
     pages, so a unit broken by a page break or a run's end keeps one name on both sides.
@@ -72,7 +79,7 @@ def group_document_units(
     Each ask names its groups from scratch, so a name is only the same group when it was
     carried in as settled; everything else is kept apart by the ask it came from.
     """
-    units = groupable_units(extracted)
+    units = groupable_units(extracted, page_of)
     if not units:
         return extracted
     by_page: dict[int, list[GroupableUnit]] = {}
@@ -89,21 +96,13 @@ def group_document_units(
 
     # A page is asked in runs short enough for one answer to carry. Whatever is left of a
     # page goes into the next ask, which is the same thing a page break already was.
-    asks: list[tuple[int, str, list[GroupableUnit]]] = [
-        (
-            page,
-            # A page asked in one run is named after itself, as it always was; only a page
-            # that had to be split says which of its runs this is.
-            f"page-{page:03d}" if run == 0 else f"page-{page:03d}-{run + 1}",
-            by_page[page][run * PIECES_PER_ASK : (run + 1) * PIECES_PER_ASK],
-        )
-        for page in sorted(by_page)
-        for run in range((len(by_page[page]) + PIECES_PER_ASK - 1) // PIECES_PER_ASK)
-    ]
+    asks = _asks(by_page)
     named: dict[str, str] = {}
+
     before: list[GroupableUnit] = []
     earlier: int | None = None
-    for index, (page, scope, pieces) in enumerate(asks):
+    for index, (pages_asked, scope, pieces) in enumerate(asks):
+        page = pages_asked[-1]
         # Only the end of what was asked before can be carried on. The rest was settled
         # where it stood, and asking again invites a page to be taken apart twice.
         # What carries on is the text: a page that ends in footnotes carried only those,
@@ -123,7 +122,7 @@ def group_document_units(
         images = [
             pages[shown_page]
             for shown_page in dict.fromkeys(
-                (earlier, page) if earlier is not None else (page,)
+                (earlier, *pages_asked) if earlier is not None else pages_asked
             )
             if shown_page in pages
         ]
@@ -159,6 +158,29 @@ def group_document_units(
         if unit.id in named:
             in_order.setdefault(named[unit.id], []).append(unit.id)
     return _joined_groups(extracted, list(in_order.values()), join)
+
+
+def _asks(
+    by_page: Mapping[int, Sequence[GroupableUnit]],
+) -> list[tuple[tuple[int, ...], str, list[GroupableUnit]]]:
+    """The runs a document is asked in, in reading order: the pages each shows, its scope,
+    and its pieces. A page is cut into runs of `PIECES_PER_ASK`, and a page that fits whole
+    in what the run before left joins it."""
+    runs: list[tuple[tuple[int, ...], str, list[GroupableUnit]]] = []
+    for page in sorted(by_page):
+        held = list(by_page[page])
+        cut = [held[at : at + PIECES_PER_ASK] for at in range(0, len(held), PIECES_PER_ASK)]
+        for run, pieces in enumerate(cut):
+            last = runs[-1] if runs else None
+            if run == 0 and last is not None and len(last[2]) + len(pieces) <= PIECES_PER_ASK:
+                shown = (*last[0], page)
+                runs[-1] = (shown, f"pages-{shown[0]:03d}-{page:03d}", [*last[2], *pieces])
+                continue
+            # A page asked in one run is named after itself, as it always was; only a page
+            # that had to be split says which of its runs this is.
+            scope = f"page-{page:03d}" if run == 0 else f"page-{page:03d}-{run + 1}"
+            runs.append(((page,), scope, pieces))
+    return runs
 
 
 def _small_print(
@@ -301,7 +323,9 @@ def _piece_id(extracted: ExtractedDocument, node: GraphNode, index: int) -> str:
     return stable_id(extracted.document.content_hash, f"{node.id}:printed-{index}")
 
 
-def groupable_units(extracted: ExtractedDocument) -> tuple[GroupableUnit, ...]:
+def groupable_units(
+    extracted: ExtractedDocument, page_of: Mapping[str, int] | None = None
+) -> tuple[GroupableUnit, ...]:
     """Every piece of text still standing on its own, in the order the document is read.
 
     What a picture swallowed is the picture's -- by the binding, which hands it whatever
@@ -316,15 +340,22 @@ def groupable_units(extracted: ExtractedDocument) -> tuple[GroupableUnit, ...]:
         and (node.text or "").strip()
         and node.id not in swallowed
     ]
-    units = in_reading_order(units)
+    if page_of:
+        # Drawn by a layout, the units are read in the file's own order; one the layout
+        # did not place is where the unit before it was.
+        placed: list[tuple[GraphNode, int]] = []
+        for node in units:
+            placed.append((node, page_of.get(node.id, placed[-1][1] if placed else 1)))
+    else:
+        placed = [(node, _page(node)) for node in in_reading_order(units)]
     return tuple(
         GroupableUnit(
             id=node.id,
             text=(node.text or "").strip()[:4000],
             node_type=node.type,
-            page_index=_page(node),
+            page_index=page,
         )
-        for node in units
+        for node, page in placed
     )
 
 
