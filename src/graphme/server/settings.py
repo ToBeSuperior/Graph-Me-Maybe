@@ -17,7 +17,8 @@ from fastapi import Request
 from graphme import model_endpoint
 from graphme.adapters.chat import auth_headers
 from graphme.config import ENV_FIELDS, LOOPBACK, Settings, read_dotenv, read_yaml
-from graphme.server.state import BUILDING, Busy, Demo
+from graphme.server.jobs import BUILDING, Busy
+from graphme.server.state import Demo
 
 
 def _models(base_url: str, headers: dict[str, str]) -> str | None:

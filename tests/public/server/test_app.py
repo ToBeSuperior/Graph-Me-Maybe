@@ -90,7 +90,7 @@ def test_routes_of_the_callers_own_sit_under_v1_behind_the_key(demo: Demo) -> No
 
 
 def test_while_the_graph_db_starts_the_page_is_told_to_ask_again(demo: Demo) -> None:
-    from graphme.server.state import GraphStarting
+    from graphme.server.jobs import GraphStarting
 
     def starting(**_: object) -> None:
         raise GraphStarting("그래프 DB를 준비하는 중입니다")
@@ -104,7 +104,7 @@ def test_while_the_graph_db_starts_the_page_is_told_to_ask_again(demo: Demo) -> 
 
 def test_while_the_graph_db_starts_the_library_is_asked_again_too(demo: Demo) -> None:
     # The library said "cannot reach the graph DB" through a start and never asked again.
-    from graphme.server.state import GraphStarting
+    from graphme.server.jobs import GraphStarting
 
     def starting(**_: object) -> None:
         raise GraphStarting("the graph DB is starting")

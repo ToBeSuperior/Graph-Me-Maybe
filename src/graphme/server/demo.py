@@ -19,9 +19,10 @@ from graphme.config import Settings, load_settings
 from graphme.samples import write_samples
 from graphme.server import create_app
 from graphme.server.app import WEB, make_demo
+from graphme.server.jobs import BUILDING
 from graphme.server.models import BuildState
 from graphme.server.settings import preflight_behind
-from graphme.server.state import BUILDING, Demo
+from graphme.server.state import Demo
 
 
 class Samples(BaseModel):

@@ -51,19 +51,18 @@ from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop, read_nod
 from graphme.config import Settings, load_settings
 from graphme.runtime import create_browser_renderer
 from graphme.server import models as api
-from graphme.server.settings import changed, described, from_here, preflight_behind
-from graphme.server.state import (
+from graphme.server.jobs import (
     BUILDING,
     IN_LOG,
-    SPACE_WAIT,
     Busy,
     CorpusBuild,
-    Demo,
     ExportJob,
     GraphStarting,
     Session,
     Undrawn,
 )
+from graphme.server.settings import changed, described, from_here, preflight_behind
+from graphme.server.state import SPACE_WAIT, Demo
 
 WEB = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 """The web app as a checkout builds it (`npm run build` in `frontend/`); an installed package

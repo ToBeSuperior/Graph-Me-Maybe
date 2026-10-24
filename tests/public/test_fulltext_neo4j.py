@@ -11,7 +11,7 @@ import uuid
 import pytest
 
 import graphme
-from graphme.adapters.storage.graph_rag import any_named, every_word, named_identifiers
+from graphme.adapters.storage.hybrid_search import any_named, every_word, named_identifiers
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("GRAPHME_NEO4J_TEST") != "1", reason="needs the local Neo4j"

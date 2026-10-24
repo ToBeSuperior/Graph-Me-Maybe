@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
-from contextlib import AbstractContextManager
-from typing import Any
 
 from graphme.application.hierarchy_decisions import apply_hierarchy_decisions
 from graphme.application.page_units import (
@@ -64,7 +62,6 @@ def caption_visuals(
     vision: VisionProvider,
     asset_store: AssetStore,
     workers: int = 1,
-    limiter: AbstractContextManager[Any] | None = None,
     page_of: Mapping[str, int] | None = None,
 ) -> ExtractedDocument:
     """Add a caption node for every visual the pages show."""
@@ -96,7 +93,7 @@ def caption_visuals(
         )
         return described, answer
 
-    answers = asked_together(jobs, describe, workers=workers, limiter=limiter)
+    answers = asked_together(jobs, describe, workers=workers)
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
     evidence: list[EvidenceRecord] = []

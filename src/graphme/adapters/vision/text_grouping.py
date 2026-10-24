@@ -11,9 +11,7 @@ lines it printed, a slide's are the paragraphs of its shapes.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
-from typing import Any
 
 from graphme.adapters.extractors.pdf import printed_pieces
 from graphme.adapters.rendering.page_renderer import RendersPages
@@ -38,11 +36,9 @@ class RenderedUnitGrouper:
         *,
         renderer: RendersPages,
         vision: VisionProvider,
-        limiter: AbstractContextManager[Any] | None = None,
     ) -> None:
         self._renderer = renderer
         self._vision = vision
-        self._limiter = limiter if limiter is not None else nullcontext()
 
     def group(
         self,
@@ -65,14 +61,13 @@ class RenderedUnitGrouper:
         pages = {page.index: page.png for page in rendered}
         if not pages:
             return extracted
-        with self._limiter:
-            return group_document_units(
-                exploded,
-                pages=pages,
-                vision=self._vision,
-                join=join,
-                page_of=flow_pages(exploded, rendered, document_format),
-            )
+        return group_document_units(
+            exploded,
+            pages=pages,
+            vision=self._vision,
+            join=join,
+            page_of=flow_pages(exploded, rendered, document_format),
+        )
 
     @staticmethod
     def _pieces(

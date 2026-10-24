@@ -18,9 +18,9 @@ import weakref
 import zipfile
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -64,6 +64,28 @@ from graphme.domain.ids import sha256_bytes
 from graphme.domain.models import ExtractedDocument, HierarchyDecision, HierarchyDerivation
 from graphme.ports.sources import SourceStore
 from graphme.runtime import create_graph_builder, create_neo4j_admin, create_vision
+from graphme.server.jobs import (
+    BUILDING,
+    CANCELLED,
+    EXPORTING,
+    FINISHED,
+    GONE,
+    IN_LOG,
+    STARTABLE,
+    STARTING,
+    STEP_STATES,
+    UNDRAWN,
+    UNREAD,
+    Busy,
+    Cancelled,
+    CorpusBuild,
+    ExportJob,
+    GraphStarting,
+    Kept,
+    Session,
+    Undrawn,
+    _mark_failed,
+)
 
 VLM_CALLS_AT_ONCE = 24
 """Model calls in flight across every document, each reading and each settling call counted
@@ -71,10 +93,9 @@ on its own. Lower it when the endpoint's rate limit turns calls away; a call tur
 retried, so too high costs time rather than pages."""
 READERS = 16
 """Documents read side by side; their model calls share VLM_CALLS_AT_ONCE besides."""
-
-Placed = dict[str, tuple[int, tuple[int, int, int, int]]]
-"""Where each node is drawn: its page and its pixel box there (`placed_units`)."""
-
+FEWEST_WORKERS = 4
+"""Pages a document asks at once however many are read beside it: its share of the calls in
+flight, but never so few that one slow page holds the rest of its pages back."""
 
 def _stamp(path: str | Path) -> tuple[int, int] | None:
     """A file's size and modification time, or None when it is not there."""
@@ -86,16 +107,6 @@ def _stamp(path: str | Path) -> tuple[int, int] | None:
 
 
 PREVIEWS_KEPT = 24
-
-
-@dataclass(frozen=True)
-class Kept:
-    """A document as the graph space holds it, with where its build drew each node."""
-
-    records: dict[str, Any]
-    page_of: dict[str, int]
-    boxes: dict[str, tuple[int, list[int]]]
-    crops: dict[str, str]
 
 
 def kept_from(records: dict[str, Any], fmt: DocumentFormat
@@ -150,20 +161,6 @@ class _Lazy:
         return drive_web_url(origin)
 
 
-class GraphStarting(RuntimeError):
-    """The graph DB is being fetched or started and is not up yet: ask again shortly."""
-
-
-class Busy(Exception):
-    """Refused because the work it would disturb is under way: a build, an export, a
-    reading. Said as 409."""
-
-
-class Undrawn(Exception):
-    """A document's pages could not be drawn again. Said as 503: the file is there, the
-    renderer is what failed."""
-
-
 @dataclass
 class _Replay:
     """Hands back pages already rendered, so nothing is drawn twice."""
@@ -194,138 +191,7 @@ def _since(started: float) -> float:
 
 # What failed is said on the page plainly; what it was -- with this machine's paths in it --
 # is in the server's log, printed where it happened.
-IN_LOG = "(details in the server log)"
 SPACE_WAIT = 2.0
-GONE = "this document's source file cannot be found"
-STARTING = "the graph DB is starting -- this carries on by itself once it is ready."
-UNREAD = f"could not be read -- the file may be damaged or hold nothing readable {IN_LOG}"
-PAGE_UNREAD = f"this page could not be read {IN_LOG}"
-UNDRAWN = f"the pages could not be drawn {IN_LOG}"
-
-
-def _mark_failed(session: Session, pages: Iterable[RenderedPage], error: Exception) -> None:
-    traceback.print_exc(file=sys.stderr)
-    for page in pages:
-        session.errors[page.index] = PAGE_UNREAD
-
-
-@dataclass
-class Session:
-    """One document through the pipeline, and what the page needs to show it."""
-
-    source: Path
-    workspace: Path
-    format: DocumentFormat
-    state: str = "idle"
-    """idle | rendering | grouping | reading | captioning | referencing | done | error"""
-    error: str | None = None
-    extracted: ExtractedDocument | None = None
-    store: LocalAssetStore | None = None
-    pages: tuple[RenderedPage, ...] = ()
-    page_of: dict[str, int] = field(default_factory=dict)
-    """The page each node is drawn on (the first, for one crossing a break). Measured once
-    after binding; a DOCX page has to be laid out again to say it."""
-    derived: dict[int, list[dict[str, str]]] = field(default_factory=dict)
-    seconds: dict[int, float] = field(default_factory=dict)
-    pending: set[int] = field(default_factory=set)
-    errors: dict[int, str] = field(default_factory=dict)
-    waiting: Future[None] | None = None
-    """Its reading, queued for a reader: cancelled outright while it has not started."""
-    stop: threading.Event | None = None
-    """The build reading it, stopped: checked between its steps, so a cancel spends no more
-    model calls on it than the step under way. None when no build is reading it."""
-    placed: tuple[ExtractedDocument, Placed] | None = None
-    """Where each node is drawn (`placed_units`), with the graph it was measured on: measured
-    again only once the graph has changed."""
-    # Every replacement of the graph goes through it: pages are read at once and each
-    # answer is applied to whatever the others left.
-    lock: threading.Lock = field(default_factory=threading.Lock)
-    preparing: threading.Lock = field(default_factory=threading.Lock)
-    kept: Kept | None = None
-    """What the graph space holds of a document built earlier -- where each node is drawn,
-    its pages, its graph -- when it was opened from there: shown with no extraction, no
-    binding and no drawing but of the page looked at."""
-    origin: str = ""
-    """Where the original is, as the graph space records it (`SourceStore`): a path on this
-    machine, or a cloud drive's address."""
-    stamp: tuple[int, int] | None = None
-    """The file's size and time when this reading began: another means the file changed."""
-    """Its pages are drawn by one request; another asking meanwhile waits for those pages
-    instead of drawing its own. Another document's pages are not held up by them."""
-
-    def read(self) -> ExtractedDocument:
-        """The graph as it stands; a step that needs one runs only after `_prepare` made it."""
-        if self.extracted is None:
-            raise RuntimeError(f"{self.source.name} has not been extracted")
-        return self.extracted
-
-
-@dataclass
-class ExportJob:
-    """Where the space's export to Neo4j stands: a `.dump` being made, then -- for an upload
-    -- that dump being pushed to Aura. Never holds the Aura password."""
-
-    id: str = ""
-    """Its job id; none for the empty slot a start begins with."""
-    kind: str = ""  # dump | aura-upload
-    state: str = "idle"  # dumping -> uploading -> done | error
-    message: str = ""
-    documents: int | None = None
-    """How many documents it carries, once known."""
-    finished_at: float | None = None
-    """When it was done, in seconds since 1970."""
-
-
-EXPORTING = ("dumping", "uploading")
-
-
-@dataclass
-class CorpusBuild:
-    """Where a folder's build stands: each document read, then all put in the graph space,
-    then the documents they name joined -- one step after another, never interleaved."""
-
-    id: str = ""
-    """Its job id; none for the empty slot a start begins with."""
-    kind: str = "build"
-    """build (read and put in the space) | read (read only) | embed (passages embedded only)"""
-    state: str = "idle"  # reading -> linking -> embedding -> done | cancelled | error
-    done: int = 0
-    total: int = 0
-    """How far the step in progress is."""
-    source: str = ""
-    failed: list[str] = field(default_factory=list)
-    documents: int = 0
-    """Documents put in the graph DB -- for a reading, documents read."""
-    known: int = 0
-    """Documents passed over: their content was in the graph DB already."""
-    carried: int = 0
-    """Files found inside the documents given, read as documents of their own and counted in
-    `total`: said apart, so a total that takes them in does not look like a jump."""
-    links: int = 0
-    skipped: int = 0
-    """Documents a cancel passed over."""
-    embedded: int = 0
-    """Passages embedded for questions."""
-    error: str | None = None
-
-
-# A document is put in the graph DB as soon as it is read: one step to the reader.
-STEP_STATES = {BuildStep.READ: "reading", BuildStep.PUT: "reading", BuildStep.LINK: "linking"}
-BUILDING = ("reading", "linking", "embedding")
-"""A build's states before it is done; embedding follows the three steps when a key is set."""
-STARTABLE = ("idle", "error", "cancelled", "rendered")
-"""States a document's reading can begin from: never started, failed, cancelled, or only
-drawn."""
-FINISHED = ("done", "error", "cancelled")
-"""States a document's reading ends in."""
-CANCELLED = "not read: the build was cancelled"
-"""Why a document a stopped build passed over was not read -- the end of its reason."""
-
-
-class Cancelled(Exception):
-    """A document's reading stopped between steps because its build was cancelled."""
-
-
 READ_TIMEOUT_SECONDS = 4 * 60 * 60
 """How long a build waits for one document's reading before counting it as failed."""
 ROOT_PREFIX = "hierarchy-demo-"
@@ -371,6 +237,9 @@ class Demo:
         self.catalog: dict[str, str] = {}
         self.readers = ThreadPoolExecutor(max_workers=READERS, thread_name_prefix="read")
         """Documents read at once: a folder of thousands queues here, not in a thread each."""
+        self._running = 0
+        """Documents being read now, which share the calls in flight (`_workers`)."""
+        self._counting = threading.Lock()
         self.hashes: dict[str, tuple[tuple[int, int] | None, str]] = {}
         """Each document's file hash, beside the size and time it was worked out at."""
         self.previews: OrderedDict[tuple[str, int, tuple[int, int] | None], bytes] = OrderedDict()
@@ -988,8 +857,23 @@ class Demo:
         return session
 
     def _run(self, session: Session) -> None:
-        self._steps(session, self._prepare, self._read, self._enrich, self._drawn)
+        with self._counting:
+            self._running += 1
+        try:
+            self._steps(session, self._prepare, self._read, self._enrich, self._drawn)
+        finally:
+            with self._counting:
+                self._running -= 1
         self._lighten(session)
+
+    def _workers(self, *, running: int | None = None) -> int:
+        """How many pages a document asks at once: the calls in flight shared among the
+        documents being read now. A thread waiting for a slot does nothing; sixteen documents
+        each asking two dozen pages kept hundreds of them waiting. A document started while
+        few others run keeps its larger share when more start after it."""
+        # ponytail: shared at start, not rebalanced; a shared page pool if that ever matters
+        now = self._running if running is None else running
+        return max(FEWEST_WORKERS, VLM_CALLS_AT_ONCE // max(1, now))
 
     @staticmethod
     def _lighten(session: Session) -> None:
@@ -1029,10 +913,9 @@ class Demo:
         return create_graph_builder(
             self.settings,
             renderer=_Replay(session.pages),
-            vision=create_vision(self.settings, self.client),
+            vision=create_vision(self.settings, self.client, limiter=self.vlm_slots),
             assets=session.store,
-            limiter=self.vlm_slots,
-            workers=VLM_CALLS_AT_ONCE,
+            workers=self._workers(),
         )
 
     def _read(self, session: Session) -> None:

@@ -250,8 +250,9 @@ it at the top. Short ids resolve an exact match, one character apart, or the las
 characters wrong (`_tail_slipped`), each only when exactly one unit fits.
 
 Every page of every format is read side by side, and every page break is joined side by
-side. Every model call takes the provider's `limiter`, so a caller reading several documents
-caps the calls in flight across all of them.
+side. The model adapter holds the caller's `limiter` around each request (`create_vision`) --
+not around the wait before asking again -- so a caller reading several documents caps the calls
+in flight across all of them, and a call sleeping out an overload keeps no slot.
 
 Two measurements go out beside the labels, and both exist because the picture alone was not
 enough. `indent` ranks where each unit's words start (0 leftmost), counting the paragraph
@@ -350,7 +351,8 @@ on, so DOCX passes `page_of` from the same layout the crops came from.
 
 ### Questions over the graph space
 
-`adapters/storage/graph_rag.py` sits on the graph space and shares its
+`adapters/storage/graph_rag.py` (with `hybrid_search.py` and `answer_prompt.py`) sits on the
+graph space and shares its
 driver. `embed-graph` cuts each document's outline into passages
 (`application/graph_chunks.py`: a section that fits `CHUNK_TOKENS` is one passage, a larger
 one is cut between its items under its headings, a single unit too big is cut between its
@@ -363,7 +365,7 @@ dropped, since it would hold none of the new vectors. `ask` runs neo4j-graphrag'
 `chunk_text` fulltext index together, since a vector ranks a passage holding the document
 number a question names below passages that only sound alike -- and walks
 `REFERENCES -> SAME_AS` to bring the cited document's nearest passages along. The two
-rankings are fused by weighted reciprocal rank fusion in our own query (`_FUSED`, k =
+rankings are fused by weighted reciprocal rank fusion in our own query (`hybrid_search.py`, `_FUSED`, k =
 `GRAPHME_RRF_K`, vector weight `GRAPHME_HYBRID_DENSE_WEIGHT`, flipped toward the words for a
 question naming a document number), each index searched well past top_k; the library's own
 max-normalised ranker is not used. The fulltext index uses the `cjk` analyzer -- the standard
@@ -405,8 +407,9 @@ every message, document and sample is written in English. Colours are tokens in 
 them when drawn (`token()`) and draws again on a theme change.
 
 The server is `src/graphme/server/`: `app.py` (`create_app`: the `/v1` routes, the key, the
-error handlers, `/health`, the web app's pages; `serve`), `state.py` (`Demo`, `Session`,
-`CorpusBuild`, `ExportJob`, the job registry and the threads that read and build),
+error handlers, `/health`, the web app's pages; `serve`), `state.py` (`Demo`: the job registry and
+the threads that read and build), `jobs.py` (`Session`, `CorpusBuild`, `ExportJob`, the states
+they pass through and what a failure says),
 `settings.py`, `models.py`. The demo lives in `src/graphme/server/demo.py` (the `POST /v1/samples` route via `extra=`, two readings a
 page and a ten-minute render in `demo_settings`, also passed as `load=` so a save keeps them, and `run`);
 `graphme app` (`src/graphme/launcher.py`: samples, its home folder, the browser) and the checkout's

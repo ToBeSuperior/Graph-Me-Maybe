@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Protocol, TypeVar
 
 from graphme.application.unit_placement import FlowPlacer, home_pages
@@ -127,21 +126,11 @@ def asked_together(
     ask: Callable[[_Job], _Answer],
     *,
     workers: int = 1,
-    limiter: AbstractContextManager[Any] | None = None,
 ) -> list[_Answer]:
-    """Run one question per job side by side, each call holding the caller's limit.
-
-    A page is its own question here -- what one visual shows is not what the document is
-    about -- so the pages go together; `limiter` is what keeps a caller reading several
-    documents under what the endpoint takes.
-    """
-    held = limiter if limiter is not None else nullcontext()
-
-    def asked(job: _Job) -> _Answer:
-        with held:
-            return ask(job)
-
+    """Run one question per job side by side. A page is its own question here -- what one
+    visual shows is not what the document is about -- so the pages go together; the model's
+    own adapter keeps a caller reading several documents under what the endpoint takes."""
     if not jobs:
         return []
     with ThreadPoolExecutor(max_workers=max(1, min(workers, len(jobs)))) as pool:
-        return list(pool.map(asked, jobs))
+        return list(pool.map(ask, jobs))

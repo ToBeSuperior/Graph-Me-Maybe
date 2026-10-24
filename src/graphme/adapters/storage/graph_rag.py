@@ -19,7 +19,6 @@ that, in one call; nothing here reasons from one hop to the next.
 from __future__ import annotations
 
 import logging
-import re
 import threading
 import time
 import unicodedata
@@ -31,17 +30,22 @@ from typing import Any, cast
 import httpx
 import neo4j
 from neo4j_graphrag.indexes import create_vector_index
-from neo4j_graphrag.retrievers import HybridCypherRetriever
 from neo4j_graphrag.types import RetrieverResultItem
-from pydantic import BaseModel, Field
 
 from graphme.adapters.chat import Endpoint, complete, image_part, is_transient
 from graphme.adapters.embedding import BatchEmbedder
 from graphme.adapters.export.neo4j import CHUNK_LABEL, NODE_LABEL
+from graphme.adapters.storage.answer_prompt import (
+    SPLIT_SYSTEM,
+    SYSTEM,
+    _nothing_found,
+    _prompt,
+    _Split,
+)
+from graphme.adapters.storage.hybrid_search import _OnceRetriever
 from graphme.adapters.storage.neo4j_space import CHUNK_TEXT_INDEX, Neo4jGraphSpace, checked_name
 from graphme.adapters.storage.similar_documents import SimilarDocuments
 from graphme.adapters.strict_schema import strict_response_schema
-from graphme.application.corpus_links import document_numbers
 from graphme.application.graph_chunks import CHUNK_RULE, chunks
 from graphme.application.passage_scores import IMPORTANCE_RULE, centroid, importance
 from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop
@@ -78,56 +82,10 @@ PICTURES_FOLLOW = (
 MAX_TOP_K = 20
 """More passages than this is a prompt too long to answer from, not a better answer."""
 
-SYSTEM = (
-    "Answer the question using only the provided context. Answer in the language the "
-    "question is written in, whatever language the context is in; when the question shows no "
-    "language of its own -- only numbers, codes or names -- answer in English. Write the "
-    "whole answer in "
-    "that one language: when it is Korean, write Korean "
-    "(Hangul) throughout, and never use Chinese characters (Hanzi) or Japanese, not even for "
-    "a single word; keep a term in its original form only where the context writes it so, "
-    "such as a part number, a unit or a standard's name. End each statement with the "
-    "[file name] of the context it rests on. If the "
-    "context does not hold the answer, say that it cannot be found in the context, and "
-    "cite nothing. If the context does not establish what the question presupposes -- the "
-    "entity, period, group or document it names -- say that the question cannot be answered "
-    "from the documents rather than answering about something similar: a figure for another "
-    "group, year or document is not an answer about the one asked for. A document applies "
-    "to what it names -- a product, a model, a project, a "
-    "period: where the context's documents are about different things, say which applies "
-    "to what the question asks, and do not carry a rule from one to another."
-)
-SPLIT_SYSTEM = (
-    "Split the user's question into the separate things it asks for, each written as a "
-    "search query of its own, in the question's language. Keep every name, model, number, "
-    "year and term the question uses in each query that is about it -- a query is searched "
-    "alone and must say what it is about. A question that asks for one thing comes back as "
-    "that one query, as written: never several wordings, synonyms or guesses at causes of "
-    "the same thing -- each query must ask for something the others do not. At most three "
-    "queries. Return only JSON matching the schema."
-)
-"""How a question asking several things -- a problem and how competitors handled it -- is
-cut into one search each: one search for both finds what the nearer part is about."""
-MAX_QUERIES = 3
-
-
 ASK_RETRY_DELAYS = (2.0, 5.0)
 """Seconds to wait before asking again when the endpoint turned a question away for now
 (`TRANSIENT_STATUS`, a timeout, a dropped connection): someone is waiting on the answer, so
 this is short, unlike a page reading's schedule."""
-
-
-class _Split(BaseModel):
-    queries: list[str] = Field(min_length=1, max_length=MAX_QUERIES)
-
-
-TEMPLATE = """Context:
-{context}
-
-Question:
-{query_text}
-
-Answer:"""
 
 
 class GraphNotEmbedded(RuntimeError):
@@ -607,9 +565,6 @@ _WAY = ("CASE WHEN 'cites' IN ways THEN 'cites' WHEN 'cited_by' IN ways THEN 'ci
 citation over a likeness."""
 
 
-_LUCENE_SPECIAL = set('+-&|!(){}[]^"~*?:\\/')
-
-
 def _checked(top_k: int) -> None:
     if not 1 <= top_k <= MAX_TOP_K:
         raise ValueError(f"top_k must be between 1 and {MAX_TOP_K}, not {top_k}")
@@ -622,45 +577,6 @@ MATCH (d:Document {{id: n.document_id}})
 RETURN n.id AS id, n.label AS label, n[$key] AS crop, d.file_name AS file
 """
 """Which of a passage's members are pictures with a stored crop (`VISUAL_TYPES`)."""
-
-
-def _prompt(question: str, context: str) -> str:
-    """The question under its context, and for a Korean or an English question -- or one with
-    no language of its own, which is answered in English -- the language said again beside
-    it: told only in the system prompt, ahead of a long context, a smaller model answered
-    Korean questions in English, and English questions in Korean."""
-    prompt = TEMPLATE.format(query_text=question, context=context)
-    if _is_korean(question):
-        return prompt.replace("\n\nAnswer:", "\n\nAnswer in Korean:")
-    if _is_english(question):
-        return prompt.replace("\n\nAnswer:", "\n\nAnswer in English:")
-    return prompt
-
-
-def _is_korean(text: str) -> bool:
-    return any("\uac00" <= character <= "\ud7a3" for character in text)
-
-
-def _is_english(text: str) -> bool:
-    """English, or no language of its own (a number, a code): English is the default."""
-    return all(character.isascii() for character in text if character.isalpha())
-
-
-def _nothing_found(question: str) -> str:
-    """What is said when nothing in the graph is near the question, in its language."""
-    if _is_korean(question):
-        return "그래프에서 이 질문과 관련된 문서를 찾지 못했습니다."
-    return "No document in the graph is related to this question."
-
-
-def _lucene_escaped(text: str) -> str:
-    """The question as plain words for the fulltext index, always: every Lucene special
-    character escaped -- a `?` ending a Korean question is otherwise a wildcard, and a wildcard
-    term skips the analyzer, so its last word never matched -- and the operators Lucene reads
-    only in capitals (AND, OR, NOT) written in small letters. The vector search is given the
-    question as it was asked."""
-    escaped = "".join(f"\\{ch}" if ch in _LUCENE_SPECIAL else ch for ch in text)
-    return re.sub(r"\b(AND|OR|NOT)\b", lambda m: m.group(1).lower(), escaped)
 
 
 def _item(record: neo4j.Record) -> RetrieverResultItem:
@@ -702,172 +618,6 @@ def _composed(text: str) -> str:
 
 _HOW = {"cites": "cites", "cited_by": "is cited by", "similar": "is similar to"}
 """How the document a link starts from stands to the one it reaches, as the model reads it."""
-
-
-def fusion_weights(question: str, *, dense: float) -> tuple[float, float]:
-    """How much the vector and the fulltext search count for this question. One naming a
-    document or part by its number leans on the words: an identifier is matched by its letters,
-    and BM25 serves specific questions better than cosine (arXiv:2504.05324). A weight already
-    leaning on the words stays as set."""
-    text = 1.0 - dense
-    if _names_an_identifier(question) and dense > text:
-        return round(text, 6), round(dense, 6)
-    return round(dense, 6), round(text, 6)
-
-
-_IDENTIFIER = re.compile(r"(?=[\w-]*[A-Za-z])(?=[\w-]*\d)[A-Za-z0-9][\w-]{2,}", re.ASCII)
-"""A word of Latin letters and digits together, three characters or more -- QP-210, V50-0003,
-ZX42 -- the way a document, a part or a lot is named; a plain number or a unit is not one."""
-
-
-def _names_an_identifier(question: str) -> bool:
-    return bool(named_identifiers(question))
-
-
-def candidates(top_k: int) -> int:
-    """Each search's candidates for the fusion: four times top_k, at least 200. A passage only
-    one search ranks is still fused, so each list reaches well past top_k -- the ANN search's
-    recall at that depth bounds what the fusion can find. The answer is often first in one
-    search and far down the other: at 40 it was left with one search's part and lost to
-    passages middling in both."""
-    return max(200, 4 * top_k)
-
-
-class _OnceRetriever(HybridCypherRetriever):
-    """Neo4j's two indexes -- vector (ANN) and fulltext (BM25) -- searched by our own query
-    (`fused`), the rankings fused by weighted reciprocal rank fusion rather than the library's
-    max-normalised scores; each document shown once across what a question finds (`_once`),
-    and only passages something says are about the question (`_FUSED`). It keeps the library's
-    retriever for its constructor, which checks the two indexes are there."""
-
-    def __init__(self, driver: neo4j.Driver, *, floor: float, dense_weight: float, rrf_k: int,
-                 **kwargs: Any) -> None:
-        super().__init__(driver, **kwargs)
-        self.floor = floor
-        """`Settings.relevance_floor`."""
-        self.dense_weight = dense_weight
-        """`Settings.hybrid_dense_weight`."""
-        self.rrf_k = rrf_k
-        """`Settings.rrf_k`."""
-
-    def fused(self, question: str, top_k: int) -> list[neo4j.Record]:
-        """The passages both searches rank, fused: a passage ranked r by a search counts that
-        search's weight / (rrf_k + r), and its score is the sum, scaled so a passage first in
-        both scores 1 -- the relative relevance the page shows. A passage is fused only with
-        evidence it is about the question (`_FUSED`); none, and the search found nothing.
-        Highest score first: the query's later steps keep no order."""
-        assert self.embedder is not None
-        if not self._holds_any(named_identifiers(question)):
-            return []
-        dense, text = fusion_weights(question, dense=self.dense_weight)
-        records, _, _ = self.driver.execute_query(
-            _FUSED + self.retrieval_query,
-            {
-                "vector_index_name": self.vector_index_name,
-                "fulltext_index_name": self.fulltext_index_name,
-                "query_text": _lucene_escaped(question),
-                "every_word": every_word(question), "floor": self.floor,
-                "query_vector": self.embedder.embed_query(question),
-                "candidates": candidates(top_k),
-                "dense_weight": dense, "text_weight": text, "rrf_k": self.rrf_k,
-                "top_k": top_k,
-            },
-            database_=self.neo4j_database,
-            routing_=neo4j.RoutingControl.READ,
-        )
-        return sorted(records, key=lambda record: record["score"], reverse=True)
-
-
-    def _holds_any(self, named: list[str]) -> bool:
-        """Whether some passage holds one of the identifiers a question names -- true when it
-        names none. One naming only numbers nothing holds asks about a document not here, and
-        passages that merely sound alike are no answer to it."""
-        if not named:
-            return True
-        records, _, _ = self.driver.execute_query(
-            "CALL db.index.fulltext.queryNodes($index, $words, {limit: 1}) YIELD node "
-            "RETURN count(node) AS found",
-            {"index": self.fulltext_index_name,
-             "words": any_named(named)},
-            database_=self.neo4j_database,
-            routing_=neo4j.RoutingControl.READ,
-        )
-        return bool(records and records[0]["found"])
-
-
-_FUSED = """
-CALL () {
-  CALL db.index.vector.queryNodes($vector_index_name, $candidates, $query_vector)
-    YIELD node, score
-  WITH collect({node: node, near: 2 * score - 1 >= $floor}) AS ranked
-  UNWIND range(0, size(ranked) - 1) AS at
-  RETURN ranked[at].node AS node, $dense_weight / ($rrf_k + at + 1) AS part,
-         ranked[at].near AS about
-  UNION ALL
-  CALL db.index.fulltext.queryNodes($fulltext_index_name, $query_text, {limit: $candidates})
-    YIELD node, score
-  WITH collect(node) AS ranked
-  UNWIND range(0, size(ranked) - 1) AS at
-  RETURN ranked[at] AS node, $text_weight / ($rrf_k + at + 1) AS part, false AS about
-  UNION ALL
-  WITH $every_word AS words WHERE words <> ''
-  CALL db.index.fulltext.queryNodes($fulltext_index_name, words, {limit: $candidates})
-    YIELD node
-  RETURN node, 0.0 AS part, true AS about
-}
-WITH node, sum(part) * ($rrf_k + 1) AS score, true IN collect(about) AS about
-WHERE about
-ORDER BY score DESC, elementId(node)
-LIMIT $top_k
-"""
-"""Weighted reciprocal rank fusion of Neo4j's two indexes over the passages, each searched to
-`candidates`. Rank says nothing about whether anything was found -- every search has a first --
-so a passage is kept only with evidence it is about the question: its cosine (Neo4j gives
-(1 + cos) / 2) reaches `relevance_floor`, or it holds the question's words (`every_word`). A
-fulltext match on some of them is not that: a nonsense question shares a common word with
-something. What follows is the retrieval query, which reads `node` and `score`."""
-
-
-def every_word(question: str) -> str:
-    """A Lucene query for the passages holding every word of the question, each as a phrase so a
-    word cut into pieces by the analyzer is still matched whole -- or every identifier it names
-    (`_IDENTIFIER`, `document_numbers`), since a question about a numbered document is answered
-    by the passages holding the number, whatever else it asks. Empty with no word in it."""
-    # Lower case, as the analyzer reads them, so the same word is not asked for twice.
-    words = _words(question)
-    named = named_identifiers(question)
-    groups = [" AND ".join(_held(word) for word in group) for group in (words, named) if group]
-    return " OR ".join(f"({group})" for group in dict.fromkeys(groups))
-
-
-def any_named(named: Sequence[str]) -> str:
-    """A Lucene query for the passages holding any of these identifiers (`_held`)."""
-    return " OR ".join(_held(word) for word in named)
-
-
-def _held(word: str) -> str:
-    """A word as the index holds it: the phrase -- or, for one ending in Latin letters or
-    digits, the same pieces with Hangul run on after the last. The `cjk` analyzer keeps a
-    particle on what it follows ("QP-210의" is the token "210의"), so the phrase alone missed
-    every Korean sentence naming the number; only Hangul may run on, so 210 is not 2100."""
-    pieces = re.findall(r"[^\W_]+", word)
-    if not pieces or not re.fullmatch(r"[a-z0-9]+", pieces[-1]):
-        return f'"{word}"'
-    run_on = " AND ".join([*pieces[:-1], f"/{pieces[-1]}[가-힣]+/"])
-    return f'("{word}" OR ({run_on}))'
-
-
-def _words(question: str) -> list[str]:
-    return list(dict.fromkeys(w.lower() for w in re.findall(r"[^\W_][\w-]*", question)))
-
-
-def named_identifiers(question: str) -> list[str]:
-    """The document numbers and identifiers (`_IDENTIFIER`) a question names, lower case and
-    without the particle written right after one ("QP-210의"). A word is cut where its Latin
-    letters and digits end."""
-    words = (word.lower() for word in re.findall(r"[A-Za-z0-9][\w-]*", question, re.ASCII))
-    numbers = (re.sub(r"[가-힣]+$", "", number) for number in sorted(document_numbers(question)))
-    return list(dict.fromkeys([*numbers, *(w for w in words if _IDENTIFIER.fullmatch(w))]))
 
 
 def _once(records: list[neo4j.Record], *, each_folder: bool = False) -> list[neo4j.Record]:

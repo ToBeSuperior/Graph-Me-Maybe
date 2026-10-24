@@ -82,12 +82,16 @@ def create_embedder(settings: Settings) -> OpenAIBatchEmbeddings:
     )
 
 
-def create_vision(settings: Settings, client: httpx.Client) -> ChatCompletionsVLMAdapter:
-    """The page-reading model: one adapter shape for every pass that reads a page."""
+def create_vision(
+    settings: Settings, client: httpx.Client, *,
+    limiter: AbstractContextManager[Any] | None = None,
+) -> ChatCompletionsVLMAdapter:
+    """The page-reading model: one adapter shape for every pass that reads a page. `limiter`
+    is held around each of its requests, for a caller reading several documents at once."""
     endpoint = chat_endpoint(settings)
     return ChatCompletionsVLMAdapter(
         base_url=endpoint.base_url, model=endpoint.model, client=client,
-        api_key=endpoint.key, wire=endpoint.wire,
+        api_key=endpoint.key, wire=endpoint.wire, limiter=limiter,
     )
 
 
@@ -106,14 +110,13 @@ def graph_parts(
     renderer: Any,
     vision: VisionProvider,
     assets: Any,
-    limiter: AbstractContextManager[Any] | None = None,
     workers: int = 1,
 ) -> dict[str, Any]:
     """What turning a document into its graph needs, wired one way for every caller.
 
     The outline is read off the page, and with it the figures, the paragraphs before the
     outline and, after it, what visuals show and which documents the pages name.
-    `limiter` and `workers` are for a caller reading several documents at once.
+    `workers` is how many pages are asked at once.
     """
     return {
         "extractors": {
@@ -128,18 +131,17 @@ def graph_parts(
             vision=vision,
             asset_store=assets,
             readings=settings.hierarchy_readings,
-            limiter=limiter,
             workers=workers,
         ),
         # Between the figures and the outline: what a figure swallowed is not a paragraph,
         # and an outline drawn over half a paragraph places half a paragraph.
-        "unit_grouper": RenderedUnitGrouper(renderer=renderer, vision=vision, limiter=limiter),
+        "unit_grouper": RenderedUnitGrouper(renderer=renderer, vision=vision),
         # Captions and named documents are read off the same rendering the outline is. A
         # named document stands as an empty node; which indexed document it is is said across
         # the corpus (`application/corpus_links.py`), whatever order they arrive in.
         "enricher": RenderedPageEnricher(
             renderer=renderer, vision=vision, asset_store=assets,
-            workers=workers, limiter=limiter,
+            workers=workers,
         ),
     }
 

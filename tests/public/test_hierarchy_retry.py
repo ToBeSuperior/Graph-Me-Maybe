@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from io import BytesIO
 
 import httpx
@@ -106,3 +107,35 @@ def test_a_key_the_endpoint_refuses_still_stops_everything() -> None:
         assert error.response.status_code == 401
     else:
         raise AssertionError("a refused key is not a page left unread")
+
+
+def test_a_call_holds_its_slot_while_asked_and_not_while_waiting_to_ask_again() -> None:
+    # A busy endpoint turns calls away for minutes; a slot held through the wait before asking
+    # again kept every other document's calls waiting behind one that was only sleeping.
+    image = _page()
+    slots = threading.Semaphore(1)
+    held_while: list[str] = []
+    decided = json.dumps({"decisions": [{
+        "subject": "subject", "status": "root", "parent": None, "confidence": 0.9,
+        "rationale": "One unit.",
+    }]})
+    tries: list[int] = []
+
+    def handle(_request: httpx.Request) -> httpx.Response:
+        held_while.append("asking" if not slots.acquire(blocking=False) else "free")
+        if held_while[-1] == "free":
+            slots.release()
+        tries.append(1)
+        return httpx.Response(503) if len(tries) == 1 else _answer(decided)
+
+    def wait(_seconds: float) -> None:
+        held_while.append("waiting, held" if not slots.acquire(blocking=False) else "waiting")
+        if held_while[-1] == "waiting":
+            slots.release()
+
+    adapter = ChatCompletionsVLMAdapter(
+        base_url="http://127.0.0.1:8000/v1", model="vlm-test",
+        client=httpx.Client(transport=httpx.MockTransport(handle)), wait=wait, limiter=slots)
+    adapter.resolve_hierarchy_scope(request=_request(image), image=image)
+
+    assert held_while == ["asking", "waiting", "asking"]

@@ -14,7 +14,8 @@ from graphme.adapters.rendering.pdf_pages import PdfPageRenderer
 from graphme.adapters.rendering.visual_binding import with_geometry
 from graphme.domain.enums import DocumentFormat
 from graphme.server import create_app
-from graphme.server.state import Demo, Session
+from graphme.server.jobs import Session
+from graphme.server.state import Demo
 from tests.public.server.conftest import SETTINGS, FakeSpace
 
 

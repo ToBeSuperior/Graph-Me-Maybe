@@ -363,7 +363,7 @@ def test_while_the_graph_is_being_opened_another_request_is_told_to_wait(
     # Neo4j being fetched and started held every request past the page's own timeout.
     import threading
 
-    from graphme.server.state import GraphStarting
+    from graphme.server.jobs import GraphStarting
     held = threading.Event()
     release = threading.Event()
     demo.graph._space = None  # not opened yet: the opening below holds the way
@@ -388,7 +388,7 @@ def test_a_page_request_never_does_the_slow_opening_itself(demo, monkeypatch) ->
     import threading
     import time
 
-    from graphme.server.state import GraphStarting
+    from graphme.server.jobs import GraphStarting
 
     opened = threading.Event()
     space = demo.graph._space
@@ -417,7 +417,7 @@ def test_when_the_opening_fails_no_waiting_request_opens_the_graph_itself(
     import threading
     import time
 
-    from graphme.server.state import GraphStarting
+    from graphme.server.jobs import GraphStarting
 
     demo.graph._space = None
     calls: list[str] = []
@@ -576,3 +576,12 @@ def test_a_document_put_in_is_no_longer_shown_as_waiting_to_be_put(
 
     assert until(lambda: build.state == "done"), build
     assert len(waiting) == 2 and waiting[-1] == set()
+
+
+def test_a_document_read_beside_many_others_asks_its_pages_a_few_at_a_time(demo: Demo) -> None:
+    """Every document read side by side shares the same calls in flight: one read alone asks
+    as many pages at once as there are, but sixteen at once each kept two dozen threads
+    waiting for a slot -- hundreds idle. A document's share is what is left for it."""
+    assert demo._workers(running=1) == state.VLM_CALLS_AT_ONCE
+    assert demo._workers(running=state.READERS) == state.FEWEST_WORKERS
+    assert state.FEWEST_WORKERS * state.READERS < 3 * state.VLM_CALLS_AT_ONCE

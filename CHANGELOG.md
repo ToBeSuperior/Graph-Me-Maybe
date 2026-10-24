@@ -5,6 +5,15 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-10-24
+
+### Changed
+
+- A call waiting to ask the model again after it was turned away (an overloaded endpoint) no
+  longer keeps its slot: other documents' calls go on meanwhile.
+- A document read beside many others asks a few of its pages at a time instead of two dozen,
+  so a large build no longer keeps hundreds of idle threads.
+
 ## [0.1.22] - 2026-10-24
 
 ### Added

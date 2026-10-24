@@ -11,11 +11,9 @@ import hashlib
 import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AbstractContextManager, nullcontext
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
-from typing import Any
 
 from PIL import Image
 
@@ -115,16 +113,12 @@ class RenderedHierarchyScopeProvider:
         vision: VisionProvider,
         asset_store: AssetStore | None = None,
         readings: int = 1,
-        limiter: AbstractContextManager[Any] | None = None,
         workers: int = 1,
     ) -> None:
         if readings < 1:
             raise ValueError("a scope needs at least one reading")
         self._workers = max(1, workers)
         """How many pages, and page breaks, are asked at once."""
-        self._limiter = limiter if limiter is not None else nullcontext()
-        """Held around every model call, so a caller reading several documents at once caps
-        the calls in flight across all of them."""
         self._renderer = renderer
         self._vision = vision
         self._asset_store = asset_store
@@ -169,10 +163,9 @@ class RenderedHierarchyScopeProvider:
             scope, shown, crops = asked
             request = self._request(extracted, scope, shown)
             try:
-                with self._limiter:
-                    answered = self._vision.group_page_figures(
-                        request=request, image=shown.png, unit_images=crops
-                    )
+                answered = self._vision.group_page_figures(
+                    request=request, image=shown.png, unit_images=crops
+                )
             except RuntimeError as error:
                 # A page whose figures cannot be read keeps the territory measurement gave
                 # it. Nothing is grouped there, and the rest of the document still is.
@@ -252,8 +245,7 @@ class RenderedHierarchyScopeProvider:
         if not lines or len(lines) > MAX_HEADING_LINES:
             return ()
         try:
-            with self._limiter:
-                answered = self._vision.outline_headings(lines=lines)
+            answered = self._vision.outline_headings(lines=lines)
         except RuntimeError as error:
             _log.warning("no usable headings, joined without them -- %s", error)
             return ()
@@ -309,8 +301,7 @@ class RenderedHierarchyScopeProvider:
         """One page break: `JOIN_READINGS` readings, a third where they differ, the vote."""
         def once() -> tuple[JoinPlacement, ...]:
             try:
-                with self._limiter:
-                    return self._vision.join_page(request=request)
+                return self._vision.join_page(request=request)
             except RuntimeError as error:
                 _log.warning("page %d: no usable join -- %s", request.page_index, error)
                 return ()
@@ -387,10 +378,9 @@ class RenderedHierarchyScopeProvider:
     ) -> HierarchyScopeResult:
         """One page's outline, read as many times as asked and settled against the page."""
         def once() -> HierarchyScopeResult:
-            with self._limiter:
-                return self._vision.resolve_hierarchy_scope(
-                    request=request, image=image, unit_images=crops, preceding=preceding
-                )
+            return self._vision.resolve_hierarchy_scope(
+                request=request, image=image, unit_images=crops, preceding=preceding
+            )
 
         if self._readings == 1:
             return once()
@@ -403,10 +393,9 @@ class RenderedHierarchyScopeProvider:
         if len({_stated(reading) for reading in readings}) == 1:
             _log.info("%s: %d readings agreed", request.scope, len(readings))
             return readings[0]
-        with self._limiter:
-            choice = self._vision.choose_hierarchy_scope(
-                request=request, image=image, candidates=readings, unit_images=crops
-            )
+        choice = self._vision.choose_hierarchy_scope(
+            request=request, image=image, candidates=readings, unit_images=crops
+        )
         if not 1 <= choice.chosen <= len(readings):
             raise ValueError("the settled reading is not one of the readings sent")
         _log.info(

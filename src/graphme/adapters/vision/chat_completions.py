@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from io import BytesIO
 from typing import Any, Literal, TypeVar
 
@@ -166,6 +167,8 @@ class _ShortIdDecision(BaseModel):
     parent: str | None = Field(default=None, min_length=1, max_length=200)
     confidence: float = Field(ge=0.0, le=1.0)
     rationale: str = Field(min_length=1, max_length=2000)
+    """Read by nothing, and still asked: answered without it, the outline came out wrong more
+    often, enough to cost more than the words it takes."""
 
 
 def _unit_payload(
@@ -408,10 +411,14 @@ class ChatCompletionsVLMAdapter:
         api_key: str | None = None,
         wire: Wire = "chat_completions",
         wait: Callable[[float], None] = time.sleep,
+        limiter: AbstractContextManager[Any] | None = None,
     ) -> None:
         self._endpoint = Endpoint(wire, base_url, model, api_key)
         self._client = client
         self._wait = wait
+        self._limiter = limiter if limiter is not None else nullcontext()
+        """Held around each request and nothing else -- not the wait before asking again -- so
+        a caller reading several documents caps the calls in flight across all of them."""
 
     def group_page_figures(
         self,
@@ -868,8 +875,9 @@ class ChatCompletionsVLMAdapter:
         system: str,
         user_content: str | list[dict[str, Any]],
     ) -> Any:
-        text = complete(self._client, self._endpoint, system=system, content=user_content,
-                        schema=schema, name=schema_name)
+        with self._limiter:
+            text = complete(self._client, self._endpoint, system=system, content=user_content,
+                            schema=schema, name=schema_name)
         try:
             return json.loads(text)
         except json.JSONDecodeError as error:

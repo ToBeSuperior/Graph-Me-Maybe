@@ -15,7 +15,6 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from contextlib import AbstractContextManager
 from typing import Any
 
 from graphme.application.corpus_links import document_numbers, generic_name
@@ -65,7 +64,6 @@ def link_references(
     asset_store: AssetStore | None = None,
     page_of: Mapping[str, int] | None = None,
     workers: int = 1,
-    limiter: AbstractContextManager[Any] | None = None,
 ) -> ExtractedDocument:
     """Add a node for every other document this one names, and point the mention at it."""
     by_page = units_by_page(extracted, pages, kinds=NAMING_TYPES, page_of=page_of)
@@ -98,7 +96,7 @@ def link_references(
     texts = {node.id: node.text for node in extracted.nodes}
     tabled = _in_tables(extracted)
     citations: list[Citation] = []
-    for answer in asked_together(jobs, read, workers=workers, limiter=limiter):
+    for answer in asked_together(jobs, read, workers=workers):
         for reference in answer.references if answer is not None else ():
             name = reference.name.strip()
             if not name or not _written(reference, texts.get(reference.subject_id)):

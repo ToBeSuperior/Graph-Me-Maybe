@@ -7,7 +7,6 @@ to what it drew. Rendering a long document twice cost more than either question 
 from __future__ import annotations
 
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -42,14 +41,12 @@ class RenderedPageEnricher:
         vision: VisionProvider,
         asset_store: AssetStore,
         workers: int = 1,
-        limiter: AbstractContextManager[Any] | None = None,
     ) -> None:
         self._renderer = renderer
         self._vision = vision
         self._asset_store = asset_store
         self._workers = workers
         """How many pages are asked at once; each page is its own question here."""
-        self._limiter = limiter
 
     def enrich(
         self,
@@ -71,7 +68,6 @@ class RenderedPageEnricher:
             asset_store=self._asset_store,
             page_of=page_of,
             workers=self._workers,
-            limiter=self._limiter,
         )
         told("referencing")
         return link_references(
@@ -81,5 +77,4 @@ class RenderedPageEnricher:
             asset_store=self._asset_store,
             page_of=page_of,
             workers=self._workers,
-            limiter=self._limiter,
         )
