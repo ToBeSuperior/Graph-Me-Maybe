@@ -5,6 +5,14 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.25] - 2026-10-24
+
+### Changed
+
+- Keys and model asks who answers and who searches first, then the keys, each marked for
+  answers or for search: an OpenAI key at the top no longer reads as required when another
+  provider answers.
+
 ## [0.1.24] - 2026-10-24
 
 ### Changed

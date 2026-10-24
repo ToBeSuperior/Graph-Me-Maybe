@@ -127,7 +127,10 @@ test('choosing Anthropic asks for its key on the same save', async ({ page }) =>
   await page.goto('/');
   await page.getByRole('link', { name: '설정 열기' }).click();
   await expect(page.getByLabel('Anthropic API 키')).toHaveCount(0);
+  // Who answers is chosen first, above the keys, and each key says what it is for.
+  await expect(page.locator('form label').first()).toContainText('채팅 제공자');
   await page.getByLabel('채팅 제공자').selectOption('anthropic');
+  await expect(page.getByText('채팅용', { exact: true })).toBeVisible();
   await page.getByLabel('Anthropic API 키').fill('sk-ant-test-abcd');
   await page.getByRole('button', { name: '저장' }).click();
   await expect(page.getByRole('status')).toHaveText('저장했습니다');

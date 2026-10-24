@@ -25,6 +25,17 @@ export function SettingsPage() {
     return env && !fields.some((g) => g.env === env)
       ? [{ env, secret: true, set: false, value: null, hint: null, choices: null }] : [];
   });
+  // Who answers and who embeds come first, then the keys they read, each saying what for.
+  const chosen = (env: string) => {
+    const f = fields.find((g) => g.env === env);
+    return f?.choices?.[values[env] || f.value || ''];
+  };
+  const roles = (env: string) => [
+    ...(chosen('GRAPHME_PROVIDER') === env ? [t('keyForChat')] : []),
+    ...(chosen('GRAPHME_EMBEDDING_PROVIDER') === env ? [t('keyForSearch')] : []),
+  ];
+  const ordered = [...fields.filter((f) => f.choices), ...keyFields,
+    ...fields.filter((f) => !f.choices)];
   const choose = (env: string, value: string, current: string | null | undefined) => {
     const next = { ...values };
     if (value === current) delete next[env]; else next[env] = value;
@@ -60,10 +71,11 @@ export function SettingsPage() {
           <p className="flex items-center gap-2 text-sm text-muted"><CheckCircle2 className="size-4 text-ok" />{t('settingsReady')}</p>
         ))}
         <form className="grid gap-4" autoComplete="off" onSubmit={(e) => { e.preventDefault(); void save(); }}>
-          {[...keyFields, ...fields].map((f) => (
+          {ordered.map((f) => (
             <label key={f.env} className="grid gap-1">
               <span className="flex items-baseline gap-2 text-sm font-medium">
                 {t('settingName', f.env)}
+                {roles(f.env).map((role) => <span key={role} className="rounded bg-accent/10 px-1.5 text-2xs font-normal text-accent">{role}</span>)}
                 {f.secret && <span className="text-xs font-normal text-muted">{f.set ? t('keySet', f.hint ?? null) : t('keyUnset')}</span>}
               </span>
               {f.choices ? (
