@@ -5,6 +5,15 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.31] - 2026-10-24
+
+### Fixed
+
+- A PDF with many tables is prepared several times faster: a table's text is read once
+  rather than once for each cell. Documents waiting to be read beside one being read no
+  longer sit in "drawing pages" for minutes. A letter drawn across a cell's rule now goes to
+  the cell holding most of it.
+
 ## [0.1.30] - 2026-10-24
 
 ### Added

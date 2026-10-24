@@ -73,6 +73,11 @@ def page_text(page: pymupdf.Page, **options: Any) -> dict[str, Any]:
 
     Boxes are in the page as it is shown, as `page.rect`, the rendered page and the table
     finder have them: pymupdf reports text on a page with /Rotate in the unturned page."""
+    return _spaced(_glyphs(page, **options))
+
+
+def _glyphs(page: pymupdf.Page, **options: Any) -> dict[str, Any]:
+    """`page.get_text("rawdict")` in the page as it is shown: its glyphs still apart."""
     turned = bool(page.rotation)
     sort = bool(options.pop("sort", False)) if turned else False
     if turned and options.get("clip") is not None:
@@ -82,6 +87,11 @@ def page_text(page: pymupdf.Page, **options: Any) -> dict[str, Any]:
         _turn(raw, page.rotation_matrix)
         if sort:
             raw["blocks"].sort(key=lambda b: (b["bbox"][3], b["bbox"][0]))
+    return raw
+
+
+def _spaced(raw: dict[str, Any]) -> dict[str, Any]:
+    """Each span of `raw` given its text, its glyphs spaced as `page_text` says."""
     for block in raw.get("blocks", ()):
         for line in block.get("lines", ()):
             glyphs = [(char, float(span.get("size", 0.0)) or 1.0)
@@ -115,15 +125,39 @@ def table_cells(page: pymupdf.Page, table: Any) -> list[list[str | None]]:
     """A found table's cells, row by row, each read the way the page's text is (`page_text`):
     the table finder's own extraction ran a Korean cell's words together where the page only
     moved the pen between them. A cell another one spans over is None, as the finder has it."""
-    return [
-        [None if cell is None else _text_in(page, pymupdf.Rect(cell))  # type: ignore[no-untyped-call]
-         for cell in row.cells]
-        for row in table.rows
-    ]
+    rows = [[None if cell is None else pymupdf.Rect(cell) for cell in row.cells]  # type: ignore[no-untyped-call]
+            for row in table.rows]
+    # The table's glyphs read once, each cell taking those lying inside it: a page read for
+    # every cell made a page of a long table cost seconds, all of it holding the interpreter lock.
+    glyphs = _glyphs(page, clip=table.bbox)
+    return [[None if cell is None else _text_of(_within(glyphs, cell)) for cell in row]
+            for row in rows]
 
 
-def _text_in(page: pymupdf.Page, area: Any) -> str:
-    raw = page_text(page, clip=area)
+def _within(raw: dict[str, Any], area: Any) -> dict[str, Any]:
+    """`raw` with only the glyphs whose middle lies in `area`: each glyph in one cell, where a
+    glyph astride a rule went to both cells or neither."""
+    x0, y0, x1, y1 = (float(v) for v in area)
+
+    def inside(box: Sequence[float]) -> bool:
+        return x0 <= (box[0] + box[2]) / 2 <= x1 and y0 <= (box[1] + box[3]) / 2 <= y1
+    blocks = []
+    for block in raw.get("blocks", ()):
+        if block.get("type") != 0:
+            continue
+        lines = []
+        for line in block.get("lines", ()):
+            spans = [{**span, "chars": chars} for span in line.get("spans", ())
+                     if (chars := [c for c in span.get("chars", ()) if inside(c["bbox"])])]
+            if spans:
+                lines.append({**line, "spans": spans})
+        if lines:
+            blocks.append({**block, "lines": lines})
+    return {**raw, "blocks": blocks}
+
+
+def _text_of(raw: dict[str, Any]) -> str:
+    raw = _spaced(raw)
     return "\n".join(
         "".join(span["text"] for span in line["spans"])
         for block in raw.get("blocks", ()) if block.get("type") == 0
