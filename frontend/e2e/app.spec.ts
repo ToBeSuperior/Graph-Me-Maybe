@@ -159,6 +159,18 @@ test('the build under way is the newest build job, and its cancel names it', asy
   await expect.poll(() => fake.cancelled).toEqual(['b1']);
 });
 
+test('a build under way says how far its reading is', async ({ page }) => {
+  await fakeApi(page, { jobs: [{ ...BUILD, percent: 42 }] });
+  await page.goto('/manage');
+  await expect(page.getByText('그래프 만드는 중 42%')).toBeVisible();
+});
+
+test('a document being read says how far, and which stage', async ({ page }) => {
+  await fakeApi(page, { progress: { stage: 'outline', done: 12, total: 40, percent: 63 } });
+  await page.goto('/manage/docs/f1?demo=1');
+  await expect(page.getByText('읽는 중 · 63% — 개요 12/40')).toBeVisible();
+});
+
 test('a finished dump is fetched from its own job', async ({ page }) => {
   await fakeApi(page, { jobs: [
     { id: 'd1', kind: 'dump', state: 'done', message: '4 KB', documents: 3, finished_at: 1767225600, dump_ready: true },

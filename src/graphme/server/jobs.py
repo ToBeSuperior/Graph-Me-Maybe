@@ -16,6 +16,7 @@ from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.application.corpus_build import (
     BuildStep,
 )
+from graphme.application.progress import Progress
 from graphme.domain.enums import DocumentFormat
 from graphme.domain.models import ExtractedDocument
 
@@ -80,6 +81,8 @@ class Session:
     derived: dict[int, list[dict[str, str]]] = field(default_factory=dict)
     seconds: dict[int, float] = field(default_factory=dict)
     pending: set[int] = field(default_factory=set)
+    progress: Progress = field(default_factory=Progress)
+    """The questions its reading plans and has answered: how far along it is."""
     errors: dict[int, str] = field(default_factory=dict)
     waiting: Future[None] | None = None
     """Its reading, queued for a reader: cancelled outright while it has not started."""
@@ -158,6 +161,9 @@ class CorpusBuild:
     """Documents a cancel passed over."""
     embedded: int = 0
     """Passages embedded for questions."""
+    percent: int | None = None
+    """How far the reading is, over every document's questions; None for a job that reads
+    nothing (embedding alone)."""
     error: str | None = None
 
 

@@ -12,6 +12,7 @@ from typing import Any, Protocol
 
 from graphme.application.document_references import link_references
 from graphme.application.page_units import flow_pages
+from graphme.application.progress import Progress
 from graphme.application.visual_captions import caption_visuals
 from graphme.domain.models import ExtractedDocument
 from graphme.ports.storage import AssetStore
@@ -41,11 +42,13 @@ class RenderedPageEnricher:
         vision: VisionProvider,
         asset_store: AssetStore,
         workers: int = 1,
+        progress: Progress | None = None,
     ) -> None:
         self._renderer = renderer
         self._vision = vision
         self._asset_store = asset_store
         self._workers = workers
+        self._progress = progress
         """How many pages are asked at once; each page is its own question here."""
 
     def enrich(
@@ -68,6 +71,7 @@ class RenderedPageEnricher:
             asset_store=self._asset_store,
             page_of=page_of,
             workers=self._workers,
+            progress=self._progress,
         )
         told("referencing")
         return link_references(
@@ -77,4 +81,5 @@ class RenderedPageEnricher:
             asset_store=self._asset_store,
             page_of=page_of,
             workers=self._workers,
+            progress=self._progress,
         )

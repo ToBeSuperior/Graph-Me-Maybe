@@ -35,6 +35,7 @@ from graphme.application.page_hierarchy_scope import (
     build_sheet_scope,
 )
 from graphme.application.page_units import flow_pages
+from graphme.application.progress import Progress
 from graphme.application.unit_placement import (
     FlowPlacer,
     NormalizedBoxPlacer,
@@ -114,11 +115,14 @@ class RenderedHierarchyScopeProvider:
         asset_store: AssetStore | None = None,
         readings: int = 1,
         workers: int = 1,
+        progress: Progress | None = None,
     ) -> None:
         if readings < 1:
             raise ValueError("a scope needs at least one reading")
         self._workers = max(1, workers)
         """How many pages, and page breaks, are asked at once."""
+        self._progress = progress or Progress()
+        """Counts each page and page break asked, for whoever shows how far the reading is."""
         self._renderer = renderer
         self._vision = vision
         self._asset_store = asset_store
@@ -156,7 +160,15 @@ class RenderedHierarchyScopeProvider:
         home = flow_pages(extracted, pages, document_format)
         drawings = self._drawings(source_path, document_format)
 
+        self._progress.plan("figures", len(pages))
+
         def read(page: RenderedPage) -> tuple[HierarchyFigureGroup, ...]:
+            try:
+                return figures_of(page)
+            finally:
+                self._progress.step("figures")
+
+        def figures_of(page: RenderedPage) -> tuple[HierarchyFigureGroup, ...]:
             asked = self._asked(extracted, page, home, nodes, drawings)
             if asked is None:
                 return ()
@@ -203,6 +215,7 @@ class RenderedHierarchyScopeProvider:
         drawings = self._drawings(source_path, document_format)
         flowing = document_format in FLOW_FORMATS
         if not flowing:
+            self._progress.plan("outline", len(pages))
             return self._derive_apart(extracted, pages, home, nodes, drawings, on_page)
         asked = {page.index: self._asked(extracted, page, home, nodes, drawings)
                  for page in pages}
@@ -210,7 +223,10 @@ class RenderedHierarchyScopeProvider:
         units = {unit.id: unit for _, scope in scopes for unit in scope.units}
         order = {unit.id: (index, place) for index, scope in scopes
                  for place, unit in enumerate(scope.units)}
+        # The headings, a page each, a page break each; the breaks counted again once read.
+        self._progress.plan("outline", 1 + len(scopes) + max(0, len(scopes) - 1))
         heads = self._headings(scopes)
+        self._progress.step("outline")
         read = self._read_pages(extracted, pages, asked, heads, units, order, on_page)
         root = next(node for node in extracted.nodes if node.type is NodeType.DOCUMENT)
         joining = Joining(
@@ -224,6 +240,7 @@ class RenderedHierarchyScopeProvider:
         )
         requests = [request for index, _ in scopes
                     if (request := joining.request(index)) is not None]
+        self._progress.plan("outline", 1 + len(scopes) + len(requests))
         with ThreadPoolExecutor(max_workers=min(self._workers, max(1, len(requests)))) as pool:
             joined = dict(zip((r.page_index for r in requests),
                               pool.map(lambda r: self._join(joining, r), requests),
@@ -289,6 +306,7 @@ class RenderedHierarchyScopeProvider:
                 result: tuple[int, tuple[HierarchyDecision, ...] | None] = (page.index, None)
             else:
                 result = (page.index, answered.decisions)
+            self._progress.step("outline")
             if on_page is not None:
                 on_page(*result)
             return result
@@ -309,6 +327,7 @@ class RenderedHierarchyScopeProvider:
         readings = [once() for _ in range(JOIN_READINGS)]
         if joining.disagree(request, readings):
             readings.append(once())
+        self._progress.step("outline")
         return joining.vote(request, readings)
 
     def _derive_apart(
@@ -325,6 +344,7 @@ class RenderedHierarchyScopeProvider:
         def read(page: RenderedPage) -> tuple[int, tuple[HierarchyDecision, ...] | None]:
             asked = self._asked(extracted, page, home, nodes, drawings)
             if asked is None:
+                self._progress.step("outline")
                 return page.index, ()
             scope, shown, crops = asked
             try:
@@ -334,6 +354,7 @@ class RenderedHierarchyScopeProvider:
                 result: tuple[int, tuple[HierarchyDecision, ...] | None] = (page.index, None)
             else:
                 result = (page.index, answered.decisions)
+            self._progress.step("outline")
             if on_page is not None and (asked is not None):
                 on_page(*result)
             return result

@@ -24,6 +24,7 @@ from graphme.application.page_units import (
     scope_of,
     units_by_page,
 )
+from graphme.application.progress import Progress
 from graphme.application.visual_crops import VISUAL_TYPES
 from graphme.domain.enums import EdgeType, EvidenceKind, NodeType
 from graphme.domain.ids import stable_id
@@ -62,6 +63,7 @@ def caption_visuals(
     vision: VisionProvider,
     asset_store: AssetStore,
     workers: int = 1,
+    progress: Progress | None = None,
     page_of: Mapping[str, int] | None = None,
 ) -> ExtractedDocument:
     """Add a caption node for every visual the pages show."""
@@ -93,7 +95,8 @@ def caption_visuals(
         )
         return described, answer
 
-    answers = asked_together(jobs, describe, workers=workers)
+    answers = asked_together(jobs, describe, workers=workers, progress=progress,
+                             stage="captions")
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
     evidence: list[EvidenceRecord] = []

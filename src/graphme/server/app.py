@@ -501,6 +501,7 @@ def create_app(
             "pending": bool(session.pending)
             or session.state
             in ("rendering", "grouping", "reading", "captioning", "referencing"),
+            "progress": session.progress.snapshot(),
             "sheets": [
                 {
                     "index": page.index,

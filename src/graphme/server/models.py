@@ -61,6 +61,16 @@ class PageInfo(_Model):
     error: str | None = None
 
 
+class ReadingProgress(_Model):
+    stage: Literal["figures", "paragraphs", "outline", "captions", "references"]
+    """The stage under way."""
+    done: int
+    total: int
+    """That stage's questions answered and planned."""
+    percent: int
+    """Every planned question answered so far, over all of them (0-100)."""
+
+
 class Pages(_Model):
     source: str
     format: str
@@ -68,6 +78,8 @@ class Pages(_Model):
     error: str | None = None
     pending: bool
     sheets: list[PageInfo]
+    progress: ReadingProgress | None = None
+    """How far the reading is, once it has begun."""
 
 
 class PagesOf(_Model):
@@ -111,6 +123,9 @@ class BuildState(_Model):
     only in the map."""
     skipped: int = 0
     embedded: int
+    percent: int | None = None
+    """How far the reading is, over every document's questions (0-100); None for a job that
+    reads nothing."""
     error: str | None = None
 
 

@@ -5,6 +5,15 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.29] - 2026-10-24
+
+### Added
+
+- A document being read says how far it is, in percent, with the stage under way (figures,
+  paragraphs, outline, captions, references) and its count -- every question the reading will
+  ask the model is counted before it is asked. A build's status says its percent over all its
+  documents while they are read.
+
 ## [0.1.28] - 2026-10-24
 
 ### Fixed

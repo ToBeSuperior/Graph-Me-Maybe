@@ -25,6 +25,7 @@ from graphme.application.page_units import (
     scope_of,
     units_by_page,
 )
+from graphme.application.progress import Progress
 from graphme.application.visual_crops import CONTAINER_TYPES, VISUAL_TYPES
 from graphme.domain.enums import EdgeType, NodeType
 from graphme.domain.ids import stable_id
@@ -64,6 +65,7 @@ def link_references(
     asset_store: AssetStore | None = None,
     page_of: Mapping[str, int] | None = None,
     workers: int = 1,
+    progress: Progress | None = None,
 ) -> ExtractedDocument:
     """Add a node for every other document this one names, and point the mention at it."""
     by_page = units_by_page(extracted, pages, kinds=NAMING_TYPES, page_of=page_of)
@@ -96,7 +98,8 @@ def link_references(
     texts = {node.id: node.text for node in extracted.nodes}
     tabled = _in_tables(extracted)
     citations: list[Citation] = []
-    for answer in asked_together(jobs, read, workers=workers):
+    for answer in asked_together(jobs, read, workers=workers, progress=progress,
+                                 stage="references"):
         for reference in answer.references if answer is not None else ():
             name = reference.name.strip()
             if not name or not _written(reference, texts.get(reference.subject_id)):

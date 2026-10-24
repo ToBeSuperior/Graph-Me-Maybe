@@ -19,6 +19,7 @@ const ko = {
   pillUploading: (done: number, total: number) => `올리는 중 ${done}/${total}`,
   pillBuilding: (done: number, total: number) => `그래프 만드는 중 ${done}/${total}`,
   pillLooking: '그래프 만드는 중',
+  pillBuildingPercent: (percent: number) => `그래프 만드는 중 ${percent}%`,
   dbUnreachable: '그래프 DB에 연결할 수 없습니다',
   dbStarting: '그래프 DB를 준비하는 중',
   close: '닫기',
@@ -198,6 +199,11 @@ const ko = {
   failed: (why: string) => `실패: ${why}`,
   cancelledRead: '빌드를 취소해 읽기를 멈췄습니다 — 다시 빌드하면 처음부터 읽습니다',
   readingNow: (read: number, total: number) => `읽는 중 · ${total}페이지 중 ${read}페이지`,
+  readingProgress: (percent: number, stage: string, done: number, total: number) =>
+    `읽는 중 · ${percent}% — ${stage} ${done}/${total}`,
+  stageName: (stage: string) => ({
+    figures: '그림 묶기', paragraphs: '문단 묶기', outline: '개요', captions: '캡션', references: '참조',
+  } as Record<string, string>)[stage] ?? stage,
   parentsOnPage: (n: number) => `이 페이지에서 정한 부모 ${n}개`,
   backToPage: '페이지로',
   nodeOn: (page: string) => `${page}의 노드`,
@@ -360,6 +366,7 @@ const en: Words = {
   pillUploading: (done, total) => `Uploading ${done}/${total}`,
   pillBuilding: (done, total) => `Building ${done}/${total}`,
   pillLooking: 'Building',
+  pillBuildingPercent: (percent) => `Building ${percent}%`,
   dbUnreachable: 'Cannot reach the graph DB',
   dbStarting: 'Preparing the graph DB',
   close: 'Close',
@@ -535,6 +542,10 @@ const en: Words = {
   failed: (why) => `Failed: ${why}`,
   cancelledRead: 'Reading stopped by a cancelled build — the next build reads it from the start',
   readingNow: (read, total) => `Reading · ${read} of ${total} pages`,
+  readingProgress: (percent, stage, done, total) => `Reading · ${percent}% — ${stage} ${done}/${total}`,
+  stageName: (stage) => ({
+    figures: 'figures', paragraphs: 'paragraphs', outline: 'outline', captions: 'captions', references: 'references',
+  } as Record<string, string>)[stage] ?? stage,
   parentsOnPage: (n) => `${n} parents set on this page`,
   backToPage: 'Back to page',
   nodeOn: (page) => `Node on ${page}`,

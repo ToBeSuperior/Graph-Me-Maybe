@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from graphme.application.page_units import held_by_a_visual
+from graphme.application.progress import Progress
 from graphme.application.reading_order import (
     SAME_COLUMN_OVERLAP,
     overlap,
@@ -67,6 +68,7 @@ def group_document_units(
     vision: Any,
     join: Callable[[Sequence[str]], str] = lambda texts: " ".join(texts),
     page_of: Mapping[str, int] | None = None,
+    progress: Progress | None = None,
 ) -> ExtractedDocument:
     """Ask each page, a run of pieces at a time, which pieces are one unit, and join them.
 
@@ -97,60 +99,66 @@ def group_document_units(
     # A page is asked in runs short enough for one answer to carry. Whatever is left of a
     # page goes into the next ask, which is the same thing a page break already was.
     asks = _asks(by_page)
+    counted = progress or Progress()
+    counted.plan("paragraphs", len(asks))
     named: dict[str, str] = {}
 
     before: list[GroupableUnit] = []
     earlier: int | None = None
     for index, (pages_asked, scope, pieces) in enumerate(asks):
-        page = pages_asked[-1]
-        # Only the end of what was asked before can be carried on. The rest was settled
-        # where it stood, and asking again invites a page to be taken apart twice.
-        # What carries on is the text: a page that ends in footnotes carried only those,
-        # and its last line never met the line on the next page that finishes it.
-        tail = [unit for unit in before if unit.id not in small][-CARRY_PIECES:]
-        shown = [*tail, *pieces]
-        if not shown:
-            continue
-        settled = {unit.id: named[unit.id] for unit in tail if unit.id in named}
-        request = UnitGroupingRequest(
-            request_id=f"{extracted.document.id}:groups:{index:03d}",
-            document_id=extracted.document.id,
-            scope=scope,
-            units=tuple(shown),
-            settled=settled,
-        )
-        images = [
-            pages[shown_page]
-            for shown_page in dict.fromkeys(
-                (earlier, *pages_asked) if earlier is not None else pages_asked
-            )
-            if shown_page in pages
-        ]
         try:
-            answer = vision.group_page_units(request=request, images=images)
-        except (RuntimeError, ValueError) as error:
-            # One page nobody could read is one page, not the document. What the answer
-            # was refused for travels with it: "malformed" alone says nothing about which
-            # rule the answer broke, and that is the one thing worth knowing here.
-            _log.warning(
-                "%s: units left as they were -- %s%s",
-                request.scope,
-                error,
-                f" ({error.__cause__})" if error.__cause__ else "",
+            page = pages_asked[-1]
+            # Only the end of what was asked before can be carried on. The rest was settled
+            # where it stood, and asking again invites a page to be taken apart twice.
+            # What carries on is the text: a page that ends in footnotes carried only those,
+            # and its last line never met the line on the next page that finishes it.
+            tail = [unit for unit in before if unit.id not in small][-CARRY_PIECES:]
+            shown = [*tail, *pieces]
+            if not shown:
+                continue
+            settled = {unit.id: named[unit.id] for unit in tail if unit.id in named}
+            request = UnitGroupingRequest(
+                request_id=f"{extracted.document.id}:groups:{index:03d}",
+                document_id=extracted.document.id,
+                scope=scope,
+                units=tuple(shown),
+                settled=settled,
             )
+            images = [
+                pages[shown_page]
+                for shown_page in dict.fromkeys(
+                    (earlier, *pages_asked) if earlier is not None else pages_asked
+                )
+                if shown_page in pages
+            ]
+            try:
+                answer = vision.group_page_units(request=request, images=images)
+            except (RuntimeError, ValueError) as error:
+                # One page nobody could read is one page, not the document. What the answer
+                # was refused for travels with it: "malformed" alone says nothing about which
+                # rule the answer broke, and that is the one thing worth knowing here.
+                _log.warning(
+                    "%s: units left as they were -- %s%s",
+                    request.scope,
+                    error,
+                    f" ({error.__cause__})" if error.__cause__ else "",
+                )
+                before, earlier = pieces, page
+                continue
+            # Every window names its groups from scratch, so a name says nothing across the
+            # break. What a group carries on is said by holding a piece that is already named.
+            members: dict[str, list[str]] = {}
+            for label in sorted(answer.labels, key=lambda item: item.order):
+                members.setdefault(label.group, []).append(label.unit_id)
+            for group, unit_ids in members.items():
+                carried = {named[unit_id] for unit_id in unit_ids if unit_id in named}
+                name = carried.pop() if carried else f"w{index:03d}-{group}"
+                for unit_id in unit_ids:
+                    named.setdefault(unit_id, name)
             before, earlier = pieces, page
-            continue
-        # Every window names its groups from scratch, so a name says nothing across the
-        # break. What a group carries on is said by holding a piece that is already named.
-        members: dict[str, list[str]] = {}
-        for label in sorted(answer.labels, key=lambda item: item.order):
-            members.setdefault(label.group, []).append(label.unit_id)
-        for group, unit_ids in members.items():
-            carried = {named[unit_id] for unit_id in unit_ids if unit_id in named}
-            name = carried.pop() if carried else f"w{index:03d}-{group}"
-            for unit_id in unit_ids:
-                named.setdefault(unit_id, name)
-        before, earlier = pieces, page
+        finally:
+            counted.step("paragraphs")
+
     # The order inside a group is the order the document is read in, which is already
     # known here -- an answer only has to say what belongs together.
     in_order: dict[str, list[str]] = {}

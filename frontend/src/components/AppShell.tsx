@@ -31,6 +31,7 @@ function StatusPill() {
           : <span className={cn('size-1.5 rounded-full', isError ? 'bg-danger' : 'bg-ok')} />}
         {busy
           ? (starting ? t('pillDbStarting') : uploading ? t('pillUploading', uploading.done, uploading.total)
+            : build!.state === 'reading' && build!.percent != null ? t('pillBuildingPercent', build!.percent)
             : build!.total ? t('pillBuilding', build!.done, build!.total) : t('pillLooking'))
           : map ? t('pillCounts', map.total, links) : t('pillNoDb')}
       </button>

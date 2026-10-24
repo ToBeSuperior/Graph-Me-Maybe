@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Protocol, TypeVar
 
+from graphme.application.progress import Progress
 from graphme.application.unit_placement import FlowPlacer, home_pages
 from graphme.application.visual_crops import VISUAL_TYPES, read_node_crop
 from graphme.domain.enums import EdgeType, NodeType
@@ -126,11 +127,23 @@ def asked_together(
     ask: Callable[[_Job], _Answer],
     *,
     workers: int = 1,
+    progress: Progress | None = None,
+    stage: str = "",
 ) -> list[_Answer]:
     """Run one question per job side by side. A page is its own question here -- what one
     visual shows is not what the document is about -- so the pages go together; the model's
-    own adapter keeps a caller reading several documents under what the endpoint takes."""
+    own adapter keeps a caller reading several documents under what the endpoint takes. Each
+    answer is counted in `progress` under `stage` as it lands."""
+    counted = progress or Progress()
+    counted.plan(stage, len(jobs))
     if not jobs:
         return []
+
+    def asked(job: _Job) -> _Answer:
+        try:
+            return ask(job)
+        finally:
+            counted.step(stage)
+
     with ThreadPoolExecutor(max_workers=max(1, min(workers, len(jobs)))) as pool:
-        return list(pool.map(ask, jobs))
+        return list(pool.map(asked, jobs))

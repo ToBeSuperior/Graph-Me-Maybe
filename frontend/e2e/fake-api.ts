@@ -27,7 +27,8 @@ const sources = [
 ];
 
 export async function fakeApi(page: Page,
-  { empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[] } = {}): Promise<Fake> {
+  { empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[],
+    progress = null as Record<string, unknown> | null } = {}): Promise<Fake> {
   const fake: Fake = { reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0,
     drive: { configured: true, connected: false, picked: 0, built: 0 } };
   const json = (route: Route, body: unknown, status = 200) =>
@@ -98,7 +99,8 @@ export async function fakeApi(page: Page,
     const file = path.match(/^\/v1\/documents\/(.+)\/file$/);
     if (file && method === 'POST') return json(route, { file_id: `file-${file[1]}` });
     if (/^\/v1\/files\/[^/]+\/pages$/.test(path)) {
-      return json(route, { source: 'x.docx', format: 'docx', state: 'done', error: null, pending: false,
+      return json(route, { source: 'x.docx', format: 'docx', state: progress ? 'reading' : 'done', error: null,
+        pending: !!progress, progress,
         sheets: [1, 2].map((index) => ({ index, name: null, width: 800, height: 1100, derived: [], seconds: 1, pending: false, error: null })) });
     }
     if (/^\/v1\/files\/[^/]+\/graph$/.test(path)) {

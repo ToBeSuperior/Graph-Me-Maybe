@@ -585,3 +585,20 @@ def test_a_document_read_beside_many_others_asks_its_pages_a_few_at_a_time(demo:
     assert demo._workers(running=1) == state.VLM_CALLS_AT_ONCE
     assert demo._workers(running=state.READERS) == state.FEWEST_WORKERS
     assert state.FEWEST_WORKERS * state.READERS < 3 * state.VLM_CALLS_AT_ONCE
+
+
+def test_a_build_says_how_far_its_reading_is_and_ends_whole(
+    demo: Demo, tmp_path: Path
+) -> None:
+    def run(session: Any) -> None:
+        read_as("a" if session.source.name == "one.pdf" else "b", session.source.name)(session)
+
+    demo._run = run  # type: ignore[method-assign]
+    docs = []
+    for name in ("one.pdf", "two.pdf"):
+        (tmp_path / name).write_bytes(f"%PDF-1.4 {name}".encode())
+        docs.append(demo.open_path(str(tmp_path / name)))
+    build = demo.build_corpus(docs, "test", embed=False)
+
+    assert until(lambda: build.state == "done"), build
+    assert build.percent == 100

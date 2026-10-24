@@ -333,3 +333,22 @@ def test_a_document_read_and_waiting_for_its_turn_in_a_build_is_not_outside(
     items = {i["name"]: i["state"] for i in client.get("/v1/documents").json()["items"]}
 
     assert items == {"waiting.pdf": "queued", "left.pdf": "done"}
+
+
+def test_a_document_being_read_says_how_far_its_reading_is(
+    demo: Demo, client: TestClient, tmp_path: Path
+) -> None:
+    source = tmp_path / "memo.pdf"
+    source.write_bytes(b"%PDF-1.4")
+    doc = demo.open_path(str(source))
+    session = demo.session(doc)
+    session.state = "reading"
+    session.progress.estimate(figures=2, outline=4)
+    session.progress.plan("figures", 2)
+    session.progress.step("figures", 2)
+    session.progress.plan("outline", 4)
+    session.progress.step("outline")
+
+    said = client.get(f"/v1/files/{doc}/pages").json()["progress"]
+
+    assert said == {"stage": "outline", "done": 1, "total": 4, "percent": 50}

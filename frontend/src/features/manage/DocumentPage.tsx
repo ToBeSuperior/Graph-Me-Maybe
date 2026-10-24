@@ -69,7 +69,9 @@ function DemoDocument({ doc }: { doc: string }) {
   if ((sheets.error as { status?: number } | null)?.status === 404) return <NotFound />;
   const status = !s ? null : s.state === 'error' ? { text: t('failed', s.error ?? ''), busy: false }
     : s.state === 'cancelled' ? { text: t('cancelledRead'), busy: false }
-    : WORKING.includes(s.state) ? { text: s.sheets.length ? t('readingNow', s.sheets.filter((p) => !p.pending).length, s.sheets.length)
+    : WORKING.includes(s.state) ? { text: s.progress
+      ? t('readingProgress', s.progress.percent, t('stageName', s.progress.stage), s.progress.done, s.progress.total)
+      : s.sheets.length ? t('readingNow', s.sheets.filter((p) => !p.pending).length, s.sheets.length)
       : t('drawingPages'), busy: true } : null;
   return (
     <DocumentView name={s?.source ?? doc} graph={graph.data} graphError={(sheets.error ?? graph.error) as Error | null}

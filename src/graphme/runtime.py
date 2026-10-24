@@ -31,6 +31,7 @@ from graphme.application.document_graph import DocumentGraphBuilder
 from graphme.application.embedded_documents import unpack_embedded
 from graphme.application.ingest import documents_at, format_of
 from graphme.application.page_enrichment import RenderedPageEnricher
+from graphme.application.progress import Progress
 from graphme.config import Settings, app_home, load_settings
 from graphme.domain.enums import DocumentFormat
 from graphme.ports.vision import VisionProvider
@@ -111,12 +112,13 @@ def graph_parts(
     vision: VisionProvider,
     assets: Any,
     workers: int = 1,
+    progress: Progress | None = None,
 ) -> dict[str, Any]:
     """What turning a document into its graph needs, wired one way for every caller.
 
     The outline is read off the page, and with it the figures, the paragraphs before the
     outline and, after it, what visuals show and which documents the pages name.
-    `workers` is how many pages are asked at once.
+    `workers` is how many pages are asked at once; `progress` counts every question asked.
     """
     return {
         "extractors": {
@@ -132,16 +134,17 @@ def graph_parts(
             asset_store=assets,
             readings=settings.hierarchy_readings,
             workers=workers,
+            progress=progress,
         ),
         # Between the figures and the outline: what a figure swallowed is not a paragraph,
         # and an outline drawn over half a paragraph places half a paragraph.
-        "unit_grouper": RenderedUnitGrouper(renderer=renderer, vision=vision),
+        "unit_grouper": RenderedUnitGrouper(renderer=renderer, vision=vision, progress=progress),
         # Captions and named documents are read off the same rendering the outline is. A
         # named document stands as an empty node; which indexed document it is is said across
         # the corpus (`application/corpus_links.py`), whatever order they arrive in.
         "enricher": RenderedPageEnricher(
             renderer=renderer, vision=vision, asset_store=assets,
-            workers=workers,
+            workers=workers, progress=progress,
         ),
     }
 

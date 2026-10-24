@@ -800,6 +800,8 @@ export interface components {
             skipped: number;
             /** Embedded */
             embedded: number;
+            /** Percent */
+            percent?: number | null;
             /** Error */
             error?: string | null;
         };
@@ -1061,6 +1063,7 @@ export interface components {
             pending: boolean;
             /** Sheets */
             sheets: components["schemas"]["PageInfo"][];
+            progress?: components["schemas"]["ReadingProgress"] | null;
         };
         /** PagesOf */
         PagesOf: {
@@ -1093,6 +1096,20 @@ export interface components {
         ReadRequest: {
             /** Files */
             files: string[];
+        };
+        /** ReadingProgress */
+        ReadingProgress: {
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "figures" | "paragraphs" | "outline" | "captions" | "references";
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+            /** Percent */
+            percent: number;
         };
         /** Reset */
         Reset: {

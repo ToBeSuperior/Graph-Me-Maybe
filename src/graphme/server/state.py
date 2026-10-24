@@ -57,9 +57,10 @@ from graphme.application.embedded_documents import (
 )
 from graphme.application.hierarchy_decisions import apply_hierarchy_decisions
 from graphme.application.ingest import SUFFIX_FORMATS, format_of
+from graphme.application.progress import Progress
 from graphme.application.visual_crops import CROP_ASSET_KEY
 from graphme.config import Settings
-from graphme.domain.enums import DocumentFormat, EdgeType
+from graphme.domain.enums import FLOW_FORMATS, DocumentFormat, EdgeType
 from graphme.domain.ids import sha256_bytes
 from graphme.domain.models import ExtractedDocument, HierarchyDecision, HierarchyDerivation
 from graphme.ports.sources import SourceStore
@@ -659,6 +660,21 @@ class Demo:
             # order they finish, so how far it is is how many are read.
             return sum(self.sessions[doc].state in FINISHED for doc in docs)
 
+        def share() -> int:
+            """How far the reading is: each document read is whole, each being read as far as
+            its questions answered, each waiting for a reader not begun."""
+            def one(doc: str) -> float:
+                session = self.sessions[doc]
+                if session.state in FINISHED:
+                    return 1.0
+                done, planned = session.progress.counts()
+                return done / planned if planned else 0.0
+            return int(100 * sum(one(doc) for doc in docs) / len(docs)) if docs else 100
+
+        def counted() -> int:
+            build.percent = share()
+            return finished()
+
         def in_turn(paths: Sequence[Path]) -> Iterator[Path]:
             """Each document once it is read; when a cancel or a reading that never ends stops
             the wait, the rest, which `process` then says were not read."""
@@ -669,7 +685,7 @@ class Demo:
                 if not read and (stop.is_set() or time.monotonic() > deadline):
                     read = left
                 if not read:
-                    build.done = finished()
+                    build.done = counted()
                     time.sleep(1)
                     continue
                 left = [p for p in left if p not in read]
@@ -691,7 +707,7 @@ class Demo:
 
         def step(name: BuildStep, done: int, total: int) -> None:
             build.state, build.total = STEP_STATES[name], total
-            build.done = done if name == BuildStep.LINK else finished()
+            build.done = done if name == BuildStep.LINK else counted()
 
         def read_only() -> BuildReport:
             failed = []
@@ -700,7 +716,7 @@ class Demo:
                     process(path)
                 except RuntimeError as error:
                     failed.append((path, str(error)))
-            build.done = finished()
+            build.done = counted()
             return BuildReport(processed=len(docs) - len(failed), failed=tuple(failed), links=0)
 
         self.putting = set(docs) if put else set()
@@ -916,11 +932,19 @@ class Demo:
             vision=create_vision(self.settings, self.client, limiter=self.vlm_slots),
             assets=session.store,
             workers=self._workers(),
+            progress=session.progress,
         )
 
     def _read(self, session: Session) -> None:
         """Figures, then paragraphs with the outline a page behind -- the builder's order. Each
         page's outline is applied the moment it lands, so the view grows while the rest is read."""
+        # Counted before any is asked: a page each, the outline's page breaks and headings too
+        # in a flowing document -- each stage replaces its estimate with its own count.
+        pages = len(session.pages)
+        session.progress = Progress()
+        session.progress.estimate(
+            figures=pages, paragraphs=pages, captions=pages, references=pages,
+            outline=2 * pages if session.format in FLOW_FORMATS else pages)
         builder = self._builder(session)
         session.state = "grouping"
         started = time.monotonic()
