@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
 import socket
 import sys
 import threading
@@ -85,14 +86,31 @@ def show_window(url: str, storage: Path) -> bool:
         return False
     try:
         webview.settings["ALLOW_DOWNLOADS"] = True  # an export's .dump and bundle
-        webview.create_window("Graph-Me-Maybe", url, width=1280, height=860,
-                              min_size=(900, 600), text_select=True)
+        window = webview.create_window("Graph-Me-Maybe", url, width=1280, height=860,
+                                       min_size=(900, 600), text_select=True)
+        # Quitting the app (Cmd+Q, the Dock) ends the process from inside the window's loop:
+        # what follows `start` never runs, and the Neo4j it started -- a process group of its
+        # own -- would outlive it.
+        if window is not None:
+            window.events.closed += _stop_neo4j
         # Kept between runs, as a browser keeps them: the theme, the language, an API key.
         webview.start(private_mode=False, storage_path=str(storage))
     except Exception:  # noqa: BLE001 -- no WebView2 runtime, no GUI session
         logging.getLogger(__name__).exception("no app window; opening the browser instead")
         return False
     return True
+
+
+def _stop_neo4j() -> None:
+    from graphme.adapters.storage import local_neo4j
+
+    local_neo4j.stop_started()
+
+
+def _ended(signum: int, frame: object) -> None:
+    """Ended by the system or `kill`: the Neo4j goes too, then the app."""
+    _stop_neo4j()
+    os._exit(0)
 
 
 def launch(
@@ -162,11 +180,11 @@ def main() -> None:
         prepare(where)
         log = open(where / "app.log", "a", encoding="utf-8", buffering=1)  # noqa: SIM115
         sys.stdout = sys.stderr = log
+    for ending in (signal.SIGTERM, *([signal.SIGHUP] if hasattr(signal, "SIGHUP") else [])):
+        signal.signal(ending, _ended)
     launch(port=None, browser=True, environ=environ,
            window=lambda url: show_window(url, where / "webview"))
     # The window is closed: the Neo4j the app started goes with it (the window is gone, so the
     # wait is not seen), then the app ends, whatever threads a build or a driver left.
-    from graphme.adapters.storage import local_neo4j
-
-    local_neo4j.stop_started()
+    _stop_neo4j()
     os._exit(0)

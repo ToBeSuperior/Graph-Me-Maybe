@@ -277,3 +277,59 @@ def test_closed_it_stops_the_neo4j_it_started(
     monkeypatch.setattr(local_neo4j, "stop_started", lambda: stopped.append(True))
     launcher.main()
     assert stopped == [True]
+
+
+def test_ended_by_a_signal_it_still_stops_the_neo4j_it_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Quit from the Dock or ended by the system, the window never returned: the app's Neo4j,
+    # a process group of its own, went on running with no app.
+    import signal
+
+    from graphme.adapters.storage import local_neo4j
+
+    handlers: dict[int, object] = {}
+    stopped: list[bool] = []
+    monkeypatch.setenv("GRAPHME_HOME", str(tmp_path))
+    monkeypatch.setattr(launcher, "launch", lambda **kw: None)
+    monkeypatch.setattr(launcher.os, "_exit", lambda code: None)
+    monkeypatch.setattr(launcher.sys, "argv", ["graphme-app"])
+    monkeypatch.setattr(launcher.signal, "signal", lambda sig, handler: handlers.setdefault(
+        sig, handler))
+    monkeypatch.setattr(local_neo4j, "stop_started", lambda: stopped.append(True))
+    launcher.main()
+    stopped.clear()
+
+    handlers[signal.SIGTERM](signal.SIGTERM, None)  # type: ignore[operator]
+    assert stopped == [True]
+
+
+def test_a_window_closed_by_quitting_the_app_stops_the_neo4j_it_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Quitting the app (Cmd+Q) ends the process from inside the window's own loop: the window
+    # is closed, and what follows `webview.start` never runs.
+    import types
+
+    from graphme.adapters.storage import local_neo4j
+
+    stopped: list[bool] = []
+    closed: list[object] = []
+
+    class Events:
+        def __init__(self) -> None:
+            self.closed = self
+
+        def __iadd__(self, handler: object) -> Events:
+            closed.append(handler)
+            return self
+
+    window = types.SimpleNamespace(events=Events())
+    fake = types.SimpleNamespace(settings={}, create_window=lambda *a, **k: window,
+                                 start=lambda **k: None)
+    monkeypatch.setitem(launcher.sys.modules, "webview", fake)
+    monkeypatch.setattr(local_neo4j, "stop_started", lambda: stopped.append(True))
+
+    assert launcher.show_window("http://127.0.0.1:1", tmp_path)
+    closed[0]()  # type: ignore[operator]
+    assert stopped == [True]

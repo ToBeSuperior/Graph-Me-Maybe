@@ -5,6 +5,18 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.27] - 2026-10-24
+
+### Fixed
+
+- Quitting the app from the Dock or with Cmd+Q, or the system ending it, stops its graph DB
+  (Neo4j) too; it went on running with no app.
+- Page furniture -- running headers, page numbers, a mark printed on every page -- is dropped
+  from the outline instead of kept at the top of the document.
+- A picture dropped as decoration takes the words printed on it: a stamp on a header icon no
+  longer stands at the top of the document on every page. A mark printed where a content
+  picture reaches the page's corner is still kept with that picture.
+
 ## [0.1.26] - 2026-10-24
 
 ### Changed

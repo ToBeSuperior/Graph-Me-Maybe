@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import Protocol
 
-from graphme.domain.enums import DocumentFormat, EdgeType
+from graphme.domain.enums import DocumentFormat, EdgeType, NodeType
 from graphme.domain.models import (
     ExtractedDocument,
     GraphEdge,
@@ -84,11 +84,13 @@ def apply_hierarchy_decisions(
 
     A `root` decision removes the subject's parent; `unresolved` is an abstention and
     leaves the deterministic answer standing. A `drop` decision takes the subject out of the
-    graph with its edges and evidence; what it owned is held by its owner instead -- a banner
-    picture dropped as decoration keeps the title printed on it -- and a part drawn in a
-    dropped figure is no longer held by it. A unit the same answer placed under a dropped one
-    reads at the root. A decision naming a node that is not in the document is refused rather
-    than silently ignored.
+    graph with its edges and evidence. A picture dropped takes the words printed on it: the
+    page judged it from its crop, words and all, and a stamp on a header icon handed to the
+    document read at its top on every page. (A band printed edge to edge, which once held the
+    cover's title, is a backdrop and holds nothing.) Anything else a dropped node owned is held
+    by its owner instead, and a part drawn in a dropped figure is no longer held by it. A unit
+    the same answer placed under a dropped one reads at the root. A decision naming a node
+    that is not in the document is refused rather than silently ignored.
     """
     if not decisions:
         return extracted
@@ -101,6 +103,7 @@ def apply_hierarchy_decisions(
             raise ValueError(f"hierarchy decision names unknown nodes: {sorted(unknown)}")
 
     dropped = dropped_subjects(decisions)
+    dropped |= _printed_on(extracted, dropped)
 
     replaced = {
         decision.subject_id: decision
@@ -149,6 +152,16 @@ def dropped_subjects(decisions: Iterable[HierarchyDecision]) -> set[str]:
     return {decision.subject_id for decision in decisions if decision.status == "drop"}
 
 
+def _printed_on(extracted: ExtractedDocument, dropped: set[str]) -> set[str]:
+    """The words a dropped picture owns: what is printed on it."""
+    pictures = {node.id for node in extracted.nodes
+                if node.id in dropped and node.type in (NodeType.IMAGE, NodeType.CHART)}
+    words = {node.id for node in extracted.nodes if node.type is NodeType.TEXT_CHUNK}
+    return {edge.target_id for edge in extracted.edges
+            if edge.type is EdgeType.CONTAINS and edge.source_id in pictures
+            and edge.target_id in words}
+
+
 def _held_by_the_kept(edges: Iterable[GraphEdge], dropped: set[str]) -> list[GraphEdge]:
     """What a dropped node owned (`CONTAINS`), owned by the nearest owner that stays: the one
     parent every node has is kept, and nothing it held is lost with it."""
@@ -181,15 +194,26 @@ def _let_go(node: GraphNode, dropped: set[str]) -> GraphNode:
         key: value for key, value in node.metadata.items() if key != "part_of_figure"}})
 
 
-def figure_part_decisions(extracted: ExtractedDocument) -> tuple[HierarchyDecision, ...]:
-    """Every unit the page said is drawn as part of a figure, placed under that figure.
+def figure_part_decisions(
+    extracted: ExtractedDocument, dropped: Iterable[str] = ()
+) -> tuple[HierarchyDecision, ...]:
+    """Every unit the page said is drawn as part of a figure, placed under that figure -- or,
+    for a figure the outline `dropped`, dropped with it.
 
     The figure pass already answered this, so the outline pass is not asked again: a
     diagram's labels were sent to it one by one, most of a page's units, and it was left to
-    place a drawing's labels among the paragraphs.
+    place a drawing's labels among the paragraphs. A word drawn on a decoration is the
+    decoration: placed under a figure that was gone, a stamp on a header icon read at the
+    top of the document, one on every page.
     """
     present = {node.id for node in extracted.nodes}
+    gone = set(dropped)
     return tuple(
+        HierarchyDecision(
+            subject_id=node.id, status="drop", confidence=1.0,
+            rationale="drawn on a figure that was dropped",
+        )
+        if figure in gone else
         HierarchyDecision(
             subject_id=node.id,
             status="parent",

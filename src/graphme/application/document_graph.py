@@ -25,6 +25,7 @@ from graphme.application.embedded_documents import cite_embedded
 from graphme.application.hierarchy_decisions import (
     HierarchyScopeProvider,
     apply_hierarchy_decisions,
+    dropped_subjects,
     figure_part_decisions,
     note_unread_pages,
 )
@@ -158,7 +159,8 @@ class DocumentGraphBuilder:
         )
         return note_unread_pages(
             apply_hierarchy_decisions(
-                extracted, (*derived.decisions, *figure_part_decisions(extracted))
+                extracted, (*derived.decisions, *figure_part_decisions(
+                    extracted, dropped_subjects(derived.decisions)))
             ),
             derived.unread_pages,
         ).validate_canonical_semantic_graph()
