@@ -283,25 +283,30 @@ def test_ended_by_a_signal_it_still_stops_the_neo4j_it_started(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Quit from the Dock or ended by the system, the window never returned: the app's Neo4j,
-    # a process group of its own, went on running with no app.
+    # a process group of its own, went on running with no app. A Python handler never ran --
+    # the main thread sits in the window's loop -- and the app ignored the signal altogether;
+    # the ending is waited for on a thread of its own, the signal blocked everywhere else.
     import signal
+    import threading
 
     from graphme.adapters.storage import local_neo4j
 
-    handlers: dict[int, object] = {}
-    stopped: list[bool] = []
+    if not hasattr(signal, "sigwait"):
+        pytest.skip("no POSIX signals here")
+    blocked: list[set[int]] = []
+    stopped = threading.Event()
     monkeypatch.setenv("GRAPHME_HOME", str(tmp_path))
     monkeypatch.setattr(launcher, "launch", lambda **kw: None)
     monkeypatch.setattr(launcher.os, "_exit", lambda code: None)
     monkeypatch.setattr(launcher.sys, "argv", ["graphme-app"])
-    monkeypatch.setattr(launcher.signal, "signal", lambda sig, handler: handlers.setdefault(
-        sig, handler))
-    monkeypatch.setattr(local_neo4j, "stop_started", lambda: stopped.append(True))
+    monkeypatch.setattr(launcher.signal, "pthread_sigmask",
+                        lambda how, sigs: blocked.append(set(sigs)) or set())
+    monkeypatch.setattr(launcher.signal, "sigwait", lambda sigs: signal.SIGTERM)
+    monkeypatch.setattr(local_neo4j, "stop_started", stopped.set)
     launcher.main()
-    stopped.clear()
 
-    handlers[signal.SIGTERM](signal.SIGTERM, None)  # type: ignore[operator]
-    assert stopped == [True]
+    assert stopped.wait(5)
+    assert blocked and signal.SIGTERM in blocked[0]
 
 
 def test_a_window_closed_by_quitting_the_app_stops_the_neo4j_it_started(

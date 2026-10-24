@@ -107,10 +107,22 @@ def _stop_neo4j() -> None:
     local_neo4j.stop_started()
 
 
-def _ended(signum: int, frame: object) -> None:
-    """Ended by the system or `kill`: the Neo4j goes too, then the app."""
-    _stop_neo4j()
-    os._exit(0)
+def _stop_on_endings() -> None:
+    """Ended by the system or `kill`, the Neo4j goes too, then the app. The main thread sits in
+    the window's loop, where a Python signal handler never runs -- one installed there left
+    the app ignoring the signal -- so the ending is blocked in every thread started after this
+    and waited for on one of its own."""
+    if not hasattr(signal, "sigwait"):
+        return  # no POSIX signals: Windows ends a process outright
+    endings = {signal.SIGTERM, signal.SIGHUP}
+    signal.pthread_sigmask(signal.SIG_BLOCK, endings)
+
+    def wait() -> None:
+        signal.sigwait(endings)
+        _stop_neo4j()
+        os._exit(0)
+
+    threading.Thread(target=wait, name="endings", daemon=True).start()
 
 
 def launch(
@@ -180,8 +192,7 @@ def main() -> None:
         prepare(where)
         log = open(where / "app.log", "a", encoding="utf-8", buffering=1)  # noqa: SIM115
         sys.stdout = sys.stderr = log
-    for ending in (signal.SIGTERM, *([signal.SIGHUP] if hasattr(signal, "SIGHUP") else [])):
-        signal.signal(ending, _ended)
+    _stop_on_endings()
     launch(port=None, browser=True, environ=environ,
            window=lambda url: show_window(url, where / "webview"))
     # The window is closed: the Neo4j the app started goes with it (the window is gone, so the

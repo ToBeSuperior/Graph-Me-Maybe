@@ -5,6 +5,13 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.28] - 2026-10-24
+
+### Fixed
+
+- The app ignored a request to end it from the system (SIGTERM) since 0.1.27; it ends again,
+  and stops its graph DB as it does.
+
 ## [0.1.27] - 2026-10-24
 
 ### Fixed
