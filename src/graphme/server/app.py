@@ -60,6 +60,7 @@ from graphme.server.jobs import (
     GraphStarting,
     Session,
     Undrawn,
+    elapsed,
 )
 from graphme.server.settings import changed, described, from_here, preflight_behind
 from graphme.server.state import SPACE_WAIT, Demo
@@ -502,6 +503,7 @@ def create_app(
             or session.state
             in ("rendering", "grouping", "reading", "captioning", "referencing"),
             "progress": session.progress.snapshot(),
+            "elapsed": elapsed(session.started_at, session.ended_at),
             "sheets": [
                 {
                     "index": page.index,
@@ -652,7 +654,7 @@ def create_app(
     def said(job: CorpusBuild | ExportJob) -> dict[str, Any]:
         if isinstance(job, ExportJob):
             return {**asdict(job), "dump_ready": dump_ready(job)}
-        return asdict(job)
+        return {**asdict(job), "elapsed": elapsed(job.started_at, job.ended_at)}
 
     def started(job: CorpusBuild | ExportJob, response: Response) -> dict[str, Any]:
         response.headers["Location"] = f"/v1/jobs/{job.id}"

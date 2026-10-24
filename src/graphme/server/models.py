@@ -80,6 +80,8 @@ class Pages(_Model):
     sheets: list[PageInfo]
     progress: ReadingProgress | None = None
     """How far the reading is, once it has begun."""
+    elapsed: float | None = None
+    """Seconds its reading has taken: still counting while it reads; None never read here."""
 
 
 class PagesOf(_Model):
@@ -127,6 +129,8 @@ class BuildState(_Model):
     """How far the reading is, over every document's questions (0-100); None for a job that
     reads nothing."""
     error: str | None = None
+    elapsed: float | None = None
+    """Seconds the job has taken: still counting while it runs."""
 
 
 class MapDocument(_Model):

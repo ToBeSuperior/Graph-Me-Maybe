@@ -5,6 +5,18 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.30] - 2026-10-24
+
+### Added
+
+- A build and a document's reading say how long they have taken: beside the progress while
+  they run, and in the build-done message and on the document page once they end.
+
+### Fixed
+
+- The percent shown no longer steps back when a stage replaces its estimate with a larger
+  count of its own; it holds until the reading passes it.
+
 ## [0.1.29] - 2026-10-24
 
 ### Added

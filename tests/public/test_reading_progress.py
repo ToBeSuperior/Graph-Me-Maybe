@@ -50,3 +50,13 @@ def test_an_early_estimate_is_part_of_the_share_until_the_stage_counts_its_own()
     assert progress.snapshot()["percent"] == 50  # type: ignore[index]
     progress.step("figures")  # never past what was planned
     assert progress.counts() == (4, 8)
+
+
+def test_the_share_shown_never_moves_back_when_a_stage_counts_more_than_its_estimate() -> None:
+    progress = Progress()
+    progress.estimate(figures=4, captions=4)
+    progress.plan("figures", 4)
+    progress.step("figures", 4)
+    before = progress.snapshot()["percent"]  # type: ignore[index]
+    progress.plan("captions", 12)  # more visuals than pages
+    assert progress.snapshot()["percent"] >= before  # type: ignore[index]

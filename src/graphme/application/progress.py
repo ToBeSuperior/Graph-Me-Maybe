@@ -5,7 +5,8 @@ figures, the runs the paragraphs are grouped in, a page each and a page break ea
 outline, a page each for captions and for the documents a page names. A stage plans its count
 when it starts and steps it as each answer lands, from whichever thread asked; the reading is
 as far along as the questions answered over all planned. An estimate planned early is replaced
-by the stage's own count when it starts, so the share can move back a little then.
+by the stage's own count when it starts; the share said never moves back for it -- it waits
+until the questions answered pass it again.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ class Progress:
         self._lock = threading.Lock()
         self._counts: dict[str, list[int]] = {}
         self._stage: str | None = None
+        self._shown = 0
 
     def plan(self, stage: str, total: int) -> None:
         """`stage` will ask `total` questions: its own count, replacing any estimate."""
@@ -52,8 +54,9 @@ class Progress:
                 return None
             done = sum(d for d, _ in self._counts.values())
             stage_done, stage_total = self._counts[self._stage]
+            self._shown = max(self._shown, min(100, 100 * done // total))
             return {"stage": self._stage, "done": stage_done, "total": stage_total,
-                    "percent": min(100, 100 * done // total)}
+                    "percent": self._shown}
 
     def counts(self) -> tuple[int, int]:
         """Questions answered and planned, over every stage."""

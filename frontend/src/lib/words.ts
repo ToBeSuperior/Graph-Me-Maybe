@@ -20,6 +20,10 @@ const ko = {
   pillBuilding: (done: number, total: number) => `그래프 만드는 중 ${done}/${total}`,
   pillLooking: '그래프 만드는 중',
   pillBuildingPercent: (percent: number) => `그래프 만드는 중 ${percent}%`,
+  took: (seconds: number) => {
+    const s = Math.round(seconds), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    return [h && `${h}시간`, (h || m) && `${m}분`, `${s % 60}초`].filter(Boolean).join(' ');
+  },
   dbUnreachable: '그래프 DB에 연결할 수 없습니다',
   dbStarting: '그래프 DB를 준비하는 중',
   close: '닫기',
@@ -52,6 +56,7 @@ const ko = {
   carriedIn: (n: number) => `문서 안에 든 파일 ${n}개도 함께 읽습니다`,
   lookingThrough: '문서 안에 든 파일을 찾는 중…',
   buildDone: (docs: number, embedded: number) => `그래프 완성 · 문서 ${docs}개, 구절 ${embedded}개`,
+  readDone: (took: string) => `읽기 완료 · ${took}`,
   buildNothingRead: '읽어 넣은 문서가 없습니다',
   buildAllKnown: (n: number) => `${n}개 모두 이미 그래프에 있습니다 — 다시 읽지 않았습니다`,
   uploaded: (n: number, skipped: number) => `${n}개 올림` + (skipped ? ` · ${skipped}개 건너뜀` : ''),
@@ -367,6 +372,10 @@ const en: Words = {
   pillBuilding: (done, total) => `Building ${done}/${total}`,
   pillLooking: 'Building',
   pillBuildingPercent: (percent) => `Building ${percent}%`,
+  took: (seconds) => {
+    const s = Math.round(seconds), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    return [h && `${h}h`, (h || m) && `${m}m`, `${s % 60}s`].filter(Boolean).join(' ');
+  },
   dbUnreachable: 'Cannot reach the graph DB',
   dbStarting: 'Preparing the graph DB',
   close: 'Close',
@@ -398,6 +407,7 @@ const en: Words = {
   carriedIn: (n) => `${n} file${n === 1 ? '' : 's'} found inside the documents ${n === 1 ? 'is' : 'are'} read too`,
   lookingThrough: 'Looking inside the documents for files they carry…',
   buildDone: (docs, embedded) => `Graph ready · ${docs} documents, ${embedded} passages`,
+  readDone: (took) => `Read · ${took}`,
   buildNothingRead: 'No document was read in',
   buildAllKnown: (n) => `All ${n} are already in the graph — not read again`,
   uploaded: (n, skipped) => `${n} uploaded` + (skipped ? ` · ${skipped} skipped` : ''),

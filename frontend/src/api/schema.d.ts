@@ -804,6 +804,8 @@ export interface components {
             percent?: number | null;
             /** Error */
             error?: string | null;
+            /** Elapsed */
+            elapsed?: number | null;
         };
         /** ChunkSpan */
         ChunkSpan: {
@@ -1064,6 +1066,8 @@ export interface components {
             /** Sheets */
             sheets: components["schemas"]["PageInfo"][];
             progress?: components["schemas"]["ReadingProgress"] | null;
+            /** Elapsed */
+            elapsed?: number | null;
         };
         /** PagesOf */
         PagesOf: {

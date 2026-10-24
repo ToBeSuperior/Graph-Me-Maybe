@@ -77,7 +77,7 @@ export function BuildProgress({ compact = false }: { compact?: boolean }) {
           </div>
           <div className="mt-1.5 flex justify-between gap-2 text-xs text-muted">
             <span className="truncate">{uploading ? uploading.current : t('buildCount', step.done, step.total)}</span>
-            <span className="font-mono">{step.done}/{step.total}</span>
+            <span className="font-mono">{!uploading && build?.elapsed != null && `${t('took', build.elapsed)} · `}{step.done}/{step.total}</span>
           </div>
         </div>
       )}

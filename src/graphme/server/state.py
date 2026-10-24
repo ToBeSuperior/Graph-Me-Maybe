@@ -566,9 +566,11 @@ class Demo:
     def _build_then_let_go(self, docs: list[str], put: bool, embed: bool) -> None:
         """The build, then the copies fetched from a cloud drive for it removed: the space
         records where each one is, and a reader is shown it from there."""
+        build = self.build
         try:
             self._build_corpus(docs, put, embed)
         finally:
+            build.ended_at = time.monotonic()
             for doc in docs:
                 if doc in self.origins:
                     shutil.rmtree(Path(self.catalog.get(doc, "")).parent, ignore_errors=True)
@@ -672,7 +674,7 @@ class Demo:
             return int(100 * sum(one(doc) for doc in docs) / len(docs)) if docs else 100
 
         def counted() -> int:
-            build.percent = share()
+            build.percent = max(build.percent or 0, share())  # an estimate replaced: no step back
             return finished()
 
         def in_turn(paths: Sequence[Path]) -> Iterator[Path]:
@@ -760,8 +762,11 @@ class Demo:
         return True
 
     def _embed_alone(self, build: CorpusBuild) -> None:
-        if self._embed(build):
-            build.state = "done"
+        try:
+            if self._embed(build):
+                build.state = "done"
+        finally:
+            build.ended_at = time.monotonic()
 
     def drop(self, docs: Iterable[str]) -> None:
         """The server's own copies of these files let go: their readings, files and hashes."""
@@ -875,9 +880,11 @@ class Demo:
     def _run(self, session: Session) -> None:
         with self._counting:
             self._running += 1
+        session.started_at, session.ended_at = time.monotonic(), None
         try:
             self._steps(session, self._prepare, self._read, self._enrich, self._drawn)
         finally:
+            session.ended_at = time.monotonic()
             with self._counting:
                 self._running -= 1
         self._lighten(session)

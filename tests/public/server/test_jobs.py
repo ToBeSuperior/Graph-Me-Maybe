@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -219,3 +220,16 @@ def test_a_failed_export_says_why_and_never_the_password(demo, monkeypatch) -> N
     assert job.state == "error"
     assert "illegal option" in job.message
     assert "s3cret" not in job.message
+
+
+def test_a_build_says_how_long_it_took_and_stops_counting_when_done(
+    demo: Demo, client: TestClient
+) -> None:
+    demo._run = read_as("a", "a.docx")  # type: ignore[method-assign]
+    job = client.post("/v1/jobs/build", json={"files": [_upload(client)]}).json()
+    assert job["elapsed"] is not None and job["elapsed"] >= 0
+
+    took = _settled(client, job["id"])["elapsed"]
+    time.sleep(0.05)
+    assert client.get(f"/v1/jobs/{job['id']}").json()["elapsed"] == took
+    assert client.get("/v1/jobs").json()[0]["elapsed"] == took

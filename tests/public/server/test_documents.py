@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import time
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -352,3 +353,19 @@ def test_a_document_being_read_says_how_far_its_reading_is(
     said = client.get(f"/v1/files/{doc}/pages").json()["progress"]
 
     assert said == {"stage": "outline", "done": 1, "total": 4, "percent": 50}
+
+
+def test_a_document_says_how_long_its_reading_took(
+    demo: Demo, client: TestClient, tmp_path: Path
+) -> None:
+    source = tmp_path / "memo.pdf"
+    source.write_bytes(b"%PDF-1.4")
+    doc = demo.open_path(str(source))
+    session = demo.session(doc)
+    assert client.get(f"/v1/files/{doc}/pages").json()["elapsed"] is None  # not read yet
+
+    session.state, session.started_at = "reading", time.monotonic() - 65
+    assert client.get(f"/v1/files/{doc}/pages").json()["elapsed"] >= 65
+
+    session.state, session.ended_at = "done", session.started_at + 90
+    assert client.get(f"/v1/files/{doc}/pages").json()["elapsed"] == 90

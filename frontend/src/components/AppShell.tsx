@@ -31,8 +31,9 @@ function StatusPill() {
           : <span className={cn('size-1.5 rounded-full', isError ? 'bg-danger' : 'bg-ok')} />}
         {busy
           ? (starting ? t('pillDbStarting') : uploading ? t('pillUploading', uploading.done, uploading.total)
-            : build!.state === 'reading' && build!.percent != null ? t('pillBuildingPercent', build!.percent)
-            : build!.total ? t('pillBuilding', build!.done, build!.total) : t('pillLooking'))
+            : [build!.state === 'reading' && build!.percent != null ? t('pillBuildingPercent', build!.percent)
+              : build!.total ? t('pillBuilding', build!.done, build!.total) : t('pillLooking'),
+              build!.elapsed != null && t('took', build!.elapsed)].filter(Boolean).join(' · '))
           : map ? t('pillCounts', map.total, links) : t('pillNoDb')}
       </button>
     </Tip>
@@ -94,12 +95,14 @@ export function AppShell() {
   // How a build ended is said once, wherever the reader is.
   useBuildFollower((build) => {
     const failed = build.failed.length ? `${t('notProcessed', build.failed.length)} · ${build.failed.join(' · ')}` : undefined;
+    const done = [t('buildDone', build.documents, build.embedded),
+      build.elapsed != null && t('took', build.elapsed)].filter(Boolean).join(' · ');
     if (build.state === 'error') toast.error(t('buildFailed'), { description: build.error ?? '' });
     else if (build.state === 'cancelled') toast.info(t('buildCancelled', build.documents, build.skipped ?? 0), { description: failed });
     else if (!build.documents && build.failed.length) toast.error(t('buildNothingRead'), { description: failed });
     else if (!build.documents && build.known) toast.info(t('buildAllKnown', build.known));
-    else if (build.failed.length) toast.warning(t('buildDone', build.documents, build.embedded), { description: failed });
-    else toast.success(t('buildDone', build.documents, build.embedded),
+    else if (build.failed.length) toast.warning(done, { description: failed });
+    else toast.success(done,
       { description: build.known ? t('alreadyIn', build.known) : undefined });
   });
   return (

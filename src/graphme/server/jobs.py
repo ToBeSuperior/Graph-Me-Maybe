@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
 import traceback
 from collections.abc import Iterable
 from concurrent.futures import Future
@@ -105,6 +106,10 @@ class Session:
     machine, or a cloud drive's address."""
     stamp: tuple[int, int] | None = None
     """The file's size and time when this reading began: another means the file changed."""
+    started_at: float | None = None
+    ended_at: float | None = None
+    """When its reading began and ended (`time.monotonic`): from a reader taking it up, not
+    from its wait in the queue."""
     """Its pages are drawn by one request; another asking meanwhile waits for those pages
     instead of drawing its own. Another document's pages are not held up by them."""
 
@@ -165,6 +170,15 @@ class CorpusBuild:
     """How far the reading is, over every document's questions; None for a job that reads
     nothing (embedding alone)."""
     error: str | None = None
+    started_at: float = field(default_factory=time.monotonic)
+    ended_at: float | None = None
+
+
+def elapsed(started_at: float | None, ended_at: float | None) -> float | None:
+    """Seconds from `started_at` to `ended_at`, or to now while it runs; None never begun."""
+    if started_at is None:
+        return None
+    return round((time.monotonic() if ended_at is None else ended_at) - started_at, 1)
 
 
 # A document is put in the graph DB as soon as it is read: one step to the reader.
