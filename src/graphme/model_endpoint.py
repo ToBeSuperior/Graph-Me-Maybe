@@ -19,8 +19,9 @@ _GEMINI = "https://generativelanguage.googleapis.com/v1beta/openai"
 PROVIDERS = {
     "openai": Provider(wire="chat_completions", base_url="https://api.openai.com/v1",
                        key_env="OPENAI_API_KEY", model="gpt-5.6-luna"),
+    # Haiku: the outline's page readings and page-break joins were measured and tuned on it.
     "anthropic": Provider(wire="messages", base_url="https://api.anthropic.com/v1",
-                          key_env="ANTHROPIC_API_KEY", model="claude-sonnet-5-5"),
+                          key_env="ANTHROPIC_API_KEY", model="claude-haiku-5-5"),
     "gemini": Provider(wire="chat_completions", base_url=_GEMINI,
                        key_env="GEMINI_API_KEY", model="gemini-2.5-flash"),
 }

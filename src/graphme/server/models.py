@@ -282,6 +282,8 @@ class SettingField(_Model):
     """The value, for a setting that is not a secret."""
     hint: str | None = None
     """A secret's last four characters, when it is set -- the secret itself is never sent."""
+    choices: dict[str, str] | None = None
+    """For a provider: what it can be, each with the variable its key is kept under."""
 
 
 class GoogleDrive(_Model):

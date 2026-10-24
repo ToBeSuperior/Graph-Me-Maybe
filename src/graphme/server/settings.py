@@ -43,8 +43,22 @@ _CHOICES = (
     ("GRAPHME_GOOGLE_CLIENT_ID", False),
     ("GRAPHME_GOOGLE_CLIENT_SECRET", True),
 )
-_ANY_KEY = {row.key_env for row in model_endpoint.PROVIDERS.values()} | {
-    row.key_env for row in model_endpoint.EMBEDDERS.values()}
+
+
+def _any_key() -> set[str]:
+    """Every provider's and embedder's key: a save switching provider brings the new one's."""
+    return {row.key_env for row in model_endpoint.PROVIDERS.values()} | {
+        row.key_env for row in model_endpoint.EMBEDDERS.values()}
+
+
+def _choices(env: str) -> dict[str, str] | None:
+    """What a provider setting can be, each with the key variable it reads -- so the page shows
+    the chosen one's key at once, saved with the switch."""
+    if env == "GRAPHME_PROVIDER":
+        return {name: row.key_env for name, row in model_endpoint.PROVIDERS.items()}
+    if env == "GRAPHME_EMBEDDING_PROVIDER":
+        return {name: row.key_env for name, row in model_endpoint.EMBEDDERS.items()}
+    return None
 
 
 def editable(settings: Settings) -> tuple[tuple[str, bool], ...]:
@@ -76,7 +90,8 @@ def described(settings: Settings) -> dict[str, Any]:
         text = None if value is None else str(value)
         fields.append({"env": env, "secret": secret, "set": bool(text),
                        "value": None if secret else text,
-                       "hint": text[-4:] if secret and text and len(text) > 8 else None})
+                       "hint": text[-4:] if secret and text and len(text) > 8 else None,
+                       **({"choices": choices} if (choices := _choices(env)) else {})})
     return {"endpoint": settings.provider, "fields": fields, "problems": preflight(settings)}
 
 
@@ -114,7 +129,7 @@ def changed(
     if demo.build.state in BUILDING:
         raise Busy("settings cannot change while a graph is being built")
     values = {k: v.strip() for k, v in values.items() if v.strip()}
-    unknown = sorted(set(values) - _ANY_KEY - {env for env, _ in _CHOICES})
+    unknown = sorted(set(values) - _any_key() - {env for env, _ in _CHOICES})
     if unknown or any("\n" in v or "\r" in v for v in values.values()):
         raise ValueError(
             f"these settings cannot be changed: {', '.join(unknown) or 'a line break'}")

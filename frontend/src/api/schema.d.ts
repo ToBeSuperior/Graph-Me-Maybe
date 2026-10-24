@@ -1122,6 +1122,10 @@ export interface components {
             value?: string | null;
             /** Hint */
             hint?: string | null;
+            /** Choices */
+            choices?: {
+                [key: string]: string;
+            } | null;
         };
         /** SettingsChange */
         SettingsChange: {

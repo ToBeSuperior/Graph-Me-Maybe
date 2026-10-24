@@ -17,6 +17,19 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [said, setSaid] = useState<{ ok: boolean; text: string } | null>(null);
   const changed = Object.values(values).some((v) => v.trim());
+  const fields = data?.fields ?? [];
+  // A provider chosen here reads its own key: shown at once, so the switch and the key are one
+  // save -- otherwise a Claude key had no field until a save without it went through.
+  const keyFields = fields.flatMap((f) => {
+    const env = f.choices?.[values[f.env] || f.value || ''];
+    return env && !fields.some((g) => g.env === env)
+      ? [{ env, secret: true, set: false, value: null, hint: null, choices: null }] : [];
+  });
+  const choose = (env: string, value: string, current: string | null | undefined) => {
+    const next = { ...values };
+    if (value === current) delete next[env]; else next[env] = value;
+    setValues(next);
+  };
 
   const save = async () => {
     setSaving(true);
@@ -47,19 +60,29 @@ export function SettingsPage() {
           <p className="flex items-center gap-2 text-sm text-muted"><CheckCircle2 className="size-4 text-ok" />{t('settingsReady')}</p>
         ))}
         <form className="grid gap-4" autoComplete="off" onSubmit={(e) => { e.preventDefault(); void save(); }}>
-          {data?.fields.map((f) => (
+          {[...keyFields, ...fields].map((f) => (
             <label key={f.env} className="grid gap-1">
               <span className="flex items-baseline gap-2 text-sm font-medium">
                 {t('settingName', f.env)}
                 {f.secret && <span className="text-xs font-normal text-muted">{f.set ? t('keySet', f.hint ?? null) : t('keyUnset')}</span>}
               </span>
-              <Input
-                type={f.secret ? 'password' : 'text'} spellCheck={false}
-                autoComplete={f.secret ? 'new-password' : 'off'}
-                placeholder={f.secret ? (f.set ? t('keyReplace') : f.env) : (f.value ?? f.env)}
-                value={values[f.env] ?? ''}
-                onChange={(e) => setValues({ ...values, [f.env]: e.target.value })}
-              />
+              {f.choices ? (
+                <select
+                  className="h-8 w-full rounded-md border border-line bg-panel px-2 text-sm text-fg focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                  value={values[f.env] ?? f.value ?? ''}
+                  onChange={(e) => choose(f.env, e.target.value, f.value)}
+                >
+                  {Object.keys(f.choices).map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              ) : (
+                <Input
+                  type={f.secret ? 'password' : 'text'} spellCheck={false}
+                  autoComplete={f.secret ? 'new-password' : 'off'}
+                  placeholder={f.secret ? (f.set ? t('keyReplace') : f.env) : (f.value ?? f.env)}
+                  value={values[f.env] ?? ''}
+                  onChange={(e) => setValues({ ...values, [f.env]: e.target.value })}
+                />
+              )}
               <span className="text-xs leading-5 text-faint">{t('settingNote', f.env)} <code>{f.env}</code></span>
             </label>
           ))}

@@ -5,6 +5,18 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-10-24
+
+### Changed
+
+- Keys and model: the chat and embedding providers are chosen from a list, and choosing one
+  shows its key field at once, saved together. A Claude (Anthropic) key can be put in directly.
+- With Anthropic, the default model is Claude Haiku, the model the outline reading was tuned on.
+
+### Fixed
+
+- Saving a new provider together with its key no longer refuses the key.
+
 ## [0.1.23] - 2026-10-24
 
 ### Changed

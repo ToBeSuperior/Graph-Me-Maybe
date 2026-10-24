@@ -310,7 +310,7 @@ const ko = {
   } as Record<string, string>)[env] ?? env,
   settingNote: (env: string) => ({
     ...{
-      GRAPHME_PROVIDER: '문서 읽기와 답변을 맡는 곳: openai, anthropic, gemini 중 하나.',
+      GRAPHME_PROVIDER: '문서 읽기와 답변을 맡는 곳. 고르면 그 제공자의 키 칸이 나타나고, 함께 저장됩니다.',
       GRAPHME_EMBEDDING_PROVIDER: '검색 임베딩을 맡는 곳: openai 또는 gemini.',
     },
     OPENAI_API_KEY: 'platform.openai.com의 유료 API 키. 임베딩 제공자가 openai이면 검색을 위해 문서 구절이 OpenAI로 갑니다.',
@@ -642,7 +642,7 @@ const en: Words = {
   } as Record<string, string>)[env] ?? env,
   settingNote: (env) => ({
     ...{
-      GRAPHME_PROVIDER: 'Who reads documents and answers: openai, anthropic or gemini.',
+      GRAPHME_PROVIDER: 'Who reads documents and answers. Choose one and its key field appears, saved with it.',
       GRAPHME_EMBEDDING_PROVIDER: 'Who embeds passages for search: openai or gemini.',
     },
     OPENAI_API_KEY: 'A paid API key from platform.openai.com. With the openai embedder, passages are sent to OpenAI to be searched.',

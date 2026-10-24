@@ -122,6 +122,18 @@ test('a key is put in on the settings page and never shown back', async ({ page 
   await expect(page.getByLabel('OpenAI API 키')).toHaveValue('');
 });
 
+test('choosing Anthropic asks for its key on the same save', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto('/');
+  await page.getByRole('link', { name: '설정 열기' }).click();
+  await expect(page.getByLabel('Anthropic API 키')).toHaveCount(0);
+  await page.getByLabel('채팅 제공자').selectOption('anthropic');
+  await page.getByLabel('Anthropic API 키').fill('sk-ant-test-abcd');
+  await page.getByRole('button', { name: '저장' }).click();
+  await expect(page.getByRole('status')).toHaveText('저장했습니다');
+  expect(fake.saved).toEqual([{ GRAPHME_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'sk-ant-test-abcd' }]);
+});
+
 test('the samples are offered only by a server that has them', async ({ page }) => {
   await fakeApi(page, { empty: true, samples: false });
   await page.goto('/');

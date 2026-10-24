@@ -56,7 +56,8 @@ def test_saved_settings_go_into_env_and_are_taken_up_at_once(page: Any) -> None:
     assert "sk-proj-abcdefgh1234" not in shown.text and shown.json()["samples"] is False
     fields = {f["env"]: f for f in shown.json()["fields"]}
     assert fields[EMBED_KEY] == {
-        "env": EMBED_KEY, "secret": True, "set": True, "value": None, "hint": "1234"}
+        "env": EMBED_KEY, "secret": True, "set": True, "value": None, "hint": "1234",
+        "choices": None}
 
 
 def test_a_refused_key_is_not_saved(page: Any) -> None:
@@ -343,3 +344,35 @@ def test_the_startup_check_does_not_hold_the_server_back(monkeypatch: pytest.Mon
     checks.preflight_behind(None)  # type: ignore[arg-type]  # the check is replaced above
     assert time.monotonic() - started < 0.5
     assert told.wait(5)
+
+
+def test_the_page_offers_every_provider_with_the_key_it_reads(page: Any) -> None:
+    # A provider typed by name, its key field shown only once the switch was saved: a Claude
+    # key had nowhere to go until a save without one went through first.
+    client, _, _, _ = page
+    fields = {f["env"]: f for f in client.get("/v1/settings").json()["fields"]}
+
+    assert fields["GRAPHME_PROVIDER"]["choices"] == {
+        name: row.key_env for name, row in model_endpoint.PROVIDERS.items()}
+    assert fields["GRAPHME_EMBEDDING_PROVIDER"]["choices"] == {
+        name: row.key_env for name, row in model_endpoint.EMBEDDERS.items()}
+    assert fields["GRAPHME_MODEL"].get("choices") is None
+
+
+def test_switching_provider_takes_that_providers_key_in_the_same_save(
+    page: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from graphme.providers import Provider
+
+    client, demo, env, _ = page
+    monkeypatch.delenv("THIRD_API_KEY", raising=False)
+    monkeypatch.setitem(model_endpoint.PROVIDERS, "third", Provider(
+        wire="chat_completions", base_url="http://127.0.0.1:9/v1", key_env="THIRD_API_KEY",
+        model="third-default"))
+
+    said = client.put("/v1/settings", json={"values": {
+        "GRAPHME_PROVIDER": "third", "THIRD_API_KEY": "sk-third-abcdefgh1234"}})
+
+    assert said.status_code == 200, said.text
+    assert "THIRD_API_KEY=sk-third-abcdefgh1234\n" in env.read_text()
+    assert demo.settings.provider == "third" and demo.settings.api_key == "sk-third-abcdefgh1234"
