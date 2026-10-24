@@ -5,6 +5,13 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.26] - 2026-10-24
+
+### Changed
+
+- The "not ready" warning says the LLM API key or the search API key is missing, with the
+  provider chosen, instead of naming OpenAI's variable whatever provider answers.
+
 ## [0.1.25] - 2026-10-24
 
 ### Changed

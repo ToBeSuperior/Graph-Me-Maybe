@@ -200,22 +200,24 @@ def preflight(settings: Settings) -> list[str]:
     """What keeps the server from building or answering, said before it starts rather than on
     the first question: the graph embedding key, the chat model's address and key, the viewer."""
     problems = []
-    chat_key = model_endpoint.PROVIDERS[settings.provider].key_env
+    # Said by what the key is for: a variable's name read as asking for that one provider's
+    # key, whichever was meant to answer.
     embed_row = model_endpoint.EMBEDDERS.get(settings.embedding_provider)
     if embed_row is None:  # a test embedder: no key to ask for
         pass
     elif not settings.embedding_key:
-        problems.append(f"{embed_row.key_env} is empty -- put in the key used to embed"
-                        " and search the graph.")
+        problems.append("The search API key is empty -- put in the key that embeds and searches"
+                        f" the graph ({settings.embedding_provider}) in Keys and model.")
     elif _models(embed_row.base_url,
                  auth_headers("chat_completions", settings.embedding_key)) == "refused":
-        problems.append(f"{settings.embedding_provider} refused {embed_row.key_env} -- "
-                        "check that it is that provider's API key.")
+        problems.append(f"{settings.embedding_provider} refused the search API key -- check"
+                        " that it is that provider's key.")
     chat = _models(settings.base_url,
                    auth_headers(model_endpoint.PROVIDERS[settings.provider].wire, settings.api_key))
     if chat == "refused" and not settings.api_key:
-        problems.append(f"{chat_key} is empty -- put in the key used to read documents"
-                        " and answer.")
+        problems.append("The LLM API key is empty -- choose the provider that reads documents"
+                        f" and answers ({settings.provider}) and put in its key in Keys and"
+                        " model.")
     elif chat == "refused":
         problems.append(f"the model server ({settings.base_url}) refused the key -- check"
                         " the key in .env.")

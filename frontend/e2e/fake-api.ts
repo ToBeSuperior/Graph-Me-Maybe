@@ -45,7 +45,7 @@ export async function fakeApi(page: Page,
     if (path === '/v1/settings') {
       if (method === 'PUT') fake.saved.push(route.request().postDataJSON().values);
       const key = !!fake.saved.length;
-      return json(route, { endpoint: 'openai', samples, problems: key ? [] : ['OPENAI_API_KEY가 비어 있습니다'], fields: [
+      return json(route, { endpoint: 'openai', samples, problems: key ? [] : ['The LLM API key is empty'], fields: [
         { env: 'OPENAI_API_KEY', secret: true, set: key, value: null, hint: key ? 'abcd' : null },
         { env: 'GRAPHME_PROVIDER', secret: false, set: true, value: 'openai', hint: null,
           choices: { openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', gemini: 'GEMINI_API_KEY' } },

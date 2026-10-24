@@ -112,7 +112,7 @@ test('with no document chosen, nothing can be downloaded', async ({ page }) => {
 test('a key is put in on the settings page and never shown back', async ({ page }) => {
   const fake = await fakeApi(page);
   await page.goto('/');
-  await expect(page.getByRole('alert')).toContainText('OPENAI_API_KEY가 비어 있습니다');
+  await expect(page.getByRole('alert')).toContainText('The LLM API key is empty');
   await page.getByRole('link', { name: '설정 열기' }).click();
   await page.getByLabel('OpenAI API 키').fill('sk-test-abcd');
   await page.getByRole('button', { name: '저장' }).click();

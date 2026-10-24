@@ -376,3 +376,20 @@ def test_switching_provider_takes_that_providers_key_in_the_same_save(
     assert said.status_code == 200, said.text
     assert "THIRD_API_KEY=sk-third-abcdefgh1234\n" in env.read_text()
     assert demo.settings.provider == "third" and demo.settings.api_key == "sk-third-abcdefgh1234"
+
+
+def test_a_missing_key_is_said_by_what_it_is_for_not_by_one_provider_s_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # "OPENAI_API_KEY is empty" stood at the top of every page, read as asking for an OpenAI
+    # key whatever provider was meant to answer.
+    from graphme.config import Settings
+
+    monkeypatch.setattr(server_settings, "_models", lambda url, headers: "refused")
+    said = server_settings.preflight(Settings().model_copy(update={
+        "api_key": None, "embedding_key": None}))
+    keys = {row.key_env for row in model_endpoint.PROVIDERS.values()} | {
+        row.key_env for row in model_endpoint.EMBEDDERS.values()}
+
+    assert any(p.startswith("The LLM API key is empty") for p in said)
+    assert not any(key in p for p in said for key in keys)
