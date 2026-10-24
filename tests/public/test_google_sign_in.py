@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -68,7 +69,8 @@ def test_a_sign_in_asks_for_the_picked_files_only_and_proves_it_started_here(
     verifier = exchange["code_verifier"][0]
     digest = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=")
     assert asked["code_challenge"] == [digest.decode()]  # PKCE: the code alone is no use
-    assert (tmp_path / "google.token").stat().st_mode & 0o077 == 0  # its owner's alone
+    # its owner's alone; on Windows the folder's own rights say so, not mode bits
+    assert sys.platform == "win32" or (tmp_path / "google.token").stat().st_mode & 0o077 == 0
 
 
 def test_an_answer_this_app_did_not_ask_for_is_refused(tmp_path: Path) -> None:

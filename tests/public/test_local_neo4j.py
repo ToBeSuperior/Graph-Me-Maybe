@@ -6,6 +6,7 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+import sys
 import tarfile
 import zipfile
 from hashlib import sha256
@@ -309,7 +310,8 @@ def test_the_first_start_sets_a_password_kept_only_for_this_user_and_starts_agai
     assert began == [False, True]  # set once, then asked for from then on
     (port, password), = secured
     assert local_neo4j.password(tmp_path) == password and len(password) >= 24
-    assert (home.data / "password").stat().st_mode & 0o077 == 0
+    # Windows has no mode bits for it: the folder's own rights keep it the owner's.
+    assert sys.platform == "win32" or (home.data / "password").stat().st_mode & 0o077 == 0
 
 
 def test_one_already_running_with_no_password_is_given_one_and_left_running(

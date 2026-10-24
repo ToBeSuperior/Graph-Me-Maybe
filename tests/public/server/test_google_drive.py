@@ -1,6 +1,7 @@
 """Connecting Google Drive from the app, against a fake Google. Invented values."""
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -121,7 +122,9 @@ def test_the_token_is_kept_where_only_its_owner_reads_it(
         "state": parse_qs(urlsplit(url).query)["state"][0], "code": "invented-code"})
 
     kept = demo.root / "google.token"
-    assert kept.read_text() == "invented-refresh" and kept.stat().st_mode & 0o077 == 0
+    assert kept.read_text() == "invented-refresh"
+    # Windows has no mode bits for it: the folder's own rights keep it the owner's.
+    assert sys.platform == "win32" or kept.stat().st_mode & 0o077 == 0
     assert "invented-refresh" not in client.get("/v1/settings").text
 
 
