@@ -5,6 +5,19 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.34] - 2026-10-26
+
+### Added
+
+- Select all: a row above each Box and Box Drive folder listing checks or clears everything in
+  the folder shown.
+
+### Fixed
+
+- A build embeds its passages with the search model run on this computer. Since 0.1.32 a build
+  skipped embedding when no embedding key was set, so newly built documents were not found by
+  questions. The next build embeds those too.
+
 ## [0.1.33] - 2026-10-26
 
 ### Added

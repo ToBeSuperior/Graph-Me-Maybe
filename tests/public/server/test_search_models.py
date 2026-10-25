@@ -149,3 +149,31 @@ def test_the_server_shutting_down_stops_the_model_servers_it_started(
         assert stopped == []
 
     assert stopped == [True]
+
+
+def test_a_build_embeds_with_a_model_run_here_which_has_no_key(
+    tmp_path: Path, space: Any, admin: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The build embedded only when an embedding key was set: with the model run here there is
+    # none, and the documents just read were never searchable.
+    from graphme import api
+    from tests.public.server.conftest import read_as
+
+    monkeypatch.setattr(api, "create_neo4j_admin", lambda settings: admin)
+    demo = Demo(Settings(embedding_provider="general"), renderer=None,  # type: ignore[arg-type]
+                root=tmp_path / "server")
+    demo.graph._space = space  # type: ignore[assignment]
+    embedded: list[bool] = []
+
+    class Rag:
+        def embed(self, on_progress: Any = None) -> int:
+            embedded.append(True)
+            return 7
+
+    demo.rag = lambda: Rag()  # type: ignore[method-assign,assignment,return-value]
+    demo._run = read_as("a", "a.docx")  # type: ignore[method-assign]
+    (tmp_path / "a.docx").write_bytes(b"a")
+    build = demo.build_corpus([demo.open_path(str(tmp_path / "a.docx"))], "test")
+
+    assert until(lambda: build.state == "done"), build
+    assert embedded == [True] and build.embedded == 7

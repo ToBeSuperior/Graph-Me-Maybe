@@ -57,12 +57,13 @@ export function BoxPage() {
   const build = () => act(async () => {
     client.setQueryData(keys.build, await call(api.POST('/v1/cloud/box/build')));
   });
-  const pick = (item: BoxItem, on: boolean) => act(async () => {
+  const pick = (items: BoxItem[], on: boolean) => act(async () => {
+    const same = (a: BoxItem, b: BoxItem) => a.id === b.id && a.type === b.type;
     // Shown checked at once; the listing asked again after the save says what was kept.
     client.setQueryData(folderKey(at), folder.data && { ...folder.data, items: folder.data.items.map(
-      (i) => (i.id === item.id && i.type === item.type ? { ...i, picked: on } : i)) });
-    const picked = (state?.picked ?? []).filter((p) => !(p.id === item.id && p.type === item.type));
-    const now = await call(api.PUT('/v1/cloud/box/picked', { body: { items: on ? [...picked, item] : picked } }));
+      (i) => (items.some((item) => same(i, item)) ? { ...i, picked: on } : i)) });
+    const picked = (state?.picked ?? []).filter((p) => !items.some((item) => same(p, item)));
+    const now = await call(api.PUT('/v1/cloud/box/picked', { body: { items: on ? [...picked, ...items] : picked } }));
     client.setQueryData(boxKey, now);
     await client.invalidateQueries({ queryKey: ['boxFolder'] });
   });
@@ -102,9 +103,12 @@ export function BoxPage() {
             <p className="flex items-center gap-2">
               <CheckCircle2 className="size-4 text-ok" />{t('boxPicked', state.picked.length)}
             </p>
-            <FolderList listing={folder.data} loading={folder.isLoading} disabled={working}
-              isPicked={(item) => item.picked} onOpen={setAt}
-              onPick={(item, on) => void pick({ type: item.type, id: item.id, name: item.name }, on)} />
+            <div data-testid="box-api" className="grid gap-2">
+              <FolderList listing={folder.data} loading={folder.isLoading} disabled={working}
+                isPicked={(item) => item.picked} onOpen={setAt}
+                onPick={(item, on) => void pick([{ type: item.type, id: item.id, name: item.name }], on)}
+                onPickAll={(items, on) => void pick(items.map((i) => ({ type: i.type, id: i.id, name: i.name })), on)} />
+            </div>
             <div className="flex flex-wrap gap-2">
               <Button variant="primary" onClick={build} disabled={working || building || !state.picked.length}>
                 {t('boxBuild')}
@@ -125,10 +129,10 @@ type Listed = Listing['items'][number];
 
 /** A folder a level at a time: the path above it to go back up, then its folders and documents,
  * each with a checkbox; a folder's name opens it. */
-function FolderList({ listing, loading, disabled, isPicked, onPick, onOpen }: {
+function FolderList({ listing, loading, disabled, isPicked, onPick, onPickAll, onOpen }: {
   listing?: Listing; loading: boolean; disabled: boolean;
   isPicked: (item: Listed) => boolean; onPick: (item: Listed, on: boolean) => void;
-  onOpen: (id: string) => void;
+  onPickAll: (items: Listed[], on: boolean) => void; onOpen: (id: string) => void;
 }) {
   const t = useT();
   const path = [...(listing?.path ?? []), ...(listing ? [{ id: listing.id, name: listing.name }] : [])];
@@ -147,6 +151,18 @@ function FolderList({ listing, loading, disabled, isPicked, onPick, onOpen }: {
       <ul className="divide-y divide-line rounded-lg border border-line bg-panel">
         {loading && <li className="p-3"><Spinner /></li>}
         {listing && !listing.items.length && <li className="p-3 text-muted">{t('boxEmpty')}</li>}
+        {listing && listing.items.length > 0 && (() => {
+          const all = listing.items.every(isPicked);
+          const some = !all && listing.items.some(isPicked);
+          return (
+            <li className="flex items-center gap-3 bg-subtle/50 px-3 py-2 text-muted">
+              <input type="checkbox" aria-label={t('pickAll')} checked={all} disabled={disabled}
+                ref={(box) => { if (box) box.indeterminate = some; }}
+                onChange={(e) => onPickAll(listing.items, e.target.checked)} />
+              <span>{t('pickAll')}</span>
+            </li>
+          );
+        })()}
         {listing?.items.map((item) => (
           <li key={`${item.type}-${item.id}`} className="flex items-center gap-3 px-3 py-2">
             <input type="checkbox" aria-label={item.name} checked={isPicked(item)} disabled={disabled}
@@ -201,7 +217,11 @@ function BoxDrive() {
       <p className="text-muted">{t('boxDriveFound')} <code className="rounded bg-surface px-1 text-fg">{root}</code></p>
       <FolderList listing={folder.data} loading={folder.isLoading} disabled={building}
         isPicked={(item) => checked.includes(item.id)} onOpen={setAt}
-        onPick={(item, on) => setChecked(on ? [...checked, item.id] : checked.filter((id) => id !== item.id))} />
+        onPick={(item, on) => setChecked(on ? [...checked, item.id] : checked.filter((id) => id !== item.id))}
+        onPickAll={(items, on) => {
+          const ids = items.map((i) => i.id);
+          setChecked(on ? [...checked.filter((id) => !ids.includes(id)), ...ids] : checked.filter((id) => !ids.includes(id)));
+        }} />
       <div className="flex items-center gap-3">
         <Button variant="primary" onClick={() => void build()} disabled={building || !checked.length}>
           {t('boxDriveBuild')}

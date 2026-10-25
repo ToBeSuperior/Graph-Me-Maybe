@@ -880,7 +880,7 @@ class Demo:
         build.skipped = sum(1 for _, reason in report.failed if reason.endswith(CANCELLED))
         build.links, build.documents = report.links, report.processed
         # What the question panel searches: the passages of every document just put in.
-        if put and embed and self.settings.embedding_key is not None and not self._embed(build):
+        if put and embed and self.settings.embeds and not self._embed(build):
             return
         build.state = "cancelled" if stop.is_set() else "done"
 

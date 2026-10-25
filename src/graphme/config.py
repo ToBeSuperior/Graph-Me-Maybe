@@ -255,6 +255,13 @@ class Settings(BaseModel):
         return self
 
     @property
+    def embeds(self) -> bool:
+        """Whether passages can be embedded: with the embedder's key, or by a model run on this
+        machine, which needs none."""
+        row = model_endpoint.EMBEDDERS.get(self.embedding_provider)
+        return self.embedding_key is not None or (row is not None and row.model_file is not None)
+
+    @property
     def asset_dir(self) -> Path:
         return self.data_dir / "assets"
 

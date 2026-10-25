@@ -190,6 +190,31 @@ test('Box Drive on this machine is found, browsed and built from', async ({ page
     '/Users/me/Library/CloudStorage/Box-Box/Plan.pdf']]);
 });
 
+test('everything in a Box Drive folder is checked at once', async ({ page }) => {
+  const fake = await fakeApi(page, { box: false });
+  await page.goto('/manage/box');
+  const drive = page.getByTestId('box-drive');
+  const all = drive.getByRole('checkbox', { name: '모두 선택' });
+  await all.check();
+  await expect(drive.getByRole('checkbox', { name: 'Quality' })).toBeChecked();
+  await expect(drive.getByRole('checkbox', { name: 'Plan.pdf' })).toBeChecked();
+  await drive.getByRole('checkbox', { name: 'Plan.pdf' }).uncheck();
+  await expect(all).not.toBeChecked();
+  await all.check();
+  await drive.getByRole('button', { name: 'Box Drive에서 그래프 만들기' }).click();
+  await expect.poll(() => fake.boxDrive).toEqual([[
+    '/Users/me/Library/CloudStorage/Box-Box/Quality', '/Users/me/Library/CloudStorage/Box-Box/Plan.pdf']]);
+});
+
+test('everything in a Box folder is picked at once', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto('/manage/box');
+  const listed = page.getByTestId('box-api');
+  await listed.getByRole('checkbox', { name: '모두 선택' }).check();
+  await expect.poll(() => fake.box.picked).toEqual([
+    { type: 'folder', id: '10', name: 'Specs' }, { type: 'file', id: 'f1', name: 'Leak Test Procedure.pdf' }]);
+});
+
 test('Box without an app says how to make one, with the address to register', async ({ page }) => {
   await fakeApi(page, { box: false });
   await page.goto('/manage/box');
