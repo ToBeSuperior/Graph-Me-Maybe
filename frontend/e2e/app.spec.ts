@@ -250,6 +250,12 @@ test('a build under way says how far its reading is', async ({ page }) => {
   await expect(page.getByText('그래프 만드는 중 42%')).toBeVisible();
 });
 
+test('a build looking through folders says how many documents it has found', async ({ page }) => {
+  await fakeApi(page, { jobs: [{ ...BUILD, done: 0, total: 0, looked: 120 }] });
+  await page.goto('/manage');
+  await expect(page.getByText('폴더를 살펴보는 중 · 문서 120개 찾음').first()).toBeVisible();
+});
+
 test('a document being read says how far, and which stage', async ({ page }) => {
   await fakeApi(page, { progress: { stage: 'outline', done: 12, total: 40, percent: 63 } });
   await page.goto('/manage/docs/f1?demo=1');

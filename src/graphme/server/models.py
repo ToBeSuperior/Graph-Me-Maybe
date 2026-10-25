@@ -130,6 +130,8 @@ class BuildState(_Model):
     percent: int | None = None
     """How far the reading is, over every document's questions (0-100); None for a job that
     reads nothing."""
+    looked: int = 0
+    """Documents found so far while the folders picked are looked through."""
     error: str | None = None
     elapsed: float | None = None
     """Seconds the job has taken: still counting while it runs."""

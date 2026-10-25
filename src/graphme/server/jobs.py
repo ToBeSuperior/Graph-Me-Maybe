@@ -169,6 +169,8 @@ class CorpusBuild:
     percent: int | None = None
     """How far the reading is, over every document's questions; None for a job that reads
     nothing (embedding alone)."""
+    looked: int = 0
+    """Documents found so far while the folders picked are looked through."""
     error: str | None = None
     started_at: float = field(default_factory=time.monotonic)
     ended_at: float | None = None

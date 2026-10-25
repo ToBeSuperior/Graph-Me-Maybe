@@ -81,7 +81,7 @@ export function BuildProgress({ compact = false }: { compact?: boolean }) {
           </div>
         </div>
       )}
-      {!uploading && step.at === 1 && !step.total && <div className="mt-3 text-xs text-muted">{t('lookingThrough')}</div>}
+      {!uploading && step.at === 1 && !step.total && <div className="mt-3 text-xs text-muted">{build?.looked ? t('lookingFolders', build.looked) : t('lookingThrough')}</div>}
       {!uploading && build && build.carried > 0 && <div className="mt-2 text-xs text-faint">{t('carriedIn', build.carried)}</div>}
       {!uploading && build && build.known > 0 && <div className="mt-2 text-xs text-faint">{t('alreadyIn', build.known)}</div>}
       {!uploading && build && step.at < 3 && <CancelBuild id={build.id} compact={compact} />}

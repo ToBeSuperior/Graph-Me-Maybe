@@ -230,9 +230,9 @@ def test_a_folder_slow_to_list_is_looked_through_behind_not_in_the_request(
     gate = threading.Event()
     walk = server_app.documents_at
 
-    def slow(path: Any) -> Any:
+    def slow(path: Any, **options: Any) -> Any:
         gate.wait(5)
-        return walk(path)
+        return walk(path, **options)
 
     monkeypatch.setattr(server_app, "documents_at", slow)
     demo._run = read_as("a", "a.docx")  # type: ignore[method-assign]
@@ -260,3 +260,35 @@ def test_a_folder_with_nothing_to_read_says_so_on_the_build(
     assert started.status_code == 202
     assert until(lambda: client.get(f"/v1/jobs/{started.json()['id']}").json()["state"] == "error")
     assert "no readable document" in client.get(f"/v1/jobs/{started.json()['id']}").json()["error"]
+
+
+def test_a_folder_that_never_lists_is_said_and_the_rest_is_built(
+    demo: Demo, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import errno
+    import os
+
+    from graphme.application import ingest
+
+    root = _box_drive(tmp_path)
+    (root / "Stuck").mkdir()
+    real = os.scandir
+
+    def scandir(path: Any) -> Any:
+        if Path(path).name == "Stuck":
+            raise OSError(errno.ETIMEDOUT, "Operation timed out", str(path))
+        return real(path)
+
+    monkeypatch.setattr(ingest.os, "scandir", scandir)
+    monkeypatch.setattr(ingest, "RETRY_DELAYS", (0.0, 0.0))
+    monkeypatch.setattr(ingest, "REST_SECONDS", 0.0)
+    monkeypatch.setattr(ingest, "PACE_SECONDS", 0.0)
+    demo._run = read_as("a", "a.docx")  # type: ignore[method-assign]
+    client = TestClient(create_app(demo), base_url=BASE)
+
+    job = client.post("/v1/jobs/build", json={"paths": [str(root)]}).json()
+    assert until(lambda: client.get(f"/v1/jobs/{job['id']}").json()["state"] == "done")
+    done = client.get(f"/v1/jobs/{job['id']}").json()
+
+    assert done["looked"] == 2  # both documents found while looking
+    assert any(f.startswith("Stuck") for f in done["failed"])

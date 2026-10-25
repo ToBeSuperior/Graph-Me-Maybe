@@ -1081,6 +1081,11 @@ export interface components {
             embedded: number;
             /** Percent */
             percent?: number | null;
+            /**
+             * Looked
+             * @default 0
+             */
+            looked: number;
             /** Error */
             error?: string | null;
             /** Elapsed */

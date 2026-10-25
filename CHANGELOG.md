@@ -5,6 +5,17 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.35] - 2026-10-26
+
+### Fixed
+
+- Building from a large Box Drive (or other cloud-drive) folder no longer stops at the first
+  folder that times out listing. Box answers "too many requests" while thousands of folders are
+  listed: a folder that times out is asked again after 10 and 30 seconds, then once more after
+  the rest is listed; folders are then listed more slowly. One that still does not list is
+  passed over and shown among what was not read, and the rest is built.
+- While a build looks through folders it says how many documents it has found so far.
+
 ## [0.1.34] - 2026-10-26
 
 ### Added

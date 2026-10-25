@@ -32,7 +32,8 @@ function StatusPill() {
         {busy
           ? (starting ? t('pillDbStarting') : uploading ? t('pillUploading', uploading.done, uploading.total)
             : [build!.state === 'reading' && build!.percent != null ? t('pillBuildingPercent', build!.percent)
-              : build!.total ? t('pillBuilding', build!.done, build!.total) : t('pillLooking'),
+              : build!.total ? t('pillBuilding', build!.done, build!.total)
+              : build!.looked ? t('lookingFolders', build!.looked) : t('pillLooking'),
               build!.elapsed != null && t('took', build!.elapsed)].filter(Boolean).join(' · '))
           : map ? t('pillCounts', map.total, links) : t('pillNoDb')}
       </button>

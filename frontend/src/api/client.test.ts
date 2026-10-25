@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError, call, lastBuild, lastExport, retrying, type Job } from './client';
 
 const build = (id: string, kind: 'build' | 'read' | 'embed', state = 'done') => ({ id, kind, state, done: 0, total: 0,
-  source: '', failed: [], documents: 0, known: 0, carried: 0, links: 0, skipped: 0, embedded: 0, error: null }) as Job;
+  source: '', failed: [], documents: 0, known: 0, carried: 0, links: 0, skipped: 0, embedded: 0, looked: 0, error: null }) as Job;
 const dump = (id: string) => ({ id, kind: 'dump', state: 'done', message: '', documents: null, finished_at: null,
   dump_ready: false }) as Job;
 

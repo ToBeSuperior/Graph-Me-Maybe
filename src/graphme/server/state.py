@@ -554,7 +554,7 @@ class Demo:
 
     def build_corpus(
         self, docs: list[str], source: str, *, put: bool = True, embed: bool = True,
-        find: Callable[[], list[str]] | None = None,
+        find: Callable[[CorpusBuild], list[str]] | None = None,
     ) -> CorpusBuild:
         """Read every document, put them all in the graph space, then join what they name and
         -- when `embed` and an embedding key is set -- embed their passages. Not `put`, the
@@ -582,14 +582,14 @@ class Demo:
         return self.build
 
     def _build_then_let_go(self, docs: list[str], put: bool, embed: bool,
-                           find: Callable[[], list[str]] | None = None) -> None:
+                           find: Callable[[CorpusBuild], list[str]] | None = None) -> None:
         """The build, then the copies fetched from a cloud drive for it removed: the space
         records where each one is, and a reader is shown it from there."""
         build = self.build
         try:
             if find is not None:
                 try:
-                    docs = find()
+                    docs = find(build)
                 except (ValueError, OSError) as error:
                     build.state, build.error = "error", f"cannot be read: {error}"
                     return
@@ -875,8 +875,9 @@ class Demo:
             self.putting = set()
         # What failed, said by file name -- the server's folders are this machine's, not the
         # reader's; what a cancel passed over is not a failure.
-        build.failed = [reason.replace(str(path), path.name).replace(f"{self.root}/", "")
-                        for path, reason in report.failed if not reason.endswith(CANCELLED)]
+        # Kept beside what was said before the reading: a folder passed over while looking.
+        build.failed += [reason.replace(str(path), path.name).replace(f"{self.root}/", "")
+                         for path, reason in report.failed if not reason.endswith(CANCELLED)]
         build.skipped = sum(1 for _, reason in report.failed if reason.endswith(CANCELLED))
         build.links, build.documents = report.links, report.processed
         # What the question panel searches: the passages of every document just put in.

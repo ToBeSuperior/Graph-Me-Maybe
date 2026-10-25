@@ -807,11 +807,22 @@ def create_app(
                     raise HTTPException(400, f"cannot be read: {each}") from error
                 wheres.append(where)
 
-            def found() -> list[str]:
+            def found(build: CorpusBuild) -> list[str]:
                 # Walked once the build has started, never inside the request: Box Drive lists
-                # a folder by asking Box, and a large one takes minutes.
-                return list(dict.fromkeys(demo.open_path(str(path))
-                                          for where in wheres for path in documents_at(where)))
+                # a folder by asking Box, and a large one takes minutes. One that will not list
+                # is passed over and said; the rest is read.
+                skipped: list[Path] = []
+                paths: list[Path] = []
+                for where in wheres:
+                    before = len(paths)
+
+                    def counted(n: int, before: int = before) -> None:
+                        build.looked = before + n
+
+                    paths += documents_at(where, skipped=skipped, on_found=counted)
+                build.failed += [f"{p.name}: the folder did not list in time -- not read"
+                                 for p in skipped]
+                return list(dict.fromkeys(demo.open_path(str(path)) for path in paths))
 
             source = str(wheres[0]) if request.folder else ", ".join(w.name for w in wheres)
             return started(demo.build_corpus([], source, embed=request.embed, find=found),
