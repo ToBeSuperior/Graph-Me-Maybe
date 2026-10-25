@@ -6,6 +6,7 @@ jumps to the question box from anywhere.
 
 - [Putting documents in](#putting-documents-in)
 - [Documents in Google Drive](#documents-in-google-drive)
+- [Documents in Box](#documents-in-box)
 - [Asking](#asking)
 - [Manage](#manage)
 - [Exporting the graph](#exporting-the-graph)
@@ -60,6 +61,30 @@ library (the link icon). **Disconnect** revokes the sign-in. Google Docs, Sheets
 
 The sign-in is kept in your system's credential store (Keychain on macOS, Credential Manager on
 Windows), never in `.env`. An app in "Testing" status signs in again after seven days.
+
+## Documents in Box
+
+**With Box Drive.** If Box's own desktop client, Box Drive, is on this computer, **Manage › Box**
+finds its folder (`~/Library/CloudStorage/Box-Box` on a Mac, `%USERPROFILE%\Box` on Windows).
+Check folders and files there and **Build from Box Drive**: no Box app to make and no approval
+from your company needed. A file kept online only is fetched by Box Drive as it is read.
+
+**With a Box app.** Folders and files kept in Box go into the graph the same way: fetched only while they are read
+or drawn, removed after, and never written to. Setting it up takes your own Box app, once:
+
+1. In the [Box Developer Console](https://developer.box.com/), create a **Custom App** with
+   **User Authentication (OAuth 2.0)**.
+2. Under **Configuration**, add the Redirect URI the app's **Manage › Box** page shows
+   (`http://127.0.0.1:<port>/v1/cloud/box/callback`; Box takes any port on this machine).
+3. Under **Application Scopes**, turn on only **Read all files and folders stored in Box**. A
+   company Box may need its admin to approve the app before anyone can sign in.
+4. In the app, **Manage › Keys and model › Advanced settings**, put in its client ID and secret.
+
+Then **Manage › Box › Connect Box** signs you in in the browser. Back in the app, browse the
+folders and check what to read -- a checked folder is read with everything under it -- and
+**Build from Box**. Run it again after files change in Box: a file is known by the version Box
+states, and only new versions are fetched and read. **Disconnect** revokes the sign-in, which is
+kept in your system's credential store like Google Drive's.
 
 ## Asking
 

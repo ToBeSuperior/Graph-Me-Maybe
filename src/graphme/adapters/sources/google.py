@@ -53,25 +53,28 @@ class Vault(Protocol):
 
 
 class KeyringVault:
-    """The OS credential store."""
+    """The OS credential store, under `account` (one per service signed in to)."""
+
+    def __init__(self, account: str = ACCOUNT) -> None:
+        self._account = account
 
     def get(self) -> str | None:
         import keyring
 
-        token: str | None = keyring.get_password(SERVICE, ACCOUNT)
+        token: str | None = keyring.get_password(SERVICE, self._account)
         return token
 
     def put(self, token: str) -> None:
         import keyring
 
-        keyring.set_password(SERVICE, ACCOUNT, token)
+        keyring.set_password(SERVICE, self._account, token)
 
     def clear(self) -> None:
         import keyring
         from keyring.errors import PasswordDeleteError
 
         with contextlib.suppress(PasswordDeleteError):
-            keyring.delete_password(SERVICE, ACCOUNT)
+            keyring.delete_password(SERVICE, self._account)
 
 
 class FileVault:
@@ -96,14 +99,14 @@ class FileVault:
         self._path.unlink(missing_ok=True)
 
 
-def vault(fallback: Path) -> Vault:
+def vault(fallback: Path, account: str = ACCOUNT) -> Vault:
     """The OS credential store when it works here, else the owner-only file."""
     try:
         import keyring
         from keyring.backends.fail import Keyring as NoKeyring
 
         if not isinstance(keyring.get_keyring(), NoKeyring):
-            return KeyringVault()
+            return KeyringVault(account)
     except Exception:  # noqa: BLE001 -- no usable store is the fallback's case
         pass
     return FileVault(fallback)

@@ -42,11 +42,12 @@ from graphme.adapters.export.neo4j_admin import AURA_URI
 from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.rendering.visual_binding import page_name, placed_units
+from graphme.adapters.sources.box import Picked as BoxPicked
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import MAX_TOP_K, GraphNotEmbedded, GraphRag
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, modified_at
 from graphme.application.embedded_documents import name_part
-from graphme.application.ingest import documents_in
+from graphme.application.ingest import documents_at
 from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop, read_node_crop
 from graphme.config import Settings, load_settings
 from graphme.runtime import create_browser_renderer
@@ -194,6 +195,20 @@ def create_app(
         return _closing_page(f"Google Drive is connected; {kept} picked. You can close this tab "
                              "and go back to Graph-Me-Maybe.")
 
+    @app.get("/v1/cloud/box/callback", response_class=HTMLResponse, include_in_schema=False)
+    def box_callback(request: Request, state: str = "", code: str | None = None,
+                     error: str | None = None) -> str:
+        """Where Box sends the browser back -- outside the key, as Google's is: the sign-in's
+        state, started by this process, is what proves it."""
+        if not from_here(request):
+            raise HTTPException(403, "only this machine's browser may finish a sign-in")
+        try:
+            demo.box().finish(state=state, code=code, error=error)
+        except (LookupError, ValueError) as refusal:
+            return _closing_page(f"Box was not connected: {refusal}")
+        return _closing_page("Box is connected. You can close this tab, go back to "
+                             "Graph-Me-Maybe and pick the folders to read.")
+
     @app.get("/health", response_model=api.Health)
     def health() -> dict[str, str]:
         """That the server answers, and from which folder: another install on this machine
@@ -279,6 +294,73 @@ def create_app(
         with refused():
             demo.google_disconnect()
             return demo.google_state()
+
+    # Box ----------------------------------------------------------------------------------
+
+    def here(request: Request, what: str) -> None:
+        if not from_here(request):
+            raise HTTPException(403, f"Box can only be {what} from this machine")
+
+    @v1.get("/cloud/box", response_model=api.Box)
+    def box_state() -> dict[str, Any]:
+        with refused():
+            return demo.box_state()
+
+    @v1.post("/cloud/box/connect", response_model=api.BoxConnect)
+    def box_connect(request: Request) -> dict[str, str]:
+        """Sign in to Box in the browser; read-only."""
+        here(request, "connected")
+        with refused():
+            url = demo.box().start(f"{request.base_url}v1/cloud/box/callback")
+        with contextlib.suppress(Exception):  # the page opens it when the server cannot
+            processes.open_in_browser(url)
+        return {"url": url}
+
+    @v1.delete("/cloud/box", response_model=api.Box)
+    def box_disconnect(request: Request) -> dict[str, Any]:
+        """The sign-in revoked at Box and forgotten here, with what was picked."""
+        here(request, "disconnected")
+        with refused():
+            demo.box_disconnect()
+            return demo.box_state()
+
+    @v1.get("/cloud/box/folders/{folder_id}", response_model=api.BoxFolder)
+    def box_folder(folder_id: str) -> dict[str, Any]:
+        """A Box folder a level at a time: its folders, then its documents."""
+        with refused():
+            return demo.box_folder(folder_id)
+
+    @v1.put("/cloud/box/picked", response_model=api.Box)
+    def box_pick(change: api.BoxPick, request: Request) -> dict[str, Any]:
+        """What is picked now, in place of what was."""
+        here(request, "changed")
+        with refused():
+            return demo.box_pick([BoxPicked(i.type, i.id, i.name) for i in change.items])
+
+    @v1.get("/box-drive", response_model=api.BoxDrive)
+    def box_drive() -> dict[str, Any]:
+        """Whether Box Drive's folder is on this machine, and where."""
+        root = demo.box_drive()
+        return {"found": root is not None, "root": str(root) if root else None}
+
+    @v1.get("/box-drive/folders", response_model=api.BoxFolder)
+    def box_drive_folder(path: str = "") -> dict[str, Any]:
+        """A Box Drive folder a level at a time, `path` relative to Box Drive's folder."""
+        try:
+            return demo.box_drive_folder(path)
+        except (LookupError, FileNotFoundError) as error:
+            raise HTTPException(404, str(error)) from error
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+
+    @v1.post("/cloud/box/build", status_code=202, response_model=api.BuildState)
+    def box_build(request: Request, response: Response) -> dict[str, Any]:
+        """The documents in what was picked into the space: a version read before is passed
+        over without being fetched."""
+        here(request, "read")
+        opened()
+        with refused():
+            return started(demo.build_box(), response)
 
     # Documents in the graph space ----------------------------------------------------------
 
@@ -713,23 +795,28 @@ def create_app(
         """Files uploaded, or a folder on the server's machine, read and built into the graph
         space, then embedded. A folder is read with the server's own rights: the key is what
         grants them."""
-        if folder := request.folder:
-            try:
-                where = Path(folder).expanduser().resolve()
-                if not where.is_dir():
-                    raise HTTPException(400, f"not a folder: {where}")
-                found = documents_in(where)
-            except (ValueError, OSError) as error:  # a NUL in the name, a folder it may not read
-                raise HTTPException(400, f"the folder cannot be read: {folder}") from error
-            # ponytail: the folder is walked inside the request; a job of its own if folders
-            # large enough to keep the 202 waiting are built.
-            docs = [demo.open_path(str(path)) for path in found]
-            if not docs:
-                raise HTTPException(400, "no readable document (xlsx, pptx, docx, pdf)")
-            source = str(where)
-        else:
-            docs, source = held(request.files), ""
-        return started(demo.build_corpus(docs, source, embed=request.embed), response)
+        if request.folder or request.paths:
+            given = [request.folder] if request.folder else request.paths
+            wheres: list[Path] = []
+            for each in given:
+                try:
+                    where = Path(each).expanduser().resolve()
+                    if not (where.is_dir() if request.folder else where.exists()):
+                        raise HTTPException(400, f"not found: {where}")
+                except (ValueError, OSError) as error:  # a NUL in the name, one it may not read
+                    raise HTTPException(400, f"cannot be read: {each}") from error
+                wheres.append(where)
+
+            def found() -> list[str]:
+                # Walked once the build has started, never inside the request: Box Drive lists
+                # a folder by asking Box, and a large one takes minutes.
+                return list(dict.fromkeys(demo.open_path(str(path))
+                                          for where in wheres for path in documents_at(where)))
+
+            source = str(wheres[0]) if request.folder else ", ".join(w.name for w in wheres)
+            return started(demo.build_corpus([], source, embed=request.embed, find=found),
+                           response)
+        return started(demo.build_corpus(held(request.files), "", embed=request.embed), response)
 
     @v1.post("/jobs/read", status_code=202, response_model=api.BuildState)
     def read(request: api.ReadRequest, response: Response) -> dict[str, Any]:

@@ -26,7 +26,8 @@ cosine, six of each in English and six in Korean: harrier 0.41 / 0.37, KURE 0.48
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 """This machine's names. `[::1]` is how a Host header writes the IPv6 one."""
 
-_SECRET_CONFIG_KEYS = {"api_key", "embedding_key", "neo4j_password", "server_key"}
+_SECRET_CONFIG_KEYS = {"api_key", "embedding_key", "neo4j_password", "server_key",
+                       "box_client_secret"}
 ENV_FIELDS = {
     "GRAPHME_PROFILE": "profile",
     "GRAPHME_DATA_DIR": "data_dir",
@@ -52,6 +53,8 @@ ENV_FIELDS = {
     "GRAPHME_NEO4J_PAGECACHE": "neo4j_pagecache",
     "GRAPHME_GOOGLE_CLIENT_ID": "google_client_id",
     "GRAPHME_GOOGLE_CLIENT_SECRET": "google_client_secret",
+    "GRAPHME_BOX_CLIENT_ID": "box_client_id",
+    "GRAPHME_BOX_CLIENT_SECRET": "box_client_secret",
 }
 _FLOAT_FIELDS = {"render_timeout_seconds", "relevance_floor", "hybrid_dense_weight"}
 _INT_FIELDS = {
@@ -188,6 +191,9 @@ class Settings(BaseModel):
     google_client_id: str | None = None
     """The user's own OAuth client (Desktop app) that reads the Google Drive files they pick."""
     google_client_secret: str | None = Field(default=None, repr=False)
+    box_client_id: str | None = None
+    """The user's own Box app (OAuth 2.0, user authentication) that reads what they pick."""
+    box_client_secret: str | None = Field(default=None, repr=False)
     """GRAPHME_API_KEY: what `graphme serve` asks every `/v1` request for. Unset, it asks for
     nothing, and serves this machine only."""
     neo4j_heap: str = Field(default="1g", pattern=r"^[1-9][0-9]*[kmg]$")

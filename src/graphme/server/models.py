@@ -95,6 +95,8 @@ class PagesOf(_Model):
 class BuildRequest(_Model):
     folder: str | None = None
     """A folder on the server's machine, or --"""
+    paths: list[str] = Field(default_factory=list)
+    """-- folders and files on the server's machine (what was checked in Box Drive), or --"""
     files: list[str] = Field(default_factory=list)
     """-- files uploaded (`POST /v1/files`)."""
     embed: bool = True
@@ -317,6 +319,61 @@ class GoogleDrive(_Model):
 class GoogleConnect(_Model):
     url: str
     """Where the browser signs in and picks files; opened already when the server could."""
+
+
+class BoxItem(_Model):
+    type: Literal["folder", "file"]
+    id: str
+    name: str
+
+
+class Box(_Model):
+    configured: bool
+    """Whether the user's Box app is set (GRAPHME_BOX_CLIENT_ID and _SECRET)."""
+    connected: bool
+    """Whether a Box account is signed in."""
+    picked: list[BoxItem]
+    """The folders and files picked for the graph."""
+
+
+class BoxConnect(_Model):
+    url: str
+    """Where the browser signs in to Box; opened already when the server could."""
+
+
+class BoxPlace(_Model):
+    id: str
+    name: str
+
+
+class BoxListed(_Model):
+    id: str
+    type: Literal["folder", "file"]
+    name: str
+    size: int | None = None
+    picked: bool = False
+    """Picked itself -- a file inside a picked folder is read with it, but not marked."""
+
+
+class BoxFolder(_Model):
+    id: str
+    name: str
+    path: list[BoxPlace]
+    """The folders above it, the top first."""
+    items: list[BoxListed]
+    """Its folders, then its documents; nothing else it holds."""
+
+
+class BoxDrive(_Model):
+    found: bool
+    """Whether Box Drive's folder is on this machine."""
+    root: str | None = None
+    """Where it is."""
+
+
+class BoxPick(_Model):
+    items: list[BoxItem]
+    """Everything picked: what was picked before is replaced."""
 
 
 class ServerSettings(_Model):

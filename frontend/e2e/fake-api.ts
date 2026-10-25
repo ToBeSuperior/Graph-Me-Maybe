@@ -2,7 +2,7 @@
 // invented documents, so the checks need no server, graph DB or model.
 import type { Page, Route } from '@playwright/test';
 
-interface Fake { searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; drive: { configured: boolean; connected: boolean; picked: number; built: number } }
+interface Fake { boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; drive: { configured: boolean; connected: boolean; picked: number; built: number } }
 
 /** A job as `GET /v1/jobs` lists it, newest first. */
 type FakeJob = Record<string, unknown> & { id: string; kind: string; state: string };
@@ -26,8 +26,11 @@ const sources = [
     ] },
 ];
 
+const BUILD_STARTED = { id: 'bx', kind: 'build', state: 'reading', done: 0, total: 1, source: 'Box', failed: [], documents: 0,
+  known: 0, carried: 0, links: 0, skipped: 0, embedded: 0, error: null };
+
 export async function fakeApi(page: Page,
-  { empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[],
+  { box = true, boxDrive = true, empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[],
     progress = null as Record<string, unknown> | null, elapsed = null as number | null } = {}): Promise<Fake> {
   const fake: Fake = {
     searchModels: [
@@ -35,6 +38,7 @@ export async function fakeApi(page: Page,
         fetching: { done: 319724160, total: 639448320 }, error: null },
       { name: 'korean', model: 'KURE-v1', size: 437779008, installed: true, chosen: false, fetching: null, error: null },
     ],
+    boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
     installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0,
     drive: { configured: true, connected: false, picked: 0, built: 0 } };
   const json = (route: Route, body: unknown, status = 200) =>
@@ -49,6 +53,42 @@ export async function fakeApi(page: Page,
       fake.refused += 1;
       return json(route, { detail: 'API 키가 필요합니다 (GRAPHME_API_KEY)' }, 401);
     }
+    const boxFolders: Record<string, { name: string; path: { id: string; name: string }[]; items: { id: string; type: string; name: string; size?: number }[] }> = {
+      0: { name: 'All Files', path: [], items: [
+        { id: '10', type: 'folder', name: 'Specs' },
+        { id: 'f1', type: 'file', name: 'Leak Test Procedure.pdf', size: 120000 }] },
+      10: { name: 'Specs', path: [{ id: '0', name: 'All Files' }], items: [
+        { id: 'f2', type: 'file', name: 'Valve Spec.docx', size: 64000 }] },
+    };
+    if (path === '/v1/box-drive') return json(route, boxDrive ? { found: true, root: '/Users/me/Library/CloudStorage/Box-Box' } : { found: false, root: null });
+    if (path === '/v1/box-drive/folders') {
+      const at = url.searchParams.get('path') ?? '';
+      const listed: Record<string, unknown> = {
+        '': { id: '', name: 'Box-Box', path: [], items: [
+          { id: 'Quality', type: 'folder', name: 'Quality', picked: false },
+          { id: 'Plan.pdf', type: 'file', name: 'Plan.pdf', picked: false }] },
+        Quality: { id: 'Quality', name: 'Quality', path: [{ id: '', name: 'Box-Box' }], items: [
+          { id: 'Quality/Audit.docx', type: 'file', name: 'Audit.docx', picked: false }] },
+      };
+      return json(route, listed[at]);
+    }
+    if (path === '/v1/jobs/build' && method === 'POST') {
+      fake.boxDrive.push(route.request().postDataJSON().paths ?? []);
+      return json(route, { ...BUILD_STARTED, source: 'Box Drive' }, 202);
+    }
+    if (path === '/v1/cloud/box') return json(route, { configured: fake.box.configured, connected: fake.box.connected, picked: fake.box.picked });
+    if (path === '/v1/cloud/box/connect') return json(route, { url: 'https://account.box.invented/api/oauth2/authorize?state=x' });
+    if (path === '/v1/cloud/box/picked') {
+      fake.box.picked = route.request().postDataJSON().items;
+      return json(route, { configured: true, connected: true, picked: fake.box.picked });
+    }
+    const boxFolder = path.match(/^\/v1\/cloud\/box\/folders\/(.+)$/);
+    if (boxFolder) {
+      const folder = boxFolders[boxFolder[1]];
+      return json(route, { id: boxFolder[1], ...folder, items: folder.items.map((i) => ({
+        ...i, picked: fake.box.picked.some((p) => p.id === i.id && p.type === i.type) })) });
+    }
+    if (path === '/v1/cloud/box/build') { fake.box.built += 1; return json(route, { ...BUILD_STARTED }, 202); }
     const searchModel = path.match(/^\/v1\/search-models\/([^/]+)(\/install)?$/);
     if (path === '/v1/search-models') return json(route, fake.searchModels);
     if (searchModel) {

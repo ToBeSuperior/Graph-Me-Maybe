@@ -159,6 +159,44 @@ test('the search model is chosen from two, each saying whether it is installed',
   await expect(page.getByTestId('search-model-korean').getByRole('button', { name: '삭제' })).toHaveCount(0);
 });
 
+test('Box folders are browsed, picked and read into the graph', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto('/manage/box');
+  await expect(page.getByRole('heading', { name: 'Box', exact: true })).toBeVisible();
+  await page.getByRole('checkbox', { name: 'Specs' }).check();
+  await expect.poll(() => fake.box.picked).toEqual([{ type: 'folder', id: '10', name: 'Specs' }]);
+  // A folder opens a level down; the way back is the path above the list.
+  await page.getByRole('button', { name: 'Specs', exact: true }).click();
+  await expect(page.getByText('Valve Spec.docx')).toBeVisible();
+  await page.getByRole('button', { name: 'All Files' }).click();
+  await expect(page.getByText('Leak Test Procedure.pdf')).toBeVisible();
+  await expect(page.getByText('1개 골랐습니다')).toBeVisible();
+  await page.getByRole('button', { name: 'Box에서 그래프 만들기' }).click();
+  await expect.poll(() => fake.box.built).toBe(1);
+});
+
+test('Box Drive on this machine is found, browsed and built from', async ({ page }) => {
+  const fake = await fakeApi(page, { box: false });
+  await page.goto('/manage/box');
+  await expect(page.getByText('/Users/me/Library/CloudStorage/Box-Box')).toBeVisible();
+  const drive = page.getByTestId('box-drive');
+  await drive.getByRole('button', { name: 'Quality', exact: true }).click();
+  await drive.getByRole('checkbox', { name: 'Audit.docx' }).check();
+  await drive.getByRole('button', { name: 'Box-Box' }).click();
+  await drive.getByRole('checkbox', { name: 'Plan.pdf' }).check();
+  await drive.getByRole('button', { name: 'Box Drive에서 그래프 만들기' }).click();
+  await expect.poll(() => fake.boxDrive).toEqual([[
+    '/Users/me/Library/CloudStorage/Box-Box/Quality/Audit.docx',
+    '/Users/me/Library/CloudStorage/Box-Box/Plan.pdf']]);
+});
+
+test('Box without an app says how to make one, with the address to register', async ({ page }) => {
+  await fakeApi(page, { box: false });
+  await page.goto('/manage/box');
+  await expect(page.getByText('/v1/cloud/box/callback')).toBeVisible();
+  await expect(page.locator('p').getByRole('link', { name: '키와 모델' })).toBeVisible();
+});
+
 test('the samples are offered only by a server that has them', async ({ page }) => {
   await fakeApi(page, { empty: true, samples: false });
   await page.goto('/');

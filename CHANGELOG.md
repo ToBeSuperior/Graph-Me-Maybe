@@ -5,6 +5,22 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.33] - 2026-10-26
+
+### Added
+
+- Box: sign in read-only with your own Box app, browse your folders in Manage › Box, check
+  folders and files, and build the graph from them. Files stay in Box; a version read before is
+  not fetched again.
+- Box Drive: when Box's desktop client is on this computer, Manage › Box finds its folder and
+  lets you check folders and files there and build from them -- no Box app and no approval from
+  your company needed.
+
+### Fixed
+
+- Building from a folder answers at once and looks through the folder behind, saying so: Box
+  Drive lists a large folder by asking Box, and the button seemed to do nothing for minutes.
+
 ## [0.1.32] - 2026-10-25
 
 ### Added

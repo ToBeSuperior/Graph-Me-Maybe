@@ -32,6 +32,13 @@ from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.rendering.visual_binding import pages_of, with_geometry
 from graphme.adapters.sources import Sources
+from graphme.adapters.sources.box import SCHEME as BOX_SCHEME
+from graphme.adapters.sources.box import BoxSource
+from graphme.adapters.sources.box import Picked as BoxPicked
+from graphme.adapters.sources.box import web_url as box_web_url
+from graphme.adapters.sources.box_account import ACCOUNT as BOX_ACCOUNT
+from graphme.adapters.sources.box_account import BoxAccount
+from graphme.adapters.sources.box_drive import box_drive_root, listing
 from graphme.adapters.sources.drive import SCHEME as DRIVE_SCHEME
 from graphme.adapters.sources.drive import DriveSource
 from graphme.adapters.sources.drive import web_url as drive_web_url
@@ -149,8 +156,9 @@ class _Lazy:
     """A source made when first asked for: a cloud drive is signed in only when one of its
     files is needed."""
 
-    def __init__(self, make: Callable[[], SourceStore]) -> None:
+    def __init__(self, make: Callable[[], SourceStore], web_url: Callable[[str], str]) -> None:
         self._make = make
+        self._web_url = web_url
 
     def open_copy(self, origin: str) -> AbstractContextManager[Path]:
         try:
@@ -160,7 +168,7 @@ class _Lazy:
         return store.open_copy(origin)
 
     def web_url(self, origin: str) -> str | None:
-        return drive_web_url(origin)
+        return self._web_url(origin)
 
 
 @dataclass
@@ -253,7 +261,9 @@ class Demo:
         self.origins: dict[str, tuple[str, dict[str, str | None]]] = {}
         """A file fetched from a cloud drive for a build: its address there, and what is
         recorded about it."""
-        self.sources.add(DRIVE_SCHEME, _Lazy(self._drive))
+        self.sources.add(DRIVE_SCHEME, _Lazy(self._drive, drive_web_url))
+        self.sources.add(BOX_SCHEME, _Lazy(self._box_source, box_web_url))
+        self._box: tuple[Client, BoxAccount] | None = None
         """Where originals are read from: this machine, and a connected cloud drive."""
         if root is not None:
             _forget_kept_pages(self.root)
@@ -543,11 +553,14 @@ class Demo:
         return doc
 
     def build_corpus(
-        self, docs: list[str], source: str, *, put: bool = True, embed: bool = True
+        self, docs: list[str], source: str, *, put: bool = True, embed: bool = True,
+        find: Callable[[], list[str]] | None = None,
     ) -> CorpusBuild:
         """Read every document, put them all in the graph space, then join what they name and
         -- when `embed` and an embedding key is set -- embed their passages. Not `put`, the
-        build stops before the space: the files are read, and nothing else."""
+        build stops before the space: the files are read, and nothing else. `find` gives the
+        documents instead, looked for once the build has started: a folder Box Drive lists by
+        asking Box takes minutes to walk, and a request that walked it answered nothing."""
         with self.building:
             if self.build.state in BUILDING:
                 raise Busy("a graph build is already running")
@@ -564,15 +577,26 @@ class Demo:
                     with session.lock:
                         if session.state not in STARTABLE:
                             session.stop = self.build_stop
-        threading.Thread(target=self._build_then_let_go, args=(docs, put, embed),
+        threading.Thread(target=self._build_then_let_go, args=(docs, put, embed, find),
                          daemon=True).start()
         return self.build
 
-    def _build_then_let_go(self, docs: list[str], put: bool, embed: bool) -> None:
+    def _build_then_let_go(self, docs: list[str], put: bool, embed: bool,
+                           find: Callable[[], list[str]] | None = None) -> None:
         """The build, then the copies fetched from a cloud drive for it removed: the space
         records where each one is, and a reader is shown it from there."""
         build = self.build
         try:
+            if find is not None:
+                try:
+                    docs = find()
+                except (ValueError, OSError) as error:
+                    build.state, build.error = "error", f"cannot be read: {error}"
+                    return
+                if not docs:
+                    build.state = "error"
+                    build.error = "no readable document (xlsx, pptx, docx, pdf)"
+                    return
             self._build_corpus(docs, put, embed)
         finally:
             build.ended_at = time.monotonic()
@@ -608,6 +632,117 @@ class Demo:
 
     def _drive(self) -> DriveSource:
         return DriveSource(self.client, self.google().access_token, self.root / "drive-copies")
+
+    # Box ------------------------------------------------------------------------------------
+
+    def box(self) -> BoxAccount:
+        """The Box account the user signs in with, through their own Box app."""
+        client_id, secret = self.settings.box_client_id, self.settings.box_client_secret
+        if not client_id or not secret:
+            raise LookupError("Box is not set up -- put in your Box app's client ID and secret "
+                              "in Keys and model")
+        client = Client(id=client_id, secret=secret)
+        with self.opening:
+            if self._box is None or self._box[0] != client:
+                self._box = (client, BoxAccount(
+                    client, self.client, vault(self.root / "box.token", BOX_ACCOUNT)))
+            return self._box[1]
+
+    def _box_kept(self) -> dict[str, Any]:
+        try:
+            said = json.loads((self.root / "box.json").read_text(encoding="utf-8"))
+            return said if isinstance(said, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _box_keep(self, kept: dict[str, Any]) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / "box.json").write_text(json.dumps(kept), encoding="utf-8")
+
+    @property
+    def box_picked(self) -> list[BoxPicked]:
+        """The Box folders and files the user picked, in the order picked."""
+        return [BoxPicked(str(i["type"]), str(i["id"]), str(i["name"]))
+                for i in self._box_kept().get("picked", [])
+                if isinstance(i, dict) and i.get("type") in ("folder", "file")]
+
+    def box_state(self) -> dict[str, Any]:
+        configured = bool(self.settings.box_client_id and self.settings.box_client_secret)
+        return {"configured": configured, "connected": configured and self.box().connected(),
+                "picked": [{"type": p.type, "id": p.id, "name": p.name}
+                           for p in self.box_picked]}
+
+    def box_pick(self, items: Sequence[BoxPicked]) -> dict[str, Any]:
+        """`items` are what is picked now, in place of what was."""
+        kept = self._box_kept()
+        kept["picked"] = [{"type": i.type, "id": i.id, "name": i.name}
+                          for i in dict.fromkeys(items)]
+        self._box_keep(kept)
+        return self.box_state()
+
+    def box_folder(self, folder_id: str) -> dict[str, Any]:
+        """A Box folder a level at a time, each item marked when it is picked itself."""
+        listed = self._box_source().folder(folder_id)
+        picked = {(p.type, p.id) for p in self.box_picked}
+        for item in listed["items"]:
+            item["picked"] = (item["type"], item["id"]) in picked
+        return listed
+
+    def box_disconnect(self) -> None:
+        self.box().disconnect()
+        (self.root / "box.json").unlink(missing_ok=True)
+
+    def build_box(self) -> CorpusBuild:
+        """The documents in what was picked in Box, read into the space. A file is known by
+        the version Box states: one whose version was read before and whose content the
+        space still holds is passed over without being fetched; the rest is fetched for the
+        build and removed after it."""
+        box = self._box_source()
+        found, lost = box.documents(self.box_picked)
+        kept = self._box_kept()
+        versions: dict[str, str] = dict(kept.get("versions", {}))
+        """Box version id -> the SHA-256 of its content, as read here."""
+        held = self.space().contents([versions[f.version] for f in found
+                                      if f.version in versions])
+        docs: list[str] = []
+        for wanted in found:
+            if wanted.version in versions and versions[wanted.version] in held:
+                continue
+            folder = self.root / "box" / wanted.id
+            shutil.rmtree(folder, ignore_errors=True)
+            folder.mkdir(parents=True)
+            with box.open_copy(wanted.origin) as copy:
+                copied = folder / copy.name
+                shutil.copyfile(copy, copied)
+            if wanted.version and (digest := content_hash(copied)):
+                versions[wanted.version] = digest
+            doc = self.open_path(str(copied))
+            self.origins[doc] = (wanted.origin, {
+                "box_file_id": wanted.id, "box_version": wanted.version,
+                "web_url": box.web_url(wanted.origin)})
+            docs.append(doc)
+        kept["versions"] = versions
+        self._box_keep(kept)
+        build = self.build_corpus(docs, "Box")
+        build.known += len(found) - len(docs)
+        build.failed += [f"{name}: no longer readable in Box" for name in lost]
+        return build
+
+    @staticmethod
+    def box_drive() -> Path | None:
+        """Box Drive's folder on this machine, when it is here."""
+        return box_drive_root(Path.home(), platform=sys.platform, environ=os.environ)
+
+    def box_drive_folder(self, relative: str) -> dict[str, Any]:
+        """A folder of Box Drive's, a level at a time; LookupError when Box Drive is not
+        here."""
+        root = self.box_drive()
+        if root is None:
+            raise LookupError("Box Drive is not on this machine")
+        return listing(root, relative)
+
+    def _box_source(self) -> BoxSource:
+        return BoxSource(self.client, self.box().access_token, self.root / "box-copies")
 
     def start_embed(self) -> CorpusBuild:
         """Passages cut and embedded for every document not embedded yet, in the build's slot:

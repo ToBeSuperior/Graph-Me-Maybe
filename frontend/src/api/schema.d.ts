@@ -155,6 +155,148 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/cloud/box": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Box State */
+        get: operations["box_state_v1_cloud_box_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Box Disconnect
+         * @description The sign-in revoked at Box and forgotten here, with what was picked.
+         */
+        delete: operations["box_disconnect_v1_cloud_box_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cloud/box/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Box Connect
+         * @description Sign in to Box in the browser; read-only.
+         */
+        post: operations["box_connect_v1_cloud_box_connect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cloud/box/folders/{folder_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Box Folder
+         * @description A Box folder a level at a time: its folders, then its documents.
+         */
+        get: operations["box_folder_v1_cloud_box_folders__folder_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cloud/box/picked": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Box Pick
+         * @description What is picked now, in place of what was.
+         */
+        put: operations["box_pick_v1_cloud_box_picked_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/box-drive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Box Drive
+         * @description Whether Box Drive's folder is on this machine, and where.
+         */
+        get: operations["box_drive_v1_box_drive_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/box-drive/folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Box Drive Folder
+         * @description A Box Drive folder a level at a time, `path` relative to Box Drive's folder.
+         */
+        get: operations["box_drive_folder_v1_box_drive_folders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cloud/box/build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Box Build
+         * @description The documents in what was picked into the space: a version read before is passed
+         *     over without being fetched.
+         */
+        post: operations["box_build_v1_cloud_box_build_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/documents": {
         parameters: {
             query?: never;
@@ -804,6 +946,81 @@ export interface components {
             /** Modified */
             modified?: number | null;
         };
+        /** Box */
+        Box: {
+            /** Configured */
+            configured: boolean;
+            /** Connected */
+            connected: boolean;
+            /** Picked */
+            picked: components["schemas"]["BoxItem"][];
+        };
+        /** BoxConnect */
+        BoxConnect: {
+            /** Url */
+            url: string;
+        };
+        /** BoxDrive */
+        BoxDrive: {
+            /** Found */
+            found: boolean;
+            /** Root */
+            root?: string | null;
+        };
+        /** BoxFolder */
+        BoxFolder: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Path */
+            path: components["schemas"]["BoxPlace"][];
+            /** Items */
+            items: components["schemas"]["BoxListed"][];
+        };
+        /** BoxItem */
+        BoxItem: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "folder" | "file";
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** BoxListed */
+        BoxListed: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "folder" | "file";
+            /** Name */
+            name: string;
+            /** Size */
+            size?: number | null;
+            /**
+             * Picked
+             * @default false
+             */
+            picked: boolean;
+        };
+        /** BoxPick */
+        BoxPick: {
+            /** Items */
+            items: components["schemas"]["BoxItem"][];
+        };
+        /** BoxPlace */
+        BoxPlace: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
         /** Boxes */
         Boxes: {
             /** Boxes */
@@ -815,6 +1032,8 @@ export interface components {
         BuildRequest: {
             /** Folder */
             folder?: string | null;
+            /** Paths */
+            paths?: string[];
             /** Files */
             files?: string[];
             /**
@@ -1506,6 +1725,201 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GoogleConnect"];
+                };
+            };
+        };
+    };
+    box_state_v1_cloud_box_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Box"];
+                };
+            };
+        };
+    };
+    box_disconnect_v1_cloud_box_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Box"];
+                };
+            };
+        };
+    };
+    box_connect_v1_cloud_box_connect_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoxConnect"];
+                };
+            };
+        };
+    };
+    box_folder_v1_cloud_box_folders__folder_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folder_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoxFolder"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    box_pick_v1_cloud_box_picked_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BoxPick"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Box"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    box_drive_v1_box_drive_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoxDrive"];
+                };
+            };
+        };
+    };
+    box_drive_folder_v1_box_drive_folders_get: {
+        parameters: {
+            query?: {
+                path?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoxFolder"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    box_build_v1_cloud_box_build_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildState"];
                 };
             };
         };
