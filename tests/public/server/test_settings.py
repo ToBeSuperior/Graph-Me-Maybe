@@ -33,8 +33,11 @@ def page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
                  "GRAPHME_MODEL", "GRAPHME_MODEL_BASE_URL", "GRAPHME_HIERARCHY_READINGS",
                  "GRAPHME_API_KEY", "GRAPHME_CONFIG"):
         monkeypatch.delenv(name, raising=False)
-    (tmp_path / ".env").write_text("# kept\nGRAPHME_MODEL=old\n" + f"{EMBED_KEY}=\n")
-    demo = Demo(Settings(), renderer=None, root=tmp_path / "server")  # type: ignore[arg-type]
+    # An embedder reached with a key: the keys are what this page is about.
+    (tmp_path / ".env").write_text("# kept\nGRAPHME_MODEL=old\nGRAPHME_EMBEDDING_PROVIDER=openai\n"
+                                   + f"{EMBED_KEY}=\n")
+    demo = Demo(Settings(embedding_provider="openai"), renderer=None,  # type: ignore[arg-type]
+                root=tmp_path / "server")
     client = TestClient(create_app(demo), base_url="http://127.0.0.1:8765")
     return client, demo, tmp_path / ".env", refused
 
@@ -386,10 +389,10 @@ def test_a_missing_key_is_said_by_what_it_is_for_not_by_one_provider_s_variable(
     from graphme.config import Settings
 
     monkeypatch.setattr(server_settings, "_models", lambda url, headers: "refused")
-    said = server_settings.preflight(Settings().model_copy(update={
+    said = server_settings.preflight(Settings(embedding_provider="openai").model_copy(update={
         "api_key": None, "embedding_key": None}))
     keys = {row.key_env for row in model_endpoint.PROVIDERS.values()} | {
-        row.key_env for row in model_endpoint.EMBEDDERS.values()}
+        row.key_env for row in model_endpoint.EMBEDDERS.values() if row.key_env}
 
     assert any(p.startswith("The LLM API key is empty") for p in said)
     assert not any(key in p for p in said for key in keys)

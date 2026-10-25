@@ -83,7 +83,7 @@ def test_the_settings_file_written_on_a_fresh_home_loads(tmp_path: Path) -> None
     launcher.prepare(tmp_path)
     written = read_dotenv(tmp_path / ".env")
     known = {p.key_env for p in model_endpoint.PROVIDERS.values()} | {
-        e.key_env for e in model_endpoint.EMBEDDERS.values()}
+        e.key_env for e in model_endpoint.EMBEDDERS.values() if e.key_env}
     assert {name for name in written if name.endswith("_KEY")} <= known
     assert load_settings(written).provider == model_endpoint.DEFAULT_PROVIDER
 

@@ -53,6 +53,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/search-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Models
+         * @description The search models this machine can run, each with whether it is installed.
+         */
+        get: operations["search_models_v1_search_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/search-models/{name}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install Search Model
+         * @description `name`'s model fetched behind; the list says how far.
+         */
+        post: operations["install_search_model_v1_search_models__name__install_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/search-models/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Search Model
+         * @description `name`'s model deleted -- refused (409) for the one searched with.
+         */
+        delete: operations["remove_search_model_v1_search_models__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/cloud/google": {
         parameters: {
             query?: never;
@@ -890,6 +950,13 @@ export interface components {
             /** Docs */
             docs?: string[] | null;
         };
+        /** Fetching */
+        Fetching: {
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+        };
         /** Found */
         Found: {
             /** Sources */
@@ -1120,6 +1187,22 @@ export interface components {
             /** Deleted */
             deleted: number;
         };
+        /** SearchModel */
+        SearchModel: {
+            /** Name */
+            name: string;
+            /** Model */
+            model: string;
+            /** Size */
+            size: number;
+            /** Installed */
+            installed: boolean;
+            /** Chosen */
+            chosen: boolean;
+            fetching?: components["schemas"]["Fetching"] | null;
+            /** Error */
+            error?: string | null;
+        };
         /** ServerSettings */
         ServerSettings: {
             /** Endpoint */
@@ -1272,6 +1355,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServerSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_models_v1_search_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchModel"][];
+                };
+            };
+        };
+    };
+    install_search_model_v1_search_models__name__install_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchModel"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_search_model_v1_search_models__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchModel"][];
                 };
             };
             /** @description Validation Error */

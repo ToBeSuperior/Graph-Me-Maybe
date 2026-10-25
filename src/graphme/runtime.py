@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from graphme.adapters.extractors.docx import DocxExtractor
 from graphme.adapters.extractors.excel import ExcelExtractor
 from graphme.adapters.extractors.pdf import PDFExtractor
 from graphme.adapters.extractors.powerpoint import PowerPointExtractor
+from graphme.adapters.local_models import LocalModels
 from graphme.adapters.rendering.browser_office import BrowserOfficeRenderer
 from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.rendering.visual_binding import RenderedVisualBinder
@@ -55,6 +57,24 @@ def _require_chat_key(settings: Settings) -> None:
             "put it in the app's Manage › Keys and model")
 
 
+_local_models: dict[Path, LocalModels] = {}
+_local_lock = threading.Lock()
+
+
+def local_models(root: Path) -> LocalModels:
+    """The one `LocalModels` of a home in this process: it holds the servers it started."""
+    with _local_lock:
+        return _local_models.setdefault(root, LocalModels(root))
+
+
+def stop_local_models() -> None:
+    """Every search model server this process started, stopped."""
+    with _local_lock:
+        homes = list(_local_models.values())
+    for models in homes:
+        models.stop_all()
+
+
 def create_embedder(settings: Settings) -> OpenAIBatchEmbeddings:
     """The provider text embedding the graph space is searched by, at the embedder's own
     address and with its own key."""
@@ -63,6 +83,13 @@ def create_embedder(settings: Settings) -> OpenAIBatchEmbeddings:
         raise ValueError(
             f"GRAPHME_EMBEDDING_PROVIDER={settings.embedding_provider} has no provider "
             "embedder to embed or search with"
+        )
+    if row.model_file is not None:  # run on this machine: no key, its own server's address
+        return OpenAIBatchEmbeddings(
+            model=settings.embedding_model, api_key="local",
+            base_url=local_models(settings.local_models or settings.data_dir).serve(
+                row.model_file),
+            query_prefix=row.query_prefix, max_retries=5,
         )
     if settings.embedding_key is None:
         hint = (
@@ -79,6 +106,7 @@ def create_embedder(settings: Settings) -> OpenAIBatchEmbeddings:
         model=settings.embedding_model,
         api_key=settings.embedding_key,
         base_url=row.base_url,
+        query_prefix=row.query_prefix,
         max_retries=5,
     )
 

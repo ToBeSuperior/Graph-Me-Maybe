@@ -5,6 +5,20 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.32] - 2026-10-25
+
+### Added
+
+- Search runs on this machine by default: no key, and no document leaves it. Keys and model
+  offers two search models -- General (harrier-oss-v1-0.6b, many languages) and Korean
+  (KURE-v1) -- each saying whether it is installed, with Install and Remove. The chosen one is
+  installed on its own the first time the app starts, and the graph is embedded again whenever
+  another is chosen. OpenAI and Gemini embeddings stay available in Advanced settings.
+- The default model is GPT-6 Luna (OpenAI): compared with other low-cost vision models on the
+  same pages, it read them as closely to Claude Haiku as any, at about the same price.
+- Keys and model keeps the keys first; who answers, its address and model are under Advanced
+  settings.
+
 ## [0.1.31] - 2026-10-24
 
 ### Fixed

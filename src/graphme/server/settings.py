@@ -16,6 +16,7 @@ from fastapi import Request
 
 from graphme import model_endpoint
 from graphme.adapters.chat import auth_headers
+from graphme.adapters.local_models import LocalModels
 from graphme.config import ENV_FIELDS, LOOPBACK, Settings, read_dotenv, read_yaml
 from graphme.server.jobs import BUILDING, Busy
 from graphme.server.state import Demo
@@ -48,7 +49,7 @@ _CHOICES = (
 def _any_key() -> set[str]:
     """Every provider's and embedder's key: a save switching provider brings the new one's."""
     return {row.key_env for row in model_endpoint.PROVIDERS.values()} | {
-        row.key_env for row in model_endpoint.EMBEDDERS.values()}
+        row.key_env for row in model_endpoint.EMBEDDERS.values() if row.key_env}
 
 
 def _choices(env: str) -> dict[str, str] | None:
@@ -66,7 +67,7 @@ def editable(settings: Settings) -> tuple[tuple[str, bool], ...]:
     it is another variable, and what the model is asked. Neo4j is not -- the server starts its
     own, and Aura is asked for only when exporting."""
     keys = [model_endpoint.PROVIDERS[settings.provider].key_env]
-    if (row := model_endpoint.EMBEDDERS.get(settings.embedding_provider)) and \
+    if (row := model_endpoint.EMBEDDERS.get(settings.embedding_provider)) and row.key_env and \
             row.key_env not in keys:
         keys.append(row.key_env)
     return (*((key, True) for key in keys), *_CHOICES)
@@ -76,7 +77,7 @@ def _field(settings: Settings, env: str) -> str:
     """The settings field a variable fills: a key by the row that names it, the rest by
     `ENV_FIELDS`."""
     row = model_endpoint.EMBEDDERS.get(settings.embedding_provider)
-    if row is not None and env == row.key_env:
+    if row is not None and row.key_env and env == row.key_env:
         return "embedding_key"
     if env == model_endpoint.PROVIDERS[settings.provider].key_env:
         return "api_key"
@@ -205,6 +206,11 @@ def preflight(settings: Settings) -> list[str]:
     embed_row = model_endpoint.EMBEDDERS.get(settings.embedding_provider)
     if embed_row is None:  # a test embedder: no key to ask for
         pass
+    elif embed_row.model_file is not None:  # run on this machine: no key, but its file
+        if not LocalModels(settings.local_models or settings.data_dir).installed(
+                embed_row.model_file):
+            problems.append("The search model is not installed yet -- it is fetched on its own;"
+                            " see Search model in Keys and model.")
     elif not settings.embedding_key:
         problems.append("The search API key is empty -- put in the key that embeds and searches"
                         f" the graph ({settings.embedding_provider}) in Keys and model.")

@@ -19,7 +19,13 @@ class BatchEmbedder(Embedder):
 class OpenAIBatchEmbeddings(OpenAIEmbeddings, BatchEmbedder):
     """OpenAI's embeddings endpoint, or a provider's compatible one (`base_url`). Vectors are
     asked for as floats -- the client otherwise asks for base64, which a compatible layer need
-    not speak -- and put back in the order the texts were sent."""
+    not speak -- and put back in the order the texts were sent. A question is written after
+    `query_prefix`, the instruction the model was trained to read one with; a passage goes as
+    it is."""
+
+    def __init__(self, *args: Any, query_prefix: str = "", **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.query_prefix = query_prefix
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         response = self.client.embeddings.create(
@@ -27,4 +33,4 @@ class OpenAIBatchEmbeddings(OpenAIEmbeddings, BatchEmbedder):
         return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
 
     def embed_query(self, text: str, **kwargs: Any) -> list[float]:
-        return self.embed_texts([text])[0]
+        return self.embed_texts([self.query_prefix + text])[0]

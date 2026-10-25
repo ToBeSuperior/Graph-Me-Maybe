@@ -4,9 +4,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { api, call, ApiError } from '../../api/client';
-import { Button, Input, Spinner } from '../../components/ui';
+import { Badge, Button, Input, Spinner } from '../../components/ui';
 import { useT } from '../../lib/i18n';
-import { keys, useSettings } from '../../lib/queries';
+import { keys, useSearchModels, useSettings } from '../../lib/queries';
 import { PageHeader } from './ManageLayout';
 
 export function SettingsPage() {
@@ -36,11 +36,40 @@ export function SettingsPage() {
   ];
   const ordered = [...fields.filter((f) => f.choices), ...keyFields,
     ...fields.filter((f) => !f.choices)];
+  const advancedChanged = ordered.some((f) => !f.secret && values[f.env] !== undefined);
   const choose = (env: string, value: string, current: string | null | undefined) => {
     const next = { ...values };
     if (value === current) delete next[env]; else next[env] = value;
     setValues(next);
   };
+
+  const field = (f: (typeof ordered)[number]) => (
+    <label key={f.env} className="grid gap-1">
+      <span className="flex items-baseline gap-2 text-sm font-medium">
+        {t('settingName', f.env)}
+        {roles(f.env).map((role) => <span key={role} className="rounded bg-accent/10 px-1.5 text-2xs font-normal text-accent">{role}</span>)}
+        {f.secret && <span className="text-xs font-normal text-muted">{f.set ? t('keySet', f.hint ?? null) : t('keyUnset')}</span>}
+      </span>
+      {f.choices ? (
+        <select
+          className="h-8 w-full rounded-md border border-line bg-panel px-2 text-sm text-fg focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+          value={values[f.env] ?? f.value ?? ''}
+          onChange={(e) => choose(f.env, e.target.value, f.value)}
+        >
+          {Object.keys(f.choices).map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+      ) : (
+        <Input
+          type={f.secret ? 'password' : 'text'} spellCheck={false}
+          autoComplete={f.secret ? 'new-password' : 'off'}
+          placeholder={f.secret ? (f.set ? t('keyReplace') : f.env) : (f.value ?? f.env)}
+          value={values[f.env] ?? ''}
+          onChange={(e) => setValues({ ...values, [f.env]: e.target.value })}
+        />
+      )}
+      <span className="text-xs leading-5 text-faint">{t('settingNote', f.env)} <code>{f.env}</code></span>
+    </label>
+  );
 
   const save = async () => {
     setSaving(true);
@@ -70,34 +99,15 @@ export function SettingsPage() {
         ) : (
           <p className="flex items-center gap-2 text-sm text-muted"><CheckCircle2 className="size-4 text-ok" />{t('settingsReady')}</p>
         ))}
+        <SearchModels />
         <form className="grid gap-4" autoComplete="off" onSubmit={(e) => { e.preventDefault(); void save(); }}>
-          {ordered.map((f) => (
-            <label key={f.env} className="grid gap-1">
-              <span className="flex items-baseline gap-2 text-sm font-medium">
-                {t('settingName', f.env)}
-                {roles(f.env).map((role) => <span key={role} className="rounded bg-accent/10 px-1.5 text-2xs font-normal text-accent">{role}</span>)}
-                {f.secret && <span className="text-xs font-normal text-muted">{f.set ? t('keySet', f.hint ?? null) : t('keyUnset')}</span>}
-              </span>
-              {f.choices ? (
-                <select
-                  className="h-8 w-full rounded-md border border-line bg-panel px-2 text-sm text-fg focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-                  value={values[f.env] ?? f.value ?? ''}
-                  onChange={(e) => choose(f.env, e.target.value, f.value)}
-                >
-                  {Object.keys(f.choices).map((name) => <option key={name} value={name}>{name}</option>)}
-                </select>
-              ) : (
-                <Input
-                  type={f.secret ? 'password' : 'text'} spellCheck={false}
-                  autoComplete={f.secret ? 'new-password' : 'off'}
-                  placeholder={f.secret ? (f.set ? t('keyReplace') : f.env) : (f.value ?? f.env)}
-                  value={values[f.env] ?? ''}
-                  onChange={(e) => setValues({ ...values, [f.env]: e.target.value })}
-                />
-              )}
-              <span className="text-xs leading-5 text-faint">{t('settingNote', f.env)} <code>{f.env}</code></span>
-            </label>
-          ))}
+          {ordered.filter((f) => f.secret).map(field)}
+          {/* Who answers, its address and model, and what else the server can take: kept out of
+              the way of the keys a first start asks for. Opened by itself while one is changed. */}
+          <details className="rounded-lg border border-line p-3" open={advancedChanged}>
+            <summary className="cursor-pointer text-sm font-medium text-muted hover:text-fg">{t('advancedSettings')}</summary>
+            <div className="mt-4 grid gap-4">{ordered.filter((f) => !f.secret).map(field)}</div>
+          </details>
           <div className="flex items-center gap-3">
             <Button type="submit" variant="primary" disabled={!changed || saving}>
               {saving && <Spinner className="size-3.5" />}{t('saveSettings')}
@@ -109,3 +119,83 @@ export function SettingsPage() {
     </div>
   );
 }
+
+/** The search models run on this machine: the one in use is chosen here and saved at once; each
+ * says whether it is installed, is installed or removed here -- never the one in use. */
+function SearchModels() {
+  const t = useT();
+  const client = useQueryClient();
+  const { data: models } = useSearchModels();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const act = async (name: string, work: () => Promise<unknown>) => {
+    setBusy(name);
+    setError(null);
+    try {
+      const now = await work();
+      if (Array.isArray(now)) client.setQueryData(keys.searchModels, now);
+      else client.setQueryData(keys.settings, now);
+      await client.invalidateQueries({ queryKey: keys.searchModels });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const choose = (name: string) => {
+    // Shown chosen at once; the list asked again after the save says what the server did.
+    client.setQueryData(keys.searchModels, models?.map((m) => ({ ...m, chosen: m.name === name })));
+    return act(name, () => call(api.PUT('/v1/settings', {
+      body: { values: { GRAPHME_EMBEDDING_PROVIDER: name } } })));
+  };
+  const install = (name: string) => act(name, () => call(api.POST('/v1/search-models/{name}/install', {
+    params: { path: { name } } })));
+  const remove = (name: string) => act(name, () => call(api.DELETE('/v1/search-models/{name}', {
+    params: { path: { name } } })));
+  if (!models?.length) return null;
+  return (
+    <section className="grid gap-2" aria-labelledby="search-model-title">
+      <h2 id="search-model-title" className="text-sm font-medium">{t('searchModelTitle')}</h2>
+      <p className="text-xs leading-5 text-faint">{t('searchModelBody')}</p>
+      <div role="radiogroup" aria-labelledby="search-model-title" className="grid gap-2">
+        {models.map((m) => (
+          <div key={m.name} data-testid={`search-model-${m.name}`}
+            className="flex items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2">
+            <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+              <input type="radio" name="search-model" className="accent-[var(--accent)]"
+                checked={m.chosen} disabled={busy !== null} onChange={() => void choose(m.name)}
+                aria-label={`${t('searchModelName', m.name)} · ${m.model}`} />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">
+                  {t('searchModelName', m.name)} <span className="font-normal text-muted">· {m.model} · {Math.round(m.size / 1e6)}MB</span>
+                </span>
+                <span className="block text-xs text-faint">{t('searchModelNote', m.name)}</span>
+              </span>
+            </label>
+            {m.chosen && <Badge tone="accent">{t('modelInUse')}</Badge>}
+            {m.fetching ? (
+              <span className="flex items-center gap-1.5 text-xs text-muted">
+                <Spinner className="size-3" />
+                {t('modelInstalling', m.fetching.total ? Math.floor((100 * m.fetching.done) / m.fetching.total) : 0)}
+              </span>
+            ) : m.installed ? (
+              <span className="flex items-center gap-2 text-xs text-ok">
+                <CheckCircle2 className="size-3.5" />{t('modelInstalled')}
+                {!m.chosen && <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => void remove(m.name)}>{t('removeModel')}</Button>}
+              </span>
+            ) : (
+              <span className="flex items-center gap-2 text-xs text-muted">
+                {t('modelNotInstalled')}
+                <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void install(m.name)}>{t('installModel')}</Button>
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      {(error || models.some((m) => m.error)) && (
+        <p role="alert" className="text-xs text-danger-fg">{error ?? models.find((m) => m.error)?.error}</p>
+      )}
+    </section>
+  );
+}
+

@@ -12,13 +12,15 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-from graphme.providers import Embedder, Provider
+from graphme.providers import LOCAL_EMBEDDERS, Embedder, Provider
 
 DEFAULT_PROVIDER = "openai"
 _GEMINI = "https://generativelanguage.googleapis.com/v1beta/openai"
 PROVIDERS = {
+    # GPT-6 Luna: the default reader, chosen against other low-cost vision models read through
+    # the same pages -- as close to Haiku as any, at about its price.
     "openai": Provider(wire="chat_completions", base_url="https://api.openai.com/v1",
-                       key_env="OPENAI_API_KEY", model="gpt-5.6-luna"),
+                       key_env="OPENAI_API_KEY", model="gpt-6-luna"),
     # Haiku: the outline's page readings and page-break joins were measured and tuned on it.
     "anthropic": Provider(wire="messages", base_url="https://api.anthropic.com/v1",
                           key_env="ANTHROPIC_API_KEY", model="claude-haiku-5-5"),
@@ -26,6 +28,7 @@ PROVIDERS = {
                        key_env="GEMINI_API_KEY", model="gemini-2.5-flash"),
 }
 EMBEDDERS = {
+    **LOCAL_EMBEDDERS,
     "openai": Embedder(base_url="https://api.openai.com/v1", key_env="OPENAI_API_KEY",
                        model="text-embedding-3-large", dimensions=3072),
     "gemini": Embedder(base_url=_GEMINI, key_env="GEMINI_API_KEY",

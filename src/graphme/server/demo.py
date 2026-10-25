@@ -74,6 +74,7 @@ def run(port: int, web: Path | None, *, on_ready: Callable[[], None] | None = No
     settings = demo_settings()
     preflight_behind(settings)
     demo = make_demo(settings)
+    demo.search_models.ensure_chosen()  # fetched behind on a first start; the page says how far
 
     def warm() -> None:
         # The graph space -- its Neo4j started on first use -- opened while the page loads.

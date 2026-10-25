@@ -13,12 +13,15 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from graphme import model_endpoint
+from graphme.providers import DEFAULT_EMBEDDER
 
 _log = logging.getLogger(__name__)
 
-RELEVANCE_FLOORS = {"text-embedding-3-large": 0.2}
+RELEVANCE_FLOORS = {"text-embedding-3-large": 0.2, "harrier-oss-v1-0.6b": 0.39, "KURE-v1": 0.46}
 """The relevance floor measured for each embedding model, on the invented sample documents
-(src/graphme/samples.py). GRAPHME_RELEVANCE_FLOOR wins over it."""
+(src/graphme/samples.py). GRAPHME_RELEVANCE_FLOOR wins over it. The two run on this machine
+were set midway between the lowest on-topic and the highest off-topic question's nearest
+cosine, six of each in English and six in Korean: harrier 0.41 / 0.37, KURE 0.48 / 0.44."""
 
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 """This machine's names. `[::1]` is how a Host header writes the IPv6 one."""
@@ -61,9 +64,9 @@ _TEST_EMBEDDERS = {"fake", "hash"}
 
 
 def default_embedder(provider: str) -> str:
-    """The chat provider's own embedder when it has one, else OpenAI's (Anthropic has
-    none)."""
-    return provider if provider in model_endpoint.EMBEDDERS else "openai"
+    """The general model run on this machine, whoever answers the questions: searching then
+    needs no key and sends nothing off it."""
+    return DEFAULT_EMBEDDER
 
 
 CHROME_PATHS = (
@@ -172,6 +175,9 @@ class Settings(BaseModel):
     neo4j_uri: str = "bolt://127.0.0.1:7687"
     """The graph space a corpus is put in (`graphme build-graph`), when it is not the app's own
     (`local_neo4j`): a checkout's, someone's own Neo4j, Aura."""
+    local_models: Path | None = None
+    """The app's home, where a search model run on this machine is kept (`models/`) with the
+    server that runs it (`llama/`); the data folder when no home is named."""
     local_neo4j: Path | None = None
     """The app's home, whose own Neo4j is the graph space (`local_neo4j.py`): set whenever the
     settings name no GRAPHME_NEO4J_URI."""
@@ -319,6 +325,8 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         values["embedding_key"] = env[row.key_env]
     if base is not None and base != Path.cwd() and "data_dir" not in values:
         values["data_dir"] = base / ".graphme"
+    with contextlib.suppress(KeyError):  # no home directory named in this environment
+        values.setdefault("local_models", app_home(env))
     if base is not None and "neo4j_uri" not in values:
         # No Neo4j named: the app's own, in its home, is the graph space -- for the app, a
         # command anywhere, and a checkout alike.

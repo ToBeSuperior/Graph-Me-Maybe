@@ -479,6 +479,20 @@ the same wire: over HTTPS anywhere, or plain HTTP only on this machine.
 
 Offline results prove orchestration, persistence and readiness — never provider quality.
 
+### Search models run on this machine
+
+Searching needs no key by default: `general` (Microsoft's harrier-oss-v1-0.6b) or `korean`
+(KURE-v1) embed on this machine (`providers.LOCAL_EMBEDDERS`, the same in both builds). Each is
+one GGUF file fetched into the app's home (`models/`) and kept only once its pinned SHA-256
+holds, served by llama.cpp's `llama-server` (`adapters/local_models.py`: a pinned build fetched
+into `llama/` and checked the same way, a child on loopback at a port the OS gives). Ollama was
+tried first and dropped: its Windows package is 1.5 GB with CUDA, llama.cpp's CPU build 24 MB.
+The server installs the chosen model on its own at start, and a model chosen in Keys and model
+is installed first if need be; either way the space is embedded again once it is
+(`server/search_models.py`, `/v1/search-models`). The model in use is never removed. A question
+is written after the model's own instruction (`Embedder.query_prefix`); a passage goes as it is.
+Each model's floor is in `RELEVANCE_FLOORS`, measured on the invented samples.
+
 
 ## Where to read next
 

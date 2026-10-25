@@ -19,6 +19,7 @@ export const keys = {
   boxes: (doc: string) => ['boxes', doc] as const,
   exportJob: ['export'] as const,
   settings: ['settings'] as const,
+  searchModels: ['searchModels'] as const,
 };
 
 /** The graph changed: what is drawn from it is asked again. A question's search and answer are
@@ -90,3 +91,12 @@ export function useBuildFollower(onEnd: (build: BuildState) => void) {
     was.current = state;
   }, [query.data, client]);
 }
+
+/** The search models this machine runs, asked again every second while one is being fetched. */
+export const useSearchModels = () =>
+  useQuery({
+    queryKey: keys.searchModels,
+    queryFn: () => call(api.GET('/v1/search-models')),
+    refetchInterval: (query) => (query.state.data?.some((m) => m.fetching) ? 1000 : false),
+  });
+

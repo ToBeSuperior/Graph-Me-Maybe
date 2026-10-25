@@ -23,7 +23,7 @@ FIRST_PORT = 8765
 _KEYS = dict.fromkeys(
     [model_endpoint.PROVIDERS[model_endpoint.DEFAULT_PROVIDER].key_env]
     + [p.key_env for p in model_endpoint.PROVIDERS.values()]
-    + [e.key_env for e in model_endpoint.EMBEDDERS.values()])
+    + [e.key_env for e in model_endpoint.EMBEDDERS.values() if e.key_env])
 ENV_TEMPLATE = (
     "# Graph-Me-Maybe settings. Keys are set from the app (Manage > Keys and model) or here.\n"
     f"GRAPHME_PROVIDER={model_endpoint.DEFAULT_PROVIDER}\n"
@@ -102,9 +102,13 @@ def show_window(url: str, storage: Path) -> bool:
 
 
 def _stop_neo4j() -> None:
+    """The Neo4j and the search model servers this process started, stopped: `os._exit` runs
+    no exit handler."""
+    from graphme import runtime
     from graphme.adapters.storage import local_neo4j
 
     local_neo4j.stop_started()
+    runtime.stop_local_models()
 
 
 def _stop_on_endings() -> None:

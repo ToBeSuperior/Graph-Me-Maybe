@@ -2,7 +2,7 @@
 // invented documents, so the checks need no server, graph DB or model.
 import type { Page, Route } from '@playwright/test';
 
-interface Fake { reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; drive: { configured: boolean; connected: boolean; picked: number; built: number } }
+interface Fake { searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; drive: { configured: boolean; connected: boolean; picked: number; built: number } }
 
 /** A job as `GET /v1/jobs` lists it, newest first. */
 type FakeJob = Record<string, unknown> & { id: string; kind: string; state: string };
@@ -29,7 +29,13 @@ const sources = [
 export async function fakeApi(page: Page,
   { empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[],
     progress = null as Record<string, unknown> | null, elapsed = null as number | null } = {}): Promise<Fake> {
-  const fake: Fake = { reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0,
+  const fake: Fake = {
+    searchModels: [
+      { name: 'general', model: 'harrier-oss-v1-0.6b', size: 639448320, installed: false, chosen: true,
+        fetching: { done: 319724160, total: 639448320 }, error: null },
+      { name: 'korean', model: 'KURE-v1', size: 437779008, installed: true, chosen: false, fetching: null, error: null },
+    ],
+    installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0,
     drive: { configured: true, connected: false, picked: 0, built: 0 } };
   const json = (route: Route, body: unknown, status = 200) =>
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -43,8 +49,22 @@ export async function fakeApi(page: Page,
       fake.refused += 1;
       return json(route, { detail: 'API 키가 필요합니다 (GRAPHME_API_KEY)' }, 401);
     }
+    const searchModel = path.match(/^\/v1\/search-models\/([^/]+)(\/install)?$/);
+    if (path === '/v1/search-models') return json(route, fake.searchModels);
+    if (searchModel) {
+      const row = fake.searchModels.find((m) => m.name === searchModel[1])!;
+      if (method === 'DELETE') { fake.removed.push(searchModel[1]); row.installed = false; }
+      else { fake.installed.push(searchModel[1]); row.fetching = { done: 0, total: row.size }; }
+      return json(route, fake.searchModels, method === 'DELETE' ? 200 : 202);
+    }
     if (path === '/v1/settings') {
-      if (method === 'PUT') fake.saved.push(route.request().postDataJSON().values);
+      if (method === 'PUT') {
+        const values = route.request().postDataJSON().values;
+        fake.saved.push(values);
+        if (values.GRAPHME_EMBEDDING_PROVIDER) {
+          for (const m of fake.searchModels) m.chosen = m.name === values.GRAPHME_EMBEDDING_PROVIDER;
+        }
+      }
       const key = !!fake.saved.length;
       return json(route, { endpoint: 'openai', samples, problems: key ? [] : ['The LLM API key is empty'], fields: [
         { env: 'OPENAI_API_KEY', secret: true, set: key, value: null, hint: key ? 'abcd' : null },

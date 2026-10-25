@@ -87,6 +87,7 @@ from graphme.server.jobs import (
     Undrawn,
     _mark_failed,
 )
+from graphme.server.search_models import SearchModels
 
 VLM_CALLS_AT_ONCE = 24
 """Model calls in flight across every document, each reading and each settling call counted
@@ -208,6 +209,7 @@ class Demo:
         # own defaults showed an outline the pipeline would not have produced.
         self.settings = settings
         self.renderer = renderer
+        self.search_models = SearchModels(self)
         if root is None:
             # A folder of its own, gone with it: a demo made for a moment (a test) leaves none.
             self.root = Path(tempfile.mkdtemp(prefix=ROOT_PREFIX))
@@ -272,10 +274,13 @@ class Demo:
     def reconfigure(self, settings: Settings) -> None:
         """New keys or model, taken up from the next reading and the next question. The graph
         space is kept: what it is reached by is not among what changes."""
+        searched_with = self.settings.embedding_provider
         self.settings = settings
         self.graph.settings = settings
         with self.opening_space:
             self.graph.forget_rag()
+        if settings.embedding_provider != searched_with:
+            self.search_models.chosen_changed()
 
     def space(self, *, wait: float = -1) -> Neo4jGraphSpace:
         """The graph space every built document is put in, opened on first use. A build waits

@@ -127,14 +127,36 @@ test('choosing Anthropic asks for its key on the same save', async ({ page }) =>
   await page.goto('/');
   await page.getByRole('link', { name: '설정 열기' }).click();
   await expect(page.getByLabel('Anthropic API 키')).toHaveCount(0);
-  // Who answers is chosen first, above the keys, and each key says what it is for.
-  await expect(page.locator('form label').first()).toContainText('채팅 제공자');
+  // Who answers is an advanced setting; chosen there, its key appears beside the others.
+  await expect(page.getByLabel('채팅 제공자')).toBeHidden();
+  await page.getByText('고급 설정').click();
   await page.getByLabel('채팅 제공자').selectOption('anthropic');
   await expect(page.getByText('채팅용', { exact: true })).toBeVisible();
   await page.getByLabel('Anthropic API 키').fill('sk-ant-test-abcd');
   await page.getByRole('button', { name: '저장' }).click();
   await expect(page.getByRole('status')).toHaveText('저장했습니다');
   expect(fake.saved).toEqual([{ GRAPHME_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'sk-ant-test-abcd' }]);
+});
+
+test('the search model is chosen from two, each saying whether it is installed', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto('/manage/settings');
+  const general = page.getByRole('radio', { name: /공용/ });
+  const korean = page.getByRole('radio', { name: /한국어/ });
+  await expect(general).toBeChecked();
+  await expect(page.getByTestId('search-model-general')).toContainText('설치 중 50%');
+  await expect(page.getByTestId('search-model-korean')).toContainText('설치됨');
+  // The one not in use can be removed, then installed again.
+  await page.getByTestId('search-model-korean').getByRole('button', { name: '삭제' }).click();
+  await expect(page.getByTestId('search-model-korean')).toContainText('설치 안 됨');
+  await page.getByTestId('search-model-korean').getByRole('button', { name: '설치' }).click();
+  expect(fake.removed).toEqual(['korean']);
+  expect(fake.installed).toEqual(['korean']);
+  // Choosing one is saved at once; the one in use is never offered for removal.
+  await korean.check();
+  await expect.poll(() => fake.saved).toEqual([{ GRAPHME_EMBEDDING_PROVIDER: 'korean' }]);
+  await expect(korean).toBeChecked();
+  await expect(page.getByTestId('search-model-korean').getByRole('button', { name: '삭제' })).toHaveCount(0);
 });
 
 test('the samples are offered only by a server that has them', async ({ page }) => {

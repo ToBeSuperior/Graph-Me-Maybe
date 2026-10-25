@@ -338,3 +338,24 @@ class Health(_Model):
 class SettingsChange(_Model):
     values: dict[str, str]
     """Only what changes; an empty value leaves that setting as it is."""
+
+
+class Fetching(_Model):
+    done: int
+    total: int
+    """Bytes fetched so far, and of how many (0 until the size is known)."""
+
+
+class SearchModel(_Model):
+    name: str
+    """`general` or `korean` -- what GRAPHME_EMBEDDING_PROVIDER names it."""
+    model: str
+    size: int
+    """The file's size in bytes."""
+    installed: bool
+    chosen: bool
+    """The one questions are searched with."""
+    fetching: Fetching | None = None
+    error: str | None = None
+    """Why its last install failed."""
+

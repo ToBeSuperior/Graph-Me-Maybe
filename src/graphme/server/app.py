@@ -11,7 +11,7 @@ import math
 import shutil
 import sys
 import traceback
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -36,7 +36,7 @@ from neo4j.exceptions import Neo4jError, ServiceUnavailable, SessionExpired
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from graphme import __version__, processes
+from graphme import __version__, processes, runtime
 from graphme.adapters.export.neo4j import graph_records, records_cypher, to_cypher
 from graphme.adapters.export.neo4j_admin import AURA_URI
 from graphme.adapters.rendering.browser_office import RenderedPage
@@ -149,7 +149,14 @@ def create_app(
     alone and `/` sent to its contract. `load` reads the settings a save in `PUT /v1/settings`
     is taken up with, as the server was started with them; `extra` is routes of the caller's
     own (the demo's samples), put under `/v1` behind the same key."""
-    app = FastAPI(title="graphme", version=__version__)
+    @contextlib.asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        yield
+        # uvicorn raises the signal it was stopped by again once it has shut down, so no exit
+        # handler runs: the search model servers started here are stopped now.
+        runtime.stop_local_models()
+
+    app = FastAPI(title="graphme", version=__version__, lifespan=lifespan)
     errors(app)
 
     def keyed(request: Request) -> None:
@@ -217,6 +224,33 @@ def create_app(
         with refused():
             new = changed(demo, change.values, Path.cwd() / ".env", load)
         return {**described(new), "samples": has_samples()}
+
+    # Search models run on this machine ---------------------------------------------------
+
+    def search_model(name: str) -> str:
+        try:
+            demo.search_models.row(name)
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from error
+        return name
+
+    @v1.get("/search-models", response_model=list[api.SearchModel])
+    def search_models() -> list[dict[str, Any]]:
+        """The search models this machine can run, each with whether it is installed."""
+        return demo.search_models.listed()
+
+    @v1.post("/search-models/{name}/install", status_code=202,
+             response_model=list[api.SearchModel])
+    def install_search_model(name: str) -> list[dict[str, Any]]:
+        """`name`'s model fetched behind; the list says how far."""
+        demo.search_models.install(search_model(name))
+        return demo.search_models.listed()
+
+    @v1.delete("/search-models/{name}", response_model=list[api.SearchModel])
+    def remove_search_model(name: str) -> list[dict[str, Any]]:
+        """`name`'s model deleted -- refused (409) for the one searched with."""
+        demo.search_models.remove(search_model(name))
+        return demo.search_models.listed()
 
     # Google Drive ---------------------------------------------------------------------------
 
@@ -810,6 +844,7 @@ def serve(settings: Settings, *, host: str, port: int, web: Path | None) -> None
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     preflight_behind(settings)
     demo = make_demo(settings)
+    demo.search_models.ensure_chosen()
     if web is None and WEB.is_dir():
         web = WEB
     uvicorn.run(create_app(demo, web=web), host=host, port=port, log_level="info")
