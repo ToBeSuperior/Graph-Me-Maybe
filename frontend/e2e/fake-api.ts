@@ -2,7 +2,7 @@
 // invented documents, so the checks need no server, graph DB or model.
 import type { Page, Route } from '@playwright/test';
 
-interface Fake { boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; drive: { configured: boolean; connected: boolean; picked: number; built: number } }
+interface Fake { boxDriveConnected: boolean; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; drive: { configured: boolean; connected: boolean; picked: number; built: number } }
 
 /** A job as `GET /v1/jobs` lists it, newest first. */
 type FakeJob = Record<string, unknown> & { id: string; kind: string; state: string };
@@ -38,7 +38,7 @@ export async function fakeApi(page: Page,
         fetching: { done: 319724160, total: 639448320 }, error: null },
       { name: 'korean', model: 'KURE-v1', size: 437779008, installed: true, chosen: false, fetching: null, error: null },
     ],
-    boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
+    boxDriveConnected: false, boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
     installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0,
     drive: { configured: true, connected: false, picked: 0, built: 0 } };
   const json = (route: Route, body: unknown, status = 200) =>
@@ -60,15 +60,20 @@ export async function fakeApi(page: Page,
       10: { name: 'Specs', path: [{ id: '0', name: 'All Files' }], items: [
         { id: 'f2', type: 'file', name: 'Valve Spec.docx', size: 64000 }] },
     };
-    if (path === '/v1/box-drive') return json(route, boxDrive ? { found: true, root: '/Users/me/Library/CloudStorage/Box-Box' } : { found: false, root: null });
+    const driveState = () => (boxDrive ? { found: true, root: '/Users/me/Library/CloudStorage/Box-Box', connected: fake.boxDriveConnected }
+      : { found: false, root: null, connected: false });
+    if (path === '/v1/box-drive' && method === 'DELETE') { fake.boxDriveConnected = false; return json(route, driveState()); }
+    if (path === '/v1/box-drive') return json(route, driveState());
+    if (path === '/v1/box-drive/connect') { fake.boxDriveConnected = true; return json(route, driveState()); }
     if (path === '/v1/box-drive/folders') {
       const at = url.searchParams.get('path') ?? '';
       const listed: Record<string, unknown> = {
         '': { id: '', name: 'Box-Box', path: [], items: [
-          { id: 'Quality', type: 'folder', name: 'Quality', picked: false },
-          { id: 'Plan.pdf', type: 'file', name: 'Plan.pdf', picked: false }] },
+          { id: 'Quality', type: 'folder', name: 'Quality', picked: false, readable: true, modified: 1767225600 },
+          { id: 'Plan.pdf', type: 'file', name: 'Plan.pdf', picked: false, readable: true, size: 2400000, modified: 1767225600 },
+          { id: 'notes.txt', type: 'file', name: 'notes.txt', picked: false, readable: false, size: 1200, modified: 1767225600 }] },
         Quality: { id: 'Quality', name: 'Quality', path: [{ id: '', name: 'Box-Box' }], items: [
-          { id: 'Quality/Audit.docx', type: 'file', name: 'Audit.docx', picked: false }] },
+          { id: 'Quality/Audit.docx', type: 'file', name: 'Audit.docx', picked: false, readable: true, size: 64000, modified: 1767225600 }] },
       };
       return json(route, listed[at]);
     }

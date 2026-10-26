@@ -353,6 +353,10 @@ class BoxListed(_Model):
     type: Literal["folder", "file"]
     name: str
     size: int | None = None
+    modified: float | None = None
+    """When it was last changed, in seconds since 1970."""
+    readable: bool = True
+    """A folder, or a document read here: what can be picked."""
     picked: bool = False
     """Picked itself -- a file inside a picked folder is read with it, but not marked."""
 
@@ -371,6 +375,8 @@ class BoxDrive(_Model):
     """Whether Box Drive's folder is on this machine."""
     root: str | None = None
     """Where it is."""
+    connected: bool = False
+    """Whether the user said to read it: asked once, then kept for every start."""
 
 
 class BoxPick(_Model):

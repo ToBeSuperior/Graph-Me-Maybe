@@ -163,10 +163,10 @@ test('Box folders are browsed, picked and read into the graph', async ({ page })
   const fake = await fakeApi(page);
   await page.goto('/manage/box');
   await expect(page.getByRole('heading', { name: 'Box', exact: true })).toBeVisible();
-  await page.getByRole('checkbox', { name: 'Specs' }).check();
+  await page.getByTestId('box-api').getByRole('checkbox', { name: 'Specs' }).check();
   await expect.poll(() => fake.box.picked).toEqual([{ type: 'folder', id: '10', name: 'Specs' }]);
   // A folder opens a level down; the way back is the path above the list.
-  await page.getByRole('button', { name: 'Specs', exact: true }).click();
+  await page.getByTestId('box-api').getByRole('row', { name: /Specs/ }).dblclick();
   await expect(page.getByText('Valve Spec.docx')).toBeVisible();
   await page.getByRole('button', { name: 'All Files' }).click();
   await expect(page.getByText('Leak Test Procedure.pdf')).toBeVisible();
@@ -175,12 +175,43 @@ test('Box folders are browsed, picked and read into the graph', async ({ page })
   await expect.poll(() => fake.box.built).toBe(1);
 });
 
+test('Box Drive is read only once the user connects it, and then on every start', async ({ page }) => {
+  const fake = await fakeApi(page, { box: false });
+  await page.goto('/manage/box');
+  const drive = page.getByTestId('box-drive');
+  await expect(drive.getByText('/Users/me/Library/CloudStorage/Box-Box')).toBeVisible();
+  await expect(drive.getByRole('checkbox', { name: 'Plan.pdf' })).toHaveCount(0);  // nothing listed yet
+  await drive.getByRole('button', { name: '연결', exact: true }).click();
+  await expect(drive.getByRole('checkbox', { name: 'Plan.pdf' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId('box-drive').getByRole('checkbox', { name: 'Plan.pdf' })).toBeVisible();
+  expect(fake.boxDriveConnected).toBe(true);
+});
+
+test('Box Drive is browsed like a folder: double-click opens, only documents can be checked', async ({ page }) => {
+  await fakeApi(page, { box: false });
+  await page.goto('/manage/box');
+  const drive = page.getByTestId('box-drive');
+  await drive.getByRole('button', { name: '연결', exact: true }).click();
+  await expect(drive.getByRole('checkbox', { name: 'notes.txt' })).toBeDisabled();
+  await expect(drive.getByRole('row', { name: /Plan\.pdf/ })).toContainText('2.4 MB');
+  await drive.getByRole('row', { name: /Quality/ }).dblclick();
+  await expect(drive.getByText('Audit.docx')).toBeVisible();
+  // Going back is always the first row of the listing, with Select all right under it.
+  const up = drive.getByRole('table').getByRole('button', { name: '뒤로' });
+  const all = drive.getByRole('checkbox', { name: '모두 선택' });
+  expect((await up.boundingBox())!.y).toBeLessThan((await all.boundingBox())!.y);
+  await up.click();
+  await expect(drive.getByText('Plan.pdf')).toBeVisible();
+  await expect(drive.getByRole('button', { name: '뒤로' })).toBeDisabled();  // at the top already
+});
+
 test('Box Drive on this machine is found, browsed and built from', async ({ page }) => {
   const fake = await fakeApi(page, { box: false });
   await page.goto('/manage/box');
-  await expect(page.getByText('/Users/me/Library/CloudStorage/Box-Box')).toBeVisible();
   const drive = page.getByTestId('box-drive');
-  await drive.getByRole('button', { name: 'Quality', exact: true }).click();
+  await drive.getByRole('button', { name: '연결', exact: true }).click();
+  await drive.getByRole('row', { name: /Quality/ }).dblclick();
   await drive.getByRole('checkbox', { name: 'Audit.docx' }).check();
   await drive.getByRole('button', { name: 'Box-Box' }).click();
   await drive.getByRole('checkbox', { name: 'Plan.pdf' }).check();
@@ -194,6 +225,7 @@ test('everything in a Box Drive folder is checked at once', async ({ page }) => 
   const fake = await fakeApi(page, { box: false });
   await page.goto('/manage/box');
   const drive = page.getByTestId('box-drive');
+  await drive.getByRole('button', { name: '연결', exact: true }).click();
   const all = drive.getByRole('checkbox', { name: '모두 선택' });
   await all.check();
   await expect(drive.getByRole('checkbox', { name: 'Quality' })).toBeChecked();

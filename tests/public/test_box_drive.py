@@ -45,11 +45,15 @@ def test_a_folder_lists_its_folders_then_its_documents_and_where_it_is(tmp_path:
     top = listing(root, "")
     specs = listing(root, "Specs")
 
-    assert [(i["type"], i["name"]) for i in top["items"]] == [
-        ("folder", "Specs"), ("file", "Leak Test Procedure.pdf")]
+    assert [(i["type"], i["name"], i["readable"]) for i in top["items"]] == [
+        ("folder", "Specs", True), ("file", "Leak Test Procedure.pdf", True)]
+    assert top["items"][1]["size"] == len(b"%PDF-1.4") and top["items"][1]["modified"] > 0
     assert top["path"] == [] and top["name"] == "Box"
-    assert [(i["type"], i["name"], i["id"]) for i in specs["items"]] == [
-        ("folder", "Old", "Specs/Old"), ("file", "Valve Spec.docx", "Specs/Valve Spec.docx")]
+    # Every file is shown as a folder shows it; one not read here cannot be picked.
+    assert [(i["type"], i["name"], i["id"], i["readable"]) for i in specs["items"]] == [
+        ("folder", "Old", "Specs/Old", True),
+        ("file", "notes.txt", "Specs/notes.txt", False),
+        ("file", "Valve Spec.docx", "Specs/Valve Spec.docx", True)]
     assert specs["path"] == [{"id": "", "name": "Box"}]
 
 

@@ -339,19 +339,34 @@ def create_app(
 
     @v1.get("/box-drive", response_model=api.BoxDrive)
     def box_drive() -> dict[str, Any]:
-        """Whether Box Drive's folder is on this machine, and where."""
-        root = demo.box_drive()
-        return {"found": root is not None, "root": str(root) if root else None}
+        """Whether Box Drive's folder is on this machine, where, and whether the user said to
+        read it."""
+        return demo.box_drive_state()
+
+    @v1.post("/box-drive/connect", response_model=api.BoxDrive)
+    def box_drive_connect(request: Request) -> dict[str, Any]:
+        """Box Drive read from now on, and on every start."""
+        if not from_here(request):
+            raise HTTPException(403, "Box Drive can only be connected from this machine")
+        if demo.box_drive() is None:
+            raise HTTPException(404, "Box Drive is not on this machine")
+        demo.box_drive_connect(True)
+        return demo.box_drive_state()
+
+    @v1.delete("/box-drive", response_model=api.BoxDrive)
+    def box_drive_disconnect(request: Request) -> dict[str, Any]:
+        """Box Drive no longer read; asked again next time."""
+        if not from_here(request):
+            raise HTTPException(403, "Box Drive can only be disconnected from this machine")
+        demo.box_drive_connect(False)
+        return demo.box_drive_state()
 
     @v1.get("/box-drive/folders", response_model=api.BoxFolder)
     def box_drive_folder(path: str = "") -> dict[str, Any]:
-        """A Box Drive folder a level at a time, `path` relative to Box Drive's folder."""
-        try:
+        """A Box Drive folder a level at a time, `path` relative to Box Drive's folder: every
+        file as a folder shows it, each said whether it can be read here."""
+        with refused():
             return demo.box_drive_folder(path)
-        except (LookupError, FileNotFoundError) as error:
-            raise HTTPException(404, str(error)) from error
-        except ValueError as error:
-            raise HTTPException(400, str(error)) from error
 
     @v1.post("/cloud/box/build", status_code=202, response_model=api.BuildState)
     def box_build(request: Request, response: Response) -> dict[str, Any]:

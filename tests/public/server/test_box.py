@@ -182,20 +182,46 @@ def test_box_drive_on_this_machine_is_found_and_browsed(demo: Demo, tmp_path: An
     demo.box_drive = lambda: root  # type: ignore[method-assign]
     client = TestClient(create_app(demo), base_url=BASE)
 
-    found = client.get("/v1/box-drive").json()
+    asked = client.get("/v1/box-drive").json()
+    refused = client.get("/v1/box-drive/folders", params={"path": "Specs"})
+    connected = client.post("/v1/box-drive/connect").json()
     specs = client.get("/v1/box-drive/folders", params={"path": "Specs"}).json()
 
-    assert found == {"found": True, "root": str(root)}
+    # Found, but not read until the user says to; then remembered for every start.
+    assert asked == {"found": True, "root": str(root), "connected": False}
+    assert refused.status_code == 409
+    assert connected == {"found": True, "root": str(root), "connected": True}
+    assert Demo(demo.settings, renderer=None,  # type: ignore[arg-type]
+                root=demo.root).box_drive_connected()
+    assert client.delete("/v1/box-drive").json()["connected"] is False
     assert [i["name"] for i in specs["items"]] == ["Valve Spec.docx"]
-    assert client.get("/v1/box-drive/folders", params={"path": ".."}).status_code == 400
 
 
 def test_without_box_drive_the_page_is_told_so(demo: Demo) -> None:
     demo.box_drive = lambda: None  # type: ignore[method-assign]
     client = TestClient(create_app(demo), base_url=BASE)
 
-    assert client.get("/v1/box-drive").json() == {"found": False, "root": None}
+    assert client.get("/v1/box-drive").json() == {"found": False, "root": None,
+                                                    "connected": False}
     assert client.get("/v1/box-drive/folders", params={"path": ""}).status_code == 404
+
+
+def test_nothing_above_box_drive_is_listed_once_connected(demo: Demo, tmp_path: Any) -> None:
+    root = _box_drive(tmp_path)
+    demo.box_drive = lambda: root  # type: ignore[method-assign]
+    client = TestClient(create_app(demo), base_url=BASE)
+    client.post("/v1/box-drive/connect")
+
+    assert client.get("/v1/box-drive/folders", params={"path": ".."}).status_code == 400
+
+
+def test_another_sites_page_cannot_connect_box_drive(demo: Demo, tmp_path: Any) -> None:
+    demo.box_drive = lambda: _box_drive(tmp_path)  # type: ignore[method-assign]
+    client = TestClient(create_app(demo), base_url=BASE)
+
+    refused = client.post("/v1/box-drive/connect", headers={"origin": "https://elsewhere.invented"})
+
+    assert refused.status_code == 403
 
 
 def test_what_is_checked_in_box_drive_is_built_together(

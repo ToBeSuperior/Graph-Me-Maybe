@@ -5,6 +5,17 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.36] - 2026-10-26
+
+### Changed
+
+- Box Drive is read only once you connect it: Manage › Box shows the folder it found and asks.
+  The answer is kept, so it connects every time the app opens until you disconnect it.
+- Box and Box Drive folders are shown as a file browser shows them: a Back row always first,
+  Select all under it, then every folder and file with its date and size. Double-click (or
+  Enter) opens a folder; the checkbox picks it. Files of formats not read here are shown greyed
+  and cannot be picked.
+
 ## [0.1.35] - 2026-10-26
 
 ### Fixed

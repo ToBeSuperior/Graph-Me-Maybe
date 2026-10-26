@@ -733,12 +733,32 @@ class Demo:
         """Box Drive's folder on this machine, when it is here."""
         return box_drive_root(Path.home(), platform=sys.platform, environ=os.environ)
 
+    def box_drive_connected(self) -> bool:
+        """Whether the user said to read Box Drive: asked once, then kept for every start."""
+        try:
+            said = json.loads((self.root / "box-drive.json").read_text(encoding="utf-8"))
+            return bool(said.get("connected"))
+        except (OSError, ValueError, AttributeError):
+            return False
+
+    def box_drive_connect(self, connected: bool) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / "box-drive.json").write_text(json.dumps({"connected": connected}),
+                                                  encoding="utf-8")
+
+    def box_drive_state(self) -> dict[str, Any]:
+        root = self.box_drive()
+        return {"found": root is not None, "root": str(root) if root else None,
+                "connected": root is not None and self.box_drive_connected()}
+
     def box_drive_folder(self, relative: str) -> dict[str, Any]:
         """A folder of Box Drive's, a level at a time; LookupError when Box Drive is not
-        here."""
+        here, Busy until the user has said to read it."""
         root = self.box_drive()
         if root is None:
             raise LookupError("Box Drive is not on this machine")
+        if not self.box_drive_connected():
+            raise Busy("Box Drive is not connected -- connect it first")
         return listing(root, relative)
 
     def _box_source(self) -> BoxSource:

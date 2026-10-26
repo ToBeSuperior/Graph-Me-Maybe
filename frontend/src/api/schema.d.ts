@@ -245,11 +245,36 @@ export interface paths {
         };
         /**
          * Box Drive
-         * @description Whether Box Drive's folder is on this machine, and where.
+         * @description Whether Box Drive's folder is on this machine, where, and whether the user said to
+         *     read it.
          */
         get: operations["box_drive_v1_box_drive_get"];
         put?: never;
         post?: never;
+        /**
+         * Box Drive Disconnect
+         * @description Box Drive no longer read; asked again next time.
+         */
+        delete: operations["box_drive_disconnect_v1_box_drive_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/box-drive/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Box Drive Connect
+         * @description Box Drive read from now on, and on every start.
+         */
+        post: operations["box_drive_connect_v1_box_drive_connect_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -265,7 +290,8 @@ export interface paths {
         };
         /**
          * Box Drive Folder
-         * @description A Box Drive folder a level at a time, `path` relative to Box Drive's folder.
+         * @description A Box Drive folder a level at a time, `path` relative to Box Drive's folder: every
+         *     file as a folder shows it, each said whether it can be read here.
          */
         get: operations["box_drive_folder_v1_box_drive_folders_get"];
         put?: never;
@@ -966,6 +992,11 @@ export interface components {
             found: boolean;
             /** Root */
             root?: string | null;
+            /**
+             * Connected
+             * @default false
+             */
+            connected: boolean;
         };
         /** BoxFolder */
         BoxFolder: {
@@ -1003,6 +1034,13 @@ export interface components {
             name: string;
             /** Size */
             size?: number | null;
+            /** Modified */
+            modified?: number | null;
+            /**
+             * Readable
+             * @default true
+             */
+            readable: boolean;
             /**
              * Picked
              * @default false
@@ -1859,6 +1897,46 @@ export interface operations {
         };
     };
     box_drive_v1_box_drive_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoxDrive"];
+                };
+            };
+        };
+    };
+    box_drive_disconnect_v1_box_drive_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoxDrive"];
+                };
+            };
+        };
+    };
+    box_drive_connect_v1_box_drive_connect_post: {
         parameters: {
             query?: never;
             header?: never;
