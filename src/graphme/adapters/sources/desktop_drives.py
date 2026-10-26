@@ -11,7 +11,10 @@ a folder shows it, and nothing above the folder is.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+import os
+import sys
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +54,68 @@ def google_drive_root(home: Path, *, platform: str, environ: Mapping[str, str],
     return next((path for path in found if path.is_dir()), None)
 
 
-DESKTOP_DRIVES = {"box": box_drive_root, "google": google_drive_root}
+@dataclass(frozen=True)
+class Drive:
+    """What a drive's desktop client shows: the folder it is in, and -- when that folder holds
+    others' too -- the drive's own folders in it, the only ones listed."""
+
+    base: Path
+    top: tuple[str, ...] | None = None
+
+
+def onedrive_drive(home: Path, *, platform: str, environ: Mapping[str, str],
+                   mounts: list[str] | None = None) -> Drive | None:
+    """Where OneDrive shows the user's own OneDrive and the SharePoint libraries synced to this
+    machine; None when it is not here. On a Mac these are `OneDrive-<org>` and
+    `OneDrive-SharedLibraries-<org>` beside other drives' folders under CloudStorage; on Windows
+    wherever OneDrive says it mounted them (`mounts`, read from the registry when not given) --
+    `OneDrive - <org>` and `<org>\\<site> - <library>` beside everything else in the profile."""
+    if platform != "win32":
+        cloud = home / "Library" / "CloudStorage"
+        top = sorted(p.name for p in cloud.glob("OneDrive-*") if p.is_dir()) \
+            if cloud.is_dir() else []
+        return Drive(cloud, tuple(top)) if top else None
+    places = [Path(m) for m in (mounts if mounts is not None else _onedrive_mounts(environ))]
+    places = [p for p in places if p.is_dir()]
+    if not places:
+        return None
+    try:
+        base = Path(os.path.commonpath(places))
+    except ValueError:  # on two drive letters: the first one's
+        base = places[0].parent
+    if base in places:  # one place, or one inside another: shown from above it
+        base = base.parent
+    return Drive(base, tuple(sorted({p.relative_to(base).parts[0] for p in places})))
+
+
+def _onedrive_mounts(environ: Mapping[str, str]) -> list[str]:
+    """Where OneDrive on Windows mounted each OneDrive and SharePoint library it syncs."""
+    found = [environ[name] for name in ("OneDriveCommercial", "OneDriveConsumer") if
+             environ.get(name)]
+    if sys.platform != "win32":  # the registry is Windows' alone
+        return found
+    try:
+        import winreg
+
+        providers = r"Software\SyncEngines\Providers\OneDrive"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, providers) as key:
+            for index in range(winreg.QueryInfoKey(key)[0]):
+                with winreg.OpenKey(key, winreg.EnumKey(key, index)) as provider:
+                    found.append(str(winreg.QueryValueEx(provider, "MountPoint")[0]))
+    except OSError:
+        pass
+    return list(dict.fromkeys(found))
+
+
+def _whole(find: Callable[..., Path | None]) -> Callable[..., Drive | None]:
+    def found(home: Path, **where: Any) -> Drive | None:
+        path = find(home, **where)
+        return Drive(path) if path is not None else None
+    return found
+
+
+DESKTOP_DRIVES: dict[str, Callable[..., Drive | None]] = {
+    "box": _whole(box_drive_root), "google": _whole(google_drive_root), "onedrive": onedrive_drive}
 """Each drive whose desktop client is read, by the name the app gives it."""
 
 
@@ -59,16 +123,20 @@ def _shown(path: Path) -> bool:
     return not path.name.startswith((".", "~$"))
 
 
-def listing(root: Path, relative: str) -> dict[str, Any]:
+def listing(root: Path, relative: str, top: tuple[str, ...] | None = None) -> dict[str, Any]:
     """The folder `relative` to `root`: where it is, its folders, then its documents. Each
-    item's id is its path relative to `root`, written with `/`."""
+    item's id is its path relative to `root`, written with `/`. With `top`, only those folders
+    of `root` are listed, and nothing outside them."""
     base = root.resolve()
     folder = (base / relative).resolve()
     if folder != base and base not in folder.parents:
-        raise ValueError(f"{relative}: outside Box Drive's folder")
+        raise ValueError(f"{relative}: outside the drive's folder")
+    if top is not None and folder != base and folder.relative_to(base).parts[0] not in top:
+        raise ValueError(f"{relative}: outside the drive's folder")
     if not folder.is_dir():
         raise FileNotFoundError(relative)
-    items = sorted((p for p in folder.iterdir() if _shown(p)),
+    items = sorted((p for p in folder.iterdir()
+                    if _shown(p) and (top is None or folder != base or p.name in top)),
                    key=lambda p: (not p.is_dir(), p.name.lower()))
     above = folder.relative_to(base).parts
     return {
@@ -92,4 +160,5 @@ def _item(path: Path, above: tuple[str, ...]) -> dict[str, Any]:
     return {"id": "/".join((*above, path.name)), "type": "folder" if folder else "file",
             "name": path.name, "size": size, "modified": modified,
             "readable": folder or path.suffix.lower() in SUFFIX_FORMATS}
+
 

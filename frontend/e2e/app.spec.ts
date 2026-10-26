@@ -185,7 +185,7 @@ test('Box Drive is read only once the user connects it, and then on every start'
   await expect(drive.getByRole('checkbox', { name: 'Plan.pdf' })).toBeVisible();
   await page.reload();
   await expect(page.getByTestId('box-drive').getByRole('checkbox', { name: 'Plan.pdf' })).toBeVisible();
-  expect(fake.connected).toEqual({ box: true, google: false });
+  expect(fake.connected).toEqual({ box: true, google: false, onedrive: false });
 });
 
 test('Box Drive is browsed like a folder: double-click opens, only documents can be checked', async ({ page }) => {
@@ -402,7 +402,7 @@ test('Google Drive for desktop is connected once, then browsed and built from', 
   await drive.getByRole('checkbox', { name: 'Plan.pdf' }).check();
   await drive.getByRole('button', { name: 'Google Drive에서 그래프 만들기' }).click();
   await expect.poll(() => fake.boxDrive).toEqual([['/Users/me/Library/CloudStorage/GoogleDrive-me@invented.test/Plan.pdf']]);
-  expect(fake.connected).toEqual({ box: false, google: true });
+  expect(fake.connected).toEqual({ box: false, google: true, onedrive: false });
   await drive.getByRole('button', { name: '연결 해제' }).click();
   await expect(drive.getByRole('button', { name: '연결', exact: true })).toBeVisible();
 });
@@ -491,4 +491,24 @@ test('a server with its own graph DB shows no workspaces', async ({ page }) => {
   await page.goto('/manage/danger');
   await expect(page.getByRole('button', { name: /워크스페이스:/ })).toHaveCount(0);
   await expect(page.getByTestId('delete-workspace')).toHaveCount(0);
+});
+
+test('OneDrive and its SharePoint libraries are connected once, browsed and built from', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto('/manage');
+  await page.getByRole('link', { name: 'OneDrive/SharePoint' }).click();
+  await expect(page.getByText('SharePoint 라이브러리는', { exact: false })).toBeVisible();  // how to sync one
+  const drive = page.getByTestId('onedrive-drive');
+  await drive.getByRole('button', { name: '연결', exact: true }).click();
+  await drive.getByRole('checkbox', { name: 'Plan.pdf' }).check();
+  await drive.getByRole('button', { name: 'OneDrive에서 그래프 만들기' }).click();
+  await expect.poll(() => fake.boxDrive).toEqual([['/Users/me/Library/CloudStorage/CloudStorage/Plan.pdf']]);
+  expect(fake.connected.onedrive).toBe(true);
+});
+
+test('without OneDrive the page links to its download', async ({ page }) => {
+  await fakeApi(page, { oneDrive: false });
+  await page.goto('/manage/onedrive');
+  await expect(page.getByTestId('onedrive-drive').getByRole('link', { name: 'OneDrive 설치하기' }))
+    .toHaveAttribute('href', 'https://www.microsoft.com/microsoft-365/onedrive/download');
 });

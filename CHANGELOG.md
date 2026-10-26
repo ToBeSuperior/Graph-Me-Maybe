@@ -5,6 +5,14 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.40] - 2026-10-26
+
+### Added
+
+- OneDrive/SharePoint: Manage › OneDrive/SharePoint reads your OneDrive and the SharePoint
+  libraries synced to this computer by OneDrive's desktop app, browsed and built from like the
+  other drives. Without OneDrive, the page links to its download page.
+
 ## [0.1.39] - 2026-10-26
 
 ### Changed

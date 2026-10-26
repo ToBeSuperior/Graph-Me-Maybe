@@ -9,6 +9,7 @@ import { TipProvider } from './components/ui';
 import { DangerPage } from './features/manage/DangerPage';
 import { BoxPage } from './features/manage/BoxPage';
 import { DrivePage } from './features/manage/DrivePage';
+import { OneDrivePage } from './features/manage/OneDrivePage';
 import { SettingsPage } from './features/manage/SettingsPage';
 import { ExportPage } from './features/manage/ExportPage';
 import { LibraryPage } from './features/manage/LibraryPage';
@@ -63,6 +64,7 @@ const router = createBrowserRouter([
           { path: 'export', element: <ExportPage /> },
           { path: 'settings', element: <SettingsPage /> },
           { path: 'drive', element: <DrivePage /> },
+          { path: 'onedrive', element: <OneDrivePage /> },
           { path: 'box', element: <BoxPage /> },
           { path: 'danger', element: <DangerPage /> },
         ],

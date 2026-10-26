@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from graphme.adapters.sources.desktop_drives import box_drive_root, google_drive_root, listing
+from graphme.adapters.sources.desktop_drives import (
+    Drive,
+    box_drive_root,
+    google_drive_root,
+    listing,
+    onedrive_drive,
+)
 
 
 def _tree(root: Path) -> Path:
@@ -100,3 +106,62 @@ def test_a_drive_letter_is_named_by_itself_at_the_top(tmp_path: Path) -> None:
     assert listing(tmp_path, "")["name"] == tmp_path.name
     top = Path(tmp_path.anchor)
     assert listing(top, "")["name"] == str(top)
+
+
+def _cloud(home: Path) -> Path:
+    cloud = home / "Library" / "CloudStorage"
+    for name in ("OneDrive-Invented Org", "OneDrive-SharedLibraries-Invented Org", "Box-Box",
+                 "GoogleDrive-someone@invented.test"):
+        (cloud / name).mkdir(parents=True)
+    (cloud / "OneDrive-SharedLibraries-Invented Org" / "Quality - Documents").mkdir()
+    (cloud / "OneDrive-SharedLibraries-Invented Org" / "Quality - Documents" / "Plan.pdf") \
+        .write_bytes(b"%PDF-1.4")
+    return cloud
+
+
+def test_on_a_mac_onedrive_shows_its_own_folders_and_the_sharepoint_libraries(
+    tmp_path: Path,
+) -> None:
+    cloud = _cloud(tmp_path)
+
+    drive = onedrive_drive(tmp_path, platform="darwin", environ={})
+
+    assert drive == Drive(cloud, ("OneDrive-Invented Org", "OneDrive-SharedLibraries-Invented Org"))
+    top = listing(drive.base, "", drive.top)
+    assert [i["name"] for i in top["items"]] == list(drive.top)  # Box's and Google's not
+    library = listing(drive.base, "OneDrive-SharedLibraries-Invented Org/Quality - Documents",
+                      drive.top)
+    assert [(i["name"], i["id"]) for i in library["items"]] == [
+        ("Plan.pdf", "OneDrive-SharedLibraries-Invented Org/Quality - Documents/Plan.pdf")]
+
+
+@pytest.mark.parametrize("elsewhere", ["Box-Box", "GoogleDrive-someone@invented.test", "..",
+                                       "OneDrive-Invented Org/../Box-Box"])
+def test_nothing_beside_onedrive_s_folders_is_listed(tmp_path: Path, elsewhere: str) -> None:
+    _cloud(tmp_path)
+    drive = onedrive_drive(tmp_path, platform="darwin", environ={})
+    assert drive is not None
+
+    with pytest.raises(ValueError, match="outside"):
+        listing(drive.base, elsewhere, drive.top)
+
+
+def test_on_windows_onedrive_shows_where_it_syncs_and_nothing_else_in_the_profile(
+    tmp_path: Path,
+) -> None:
+    mine = tmp_path / "OneDrive - Invented Org"
+    library = tmp_path / "Invented Org" / "Quality - Documents"
+    for folder in (mine, library, tmp_path / "Downloads"):
+        folder.mkdir(parents=True)
+
+    drive = onedrive_drive(Path("/elsewhere"), platform="win32", environ={},
+                           mounts=[str(mine), str(library)])
+
+    assert drive == Drive(tmp_path, ("Invented Org", "OneDrive - Invented Org"))
+    with pytest.raises(ValueError, match="outside"):
+        listing(drive.base, "Downloads", drive.top)
+
+
+def test_without_onedrive_nothing_is_found(tmp_path: Path) -> None:
+    assert onedrive_drive(tmp_path, platform="darwin", environ={}) is None
+    assert onedrive_drive(tmp_path, platform="win32", environ={}, mounts=[]) is None

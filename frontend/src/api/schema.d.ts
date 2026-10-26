@@ -2001,7 +2001,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                kind: "box" | "google";
+                kind: "box" | "google" | "onedrive";
             };
             cookie?: never;
         };
@@ -2032,7 +2032,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                kind: "box" | "google";
+                kind: "box" | "google" | "onedrive";
             };
             cookie?: never;
         };
@@ -2063,7 +2063,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                kind: "box" | "google";
+                kind: "box" | "google" | "onedrive";
             };
             cookie?: never;
         };
@@ -2096,7 +2096,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                kind: "box" | "google";
+                kind: "box" | "google" | "onedrive";
             };
             cookie?: never;
         };

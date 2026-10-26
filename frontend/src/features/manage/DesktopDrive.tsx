@@ -118,11 +118,12 @@ export function FolderList({ listing, loading, disabled, isPicked, onPick, onPic
 const INSTALL = {
   box: 'https://www.box.com/resources/downloads',
   google: 'https://www.google.com/drive/download/',
+  onedrive: 'https://www.microsoft.com/microsoft-365/onedrive/download',
 } as const;
 
 /** A cloud drive's desktop client on this machine -- Box Drive, Google Drive for desktop --
  * asked once to connect, then browsed like a folder and built from what is checked. */
-export function DesktopDrive({ kind, app }: { kind: 'box' | 'google'; app: string }) {
+export function DesktopDrive({ kind, app }: { kind: keyof typeof INSTALL; app: string }) {
   const t = useT();
   const client = useQueryClient();
   const [at, setAt] = useState('');

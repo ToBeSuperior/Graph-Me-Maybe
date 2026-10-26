@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from graphme.adapters.sources.desktop_drives import Drive
 from graphme.server.app import create_app
 from graphme.server.state import Demo
 
@@ -22,12 +23,12 @@ def _drive(tmp_path: Path) -> Path:
     return root
 
 
-@pytest.mark.parametrize("kind", ["box", "google"])
+@pytest.mark.parametrize("kind", ["box", "google", "onedrive"])
 def test_a_drive_on_this_machine_is_found_connected_and_browsed(
     demo: Demo, tmp_path: Path, kind: str
 ) -> None:
     root = _drive(tmp_path)
-    demo.desktop_drive = lambda name: root if name == kind else None  # type: ignore[method-assign]
+    demo.desktop_drive = lambda name: Drive(root) if name == kind else None  # type: ignore[method-assign]
     client = TestClient(create_app(demo), base_url=BASE)
 
     asked = client.get(f"/v1/drives/{kind}").json()
@@ -49,7 +50,7 @@ def test_a_drive_on_this_machine_is_found_connected_and_browsed(
 
 def test_connecting_one_drive_does_not_connect_the_other(demo: Demo, tmp_path: Path) -> None:
     root = _drive(tmp_path)
-    demo.desktop_drive = lambda name: root  # type: ignore[method-assign]
+    demo.desktop_drive = lambda name: Drive(root)  # type: ignore[method-assign]
     client = TestClient(create_app(demo), base_url=BASE)
 
     client.post("/v1/drives/google/connect")
@@ -69,7 +70,7 @@ def test_without_the_client_the_page_is_told_so(demo: Demo) -> None:
 
 def test_a_drive_is_connected_only_from_this_machine(demo: Demo, tmp_path: Path) -> None:
     root = _drive(tmp_path)
-    demo.desktop_drive = lambda name: root  # type: ignore[method-assign]
+    demo.desktop_drive = lambda name: Drive(root)  # type: ignore[method-assign]
     client = TestClient(create_app(demo), base_url=BASE)
 
     elsewhere = {"origin": "https://elsewhere.invented"}

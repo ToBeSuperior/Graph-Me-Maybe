@@ -7,6 +7,7 @@ jumps to the question box from anywhere.
 - [Putting documents in](#putting-documents-in)
 - [Documents in Google Drive](#documents-in-google-drive)
 - [Documents in Box](#documents-in-box)
+- [Documents in OneDrive and SharePoint](#documents-in-onedrive-and-sharepoint)
 - [Asking](#asking)
 - [Manage](#manage)
 - [Exporting the graph](#exporting-the-graph)
@@ -70,6 +71,17 @@ folders and check what to read -- a checked folder is read with everything under
 **Build from Box**. Run it again after files change in Box: a file is known by the version Box
 states, and only new versions are fetched and read. **Disconnect** revokes the sign-in, which is
 kept in your system's credential store (Keychain on macOS, Credential Manager on Windows).
+
+## Documents in OneDrive and SharePoint
+
+With Microsoft's **OneDrive** desktop app signed in to your work account, **Manage ›
+OneDrive/SharePoint** shows your OneDrive and every SharePoint library synced to this computer
+(`~/Library/CloudStorage/OneDrive-<org>` and `OneDrive-SharedLibraries-<org>` on a Mac; on Windows
+wherever OneDrive syncs them, `OneDrive - <org>` and `<org>\<site> - <library>` in your profile).
+A SharePoint library shows up once it is synced: open it in SharePoint and choose **Sync**, or
+**Add shortcut to My files**. Then connect, browse and **Build from OneDrive** as with the other
+drives. Without OneDrive, the page links to its download page. If your organization turns off
+syncing, SharePoint cannot be read this way.
 
 ## Asking
 

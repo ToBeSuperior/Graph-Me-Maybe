@@ -356,8 +356,9 @@ class BoxFolder(_Model):
     """Its folders, then its documents; nothing else it holds."""
 
 
-DriveKind = Literal["box", "google"]
-"""A drive whose desktop client is read: Box Drive, Google Drive for desktop."""
+DriveKind = Literal["box", "google", "onedrive"]
+"""A drive whose desktop client is read: Box Drive, Google Drive for desktop, OneDrive (with
+the SharePoint libraries it syncs)."""
 
 
 class DesktopDrive(_Model):

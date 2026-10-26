@@ -38,7 +38,7 @@ from graphme.adapters.sources.box import Picked as BoxPicked
 from graphme.adapters.sources.box import web_url as box_web_url
 from graphme.adapters.sources.box_account import ACCOUNT as BOX_ACCOUNT
 from graphme.adapters.sources.box_account import BoxAccount
-from graphme.adapters.sources.desktop_drives import DESKTOP_DRIVES, listing
+from graphme.adapters.sources.desktop_drives import DESKTOP_DRIVES, Drive, listing
 from graphme.adapters.sources.sign_in import Client, vault
 from graphme.adapters.storage import local_neo4j
 from graphme.adapters.storage.assets import LocalAssetStore
@@ -748,7 +748,7 @@ class Demo:
     # A cloud drive's desktop client ---------------------------------------------------------
 
     @staticmethod
-    def desktop_drive(kind: str) -> Path | None:
+    def desktop_drive(kind: str) -> Drive | None:
         """The folder `kind`'s desktop client shows on this machine, when it is here."""
         return DESKTOP_DRIVES[kind](Path.home(), platform=sys.platform, environ=os.environ)
 
@@ -766,19 +766,19 @@ class Demo:
                                                       encoding="utf-8")
 
     def drive_state(self, kind: str) -> dict[str, Any]:
-        root = self.desktop_drive(kind)
-        return {"found": root is not None, "root": str(root) if root else None,
-                "connected": root is not None and self.drive_connected(kind)}
+        drive = self.desktop_drive(kind)
+        return {"found": drive is not None, "root": str(drive.base) if drive else None,
+                "connected": drive is not None and self.drive_connected(kind)}
 
     def drive_folder(self, kind: str, relative: str) -> dict[str, Any]:
         """A folder of `kind`'s, a level at a time; LookupError when its client is not here,
         Busy until the user has said to read it."""
-        root = self.desktop_drive(kind)
-        if root is None:
+        drive = self.desktop_drive(kind)
+        if drive is None:
             raise LookupError(f"{kind} drive is not on this machine")
         if not self.drive_connected(kind):
             raise Busy(f"{kind} drive is not connected -- connect it first")
-        return listing(root, relative)
+        return listing(drive.base, relative, drive.top)
 
     def _box_source(self) -> BoxSource:
         return BoxSource(self.client, self.box().access_token, self.root / "box-copies")

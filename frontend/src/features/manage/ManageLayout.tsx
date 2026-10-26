@@ -1,6 +1,6 @@
 // Managing the graph: what is in it, how its documents are tied, getting it out, and emptying
 // it -- each a page of its own under one side menu, the dangerous one last and apart.
-import { Box, Cloud, Download, Files, KeyRound, Network, TriangleAlert } from 'lucide-react';
+import { Box, Cloud, Cloudy, Download, Files, KeyRound, Network, TriangleAlert } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { cn } from '../../lib/format';
 import { useT } from '../../lib/i18n';
@@ -25,6 +25,7 @@ export function ManageLayout() {
           <NavLink to="/manage/map" className={item}><Network className="size-4" />{t('mapTitle')}</NavLink>
           <NavLink to="/manage/export" className={item}><Download className="size-4" />{t('exportTitle')}</NavLink>
           <NavLink to="/manage/drive" className={item}><Cloud className="size-4" />{t('driveTitle')}</NavLink>
+          <NavLink to="/manage/onedrive" className={item}><Cloudy className="size-4" />{t('onedriveTitle')}</NavLink>
           <NavLink to="/manage/box" className={item}><Box className="size-4" />{t('boxTitle')}</NavLink>
           <NavLink to="/manage/settings" className={item}><KeyRound className="size-4" />{t('keysTitle')}</NavLink>
           <div className="hidden flex-1 md:block" />
