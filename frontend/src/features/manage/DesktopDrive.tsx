@@ -2,7 +2,7 @@
 // machine browsed with it: the drive's own app keeps its files here as ordinary folders, so
 // nothing signs in and no company approval is needed.
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ChevronRight, FileText, Folder } from 'lucide-react';
+import { ArrowLeft, ChevronRight, ExternalLink, FileText, Folder } from 'lucide-react';
 import { useState } from 'react';
 import { api, call, ApiError, isBuilding } from '../../api/client';
 import type { components } from '../../api/schema';
@@ -114,6 +114,12 @@ export function FolderList({ listing, loading, disabled, isPicked, onPick, onPic
  * no sign-in of the app's own is needed, so a company Box that has not approved the app still
  * can. It is read only once the user says so, and from then on at every start. What is checked
  * is kept on this page and built in one go. */
+/** Where each drive's own desktop app is downloaded from. */
+const INSTALL = {
+  box: 'https://www.box.com/resources/downloads',
+  google: 'https://www.google.com/drive/download/',
+} as const;
+
 /** A cloud drive's desktop client on this machine -- Box Drive, Google Drive for desktop --
  * asked once to connect, then browsed like a folder and built from what is checked. */
 export function DesktopDrive({ kind, app }: { kind: 'box' | 'google'; app: string }) {
@@ -131,7 +137,20 @@ export function DesktopDrive({ kind, app }: { kind: 'box' | 'google'; app: strin
     queryFn: () => call(api.GET('/v1/drives/{kind}/folders', { params: { path: { kind }, query: { path: at } } })),
   });
   if (!drive.data) return null;
-  if (!drive.data.found) return <p className="text-muted">{t('deskMissing', app)}</p>;
+  if (!drive.data.found) {
+    return (
+      <section data-testid={`${kind}-drive`} className="grid gap-3 rounded-lg border border-line p-3">
+        <p className="text-muted">{t('deskMissing', app)}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <a href={INSTALL[kind]} target="_blank" rel="noreferrer"
+            className="inline-flex h-8 items-center gap-2 rounded-md bg-accent px-3 text-sm font-medium text-on-accent shadow-sm hover:bg-accent-hover">
+            {t('deskInstall', app)}<ExternalLink className="size-3.5" />
+          </a>
+          <Button variant="ghost" busy={drive.isFetching} onClick={() => void drive.refetch()}>{t('deskRecheck')}</Button>
+        </div>
+      </section>
+    );
+  }
   const root = drive.data.root ?? '';
   const connect = async (on: boolean) => {
     client.setQueryData(['desktopDrive', kind],

@@ -2,7 +2,7 @@
 // invented documents, so the checks need no server, graph DB or model.
 import type { Page, Route } from '@playwright/test';
 
-interface Fake { workspaces: { active: string; items: { id: string; name: string }[] }; opened: string[]; deletedWorkspaces: string[]; connected: { box: boolean; google: boolean }; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number }
+interface Fake { found: { box: boolean; google: boolean }; workspaces: { active: string; items: { id: string; name: string }[] }; opened: string[]; deletedWorkspaces: string[]; connected: { box: boolean; google: boolean }; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number }
 
 /** A job as `GET /v1/jobs` lists it, newest first. */
 type FakeJob = Record<string, unknown> & { id: string; kind: string; state: string };
@@ -39,7 +39,7 @@ export async function fakeApi(page: Page,
       { name: 'korean', model: 'KURE-v1', size: 437779008, installed: true, chosen: false, fetching: null, error: null },
     ],
     workspaces: { active: 'default', items: [{ id: 'default', name: 'Default' }, { id: 'w2', name: 'Invented audits' }] },
-    opened: [], deletedWorkspaces: [],
+    found: { box: boxDrive, google: googleDrive }, opened: [], deletedWorkspaces: [],
     connected: { box: false, google: false }, boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
     installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0 };
   const json = (route: Route, body: unknown, status = 200) =>
@@ -87,7 +87,7 @@ export async function fakeApi(page: Page,
     if (desk) {
       const kind = desk[1] as 'box' | 'google';
       const top = kind === 'box' ? 'Box-Box' : 'GoogleDrive-me@invented.test';
-      const found = kind === 'box' ? boxDrive : googleDrive;
+      const found = fake.found[kind];
       if (desk[2] === '/connect') fake.connected[kind] = true;
       else if (!desk[2] && method === 'DELETE') fake.connected[kind] = false;
       if (desk[2] !== '/folders') {

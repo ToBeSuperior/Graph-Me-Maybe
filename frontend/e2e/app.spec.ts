@@ -407,10 +407,22 @@ test('Google Drive for desktop is connected once, then browsed and built from', 
   await expect(drive.getByRole('button', { name: '연결', exact: true })).toBeVisible();
 });
 
-test('without Google Drive for desktop the page says how to get it', async ({ page }) => {
-  await fakeApi(page, { googleDrive: false });
+test('without the drive\'s desktop app the page links to its install page, then finds it', async ({ page }) => {
+  const fake = await fakeApi(page, { googleDrive: false });
   await page.goto('/manage/drive');
-  await expect(page.getByText('Google Drive가 이 컴퓨터에 없습니다', { exact: false })).toBeVisible();
+  const drive = page.getByTestId('google-drive');
+  await expect(drive.getByRole('link', { name: 'Google Drive 설치하기' }))
+    .toHaveAttribute('href', 'https://www.google.com/drive/download/');
+  fake.found.google = true;  // installed meanwhile
+  await drive.getByRole('button', { name: '설치했으면 다시 확인' }).click();
+  await expect(drive.getByRole('button', { name: '연결', exact: true })).toBeVisible();
+});
+
+test('without Box Drive the Box page links to Box\'s downloads', async ({ page }) => {
+  await fakeApi(page, { boxDrive: false });
+  await page.goto('/manage/box');
+  await expect(page.getByTestId('box-drive').getByRole('link', { name: 'Box Drive 설치하기' }))
+    .toHaveAttribute('href', 'https://www.box.com/resources/downloads');
 });
 
 test('a file read and waiting for its turn in the build is not shown as left out', async ({ page }) => {

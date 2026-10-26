@@ -5,6 +5,13 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.39] - 2026-10-26
+
+### Changed
+
+- Box and Google Drive pages say plainly that a drive is connected to pick from. Without the
+  drive's desktop app, the page links to its download page and checks again once it is installed.
+
 ## [0.1.38] - 2026-10-26
 
 ### Added

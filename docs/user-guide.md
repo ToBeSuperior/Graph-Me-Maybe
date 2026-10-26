@@ -44,16 +44,16 @@ Google Drive** finds the folder it keeps the drive in (`~/Library/CloudStorage/G
 on a Mac; on Windows the drive letter it adds, `G:` by default, or `%USERPROFILE%\My Drive` when
 mirrored). The first time, it asks whether to connect; once connected it connects every time the
 app opens. Browse the folders -- double-click opens one -- check folders and files, and **Build
-from Google Drive**: no sign-in of the app's own and no approval from your company. A file kept
-online only is fetched by Google Drive as it is read. Google Docs, Sheets and Slides are links to
+from Google Drive**. Without Google Drive for desktop, the page links to its download page and
+checks again once it is installed. A file kept online only is fetched by Google Drive as it is read. Google Docs, Sheets and Slides are links to
 the web, not files, and are not read; DOCX, PPTX, XLSX and PDF files are.
 
 ## Documents in Box
 
 **With Box Drive.** If Box's own desktop client, Box Drive, is on this computer, **Manage › Box**
 finds its folder (`~/Library/CloudStorage/Box-Box` on a Mac, `%USERPROFILE%\Box` on Windows).
-Check folders and files there and **Build from Box Drive**: no Box app to make and no approval
-from your company needed. A file kept online only is fetched by Box Drive as it is read.
+Check folders and files there and **Build from Box Drive**. Without Box Drive, the page links to
+Box's downloads. A file kept online only is fetched by Box Drive as it is read.
 
 **With a Box app.** Folders and files kept in Box go into the graph the same way: fetched only while they are read
 or drawn, removed after, and never written to. Setting it up takes your own Box app, once:
@@ -62,8 +62,7 @@ or drawn, removed after, and never written to. Setting it up takes your own Box 
    **User Authentication (OAuth 2.0)**.
 2. Under **Configuration**, add the Redirect URI the app's **Manage › Box** page shows
    (`http://127.0.0.1:<port>/v1/cloud/box/callback`; Box takes any port on this machine).
-3. Under **Application Scopes**, turn on only **Read all files and folders stored in Box**. A
-   company Box may need its admin to approve the app before anyone can sign in.
+3. Under **Application Scopes**, turn on only **Read all files and folders stored in Box**.
 4. In the app, **Manage › Keys and model › Advanced settings**, put in its client ID and secret.
 
 Then **Manage › Box › Connect Box** signs you in in the browser. Back in the app, browse the
