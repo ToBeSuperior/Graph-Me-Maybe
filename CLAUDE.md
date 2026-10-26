@@ -479,8 +479,8 @@ and rejects fake providers unless `GRAPHME_PROFILE=test`.
 
 `GRAPHME_PROVIDER` is `openai`, `anthropic` or `gemini`; its key is read from that provider's
 own variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`) and required at
-startup. Embeddings come from OpenAI or Gemini; with Anthropic, search needs an OpenAI key or
-`GRAPHME_EMBEDDING_PROVIDER=gemini`. `GRAPHME_MODEL_BASE_URL` can name another server speaking
+startup. Search embeds on this machine by default (see below); OpenAI or Gemini embeddings take
+their own key. `GRAPHME_MODEL_BASE_URL` can name another server speaking
 the same wire: over HTTPS anywhere, or plain HTTP only on this machine.
 
 Offline results prove orchestration, persistence and readiness — never provider quality.

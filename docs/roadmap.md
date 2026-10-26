@@ -23,6 +23,15 @@ end to end, and the VLM hierarchy handles worksheets, slides, DOCX and PDF.
       Compare with other GraphRAG implementations under the same conditions.
 - [ ] **Ship the demo with an installer.** Let people start the demo from one installer,
       without installing dependencies such as Neo4j, Chrome and Node by hand.
+- [ ] **A native installer and app.** Today one-line scripts install uv and the app as a Python
+      package, and the Mac `.app` is a shortcut to that command. Bundle Python, the libraries
+      and the app into one `Graph-Me-Maybe.app` / `.exe` (BeeWare Briefcase or PyInstaller) and
+      ship a `.dmg` and an `.msi`/setup `.exe`, built by the release workflow for each platform;
+      Neo4j, the Java runtime and the search model stay fetched on first start. Unsigned, macOS
+      warns of an unidentified developer and Windows SmartScreen warns too, and a company PC may
+      refuse it: signing needs an Apple Developer ID (with notarization) and a Windows code-signing
+      certificate. To decide: signing, the platforms (Apple Silicon, Intel, Windows), and whether
+      the one-line scripts stay.
 
 ## 1 · Wire the hierarchy into production indexing
 
@@ -92,6 +101,13 @@ end to end, and the VLM hierarchy handles worksheets, slides, DOCX and PDF.
       the order finishes. Decide whether to show the number read separately.
 - [ ] Changing the passage count asks the question again without confirmation. A citation
       chip in the answer does not jump to the evidence passage.
+
+- [ ] (Later) ONLYOFFICE as a source. It has no desktop client that syncs files to a folder, so
+      it cannot be read like Box Drive, Google Drive or OneDrive, and DocSpace has no WebDAV
+      server yet. Read DocSpace through its REST API with a personal access token (its address
+      and key in Keys and model; rooms and folders browsed in the app, picked files fetched while
+      read). A room kept on an outside storage (OneDrive, Box, Google Drive) is read through that
+      drive's tab already; Workspace's WebDAV can be mounted and added as a folder.
 
 ## 2 · Breaking down tables
 

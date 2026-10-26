@@ -34,6 +34,10 @@ keeps the ones already in the graph, and still finishes the search index. Model 
 run to the end; documents read that way appear in the library as "outside the graph", where
 **Read again** puts them in at no cost and **Remove from list** drops them.
 
+**When a build ends**, the side menu of **Manage** keeps its result: how many documents went in, how
+many were in the graph already and how many failed. **Show result** lists each failed document with
+why, beside its name -- a file locked by a password or rights protection says so.
+
 **Check that it worked:** the top bar shows `19 documents · … links`; asking about `WO-2026-031`
 brings the work order first, and its page is drawn on the right; a question about nothing in the
 documents gets **No related documents**.
@@ -46,8 +50,9 @@ on a Mac; on Windows the drive letter it adds, `G:` by default, or `%USERPROFILE
 mirrored). The first time, it asks whether to connect; once connected it connects every time the
 app opens. Browse the folders -- double-click opens one -- check folders and files, and **Build
 from Google Drive**. Without Google Drive for desktop, the page links to its download page and
-checks again once it is installed. A file kept online only is fetched by Google Drive as it is read. Google Docs, Sheets and Slides are links to
-the web, not files, and are not read; DOCX, PPTX, XLSX and PDF files are.
+checks again once it is installed. A file kept online only is fetched by Google Drive as it is
+read. Google Docs, Sheets and Slides are links to the web, not files, and are not read; DOCX, PPTX,
+XLSX and PDF files are.
 
 ## Documents in Box
 
@@ -149,7 +154,9 @@ screen this slides in from the side.
 - **Danger zone — reset** shows how many documents will go and asks for a confirmation word. It
   empties the graph (indexes stay) and drops what the app had read, so documents added afterwards are
   read from scratch. CLI: `graphme reset-graph`.
-- **Keys and model** — the provider, the model, the keys and readings per page. A key is checked
+- **Keys and model** — the provider, the model, the keys and readings per page, and the search
+  model: `general` or `korean`, run on this machine, each installed or removed there and marked as
+  installed or not; changing it embeds the graph again. A key is checked
   before it is saved and never shown back. Editing `.env` directly works too; shell variables override
   it.
 

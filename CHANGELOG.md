@@ -5,6 +5,15 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.41] - 2026-10-26
+
+### Changed
+
+- The README, the install and user guides, retrieval and `.env.example` say what the app does now:
+  search runs on this machine with no key unless a cloud embedder is chosen, the cloud drives
+  (Box Drive, Google Drive, OneDrive/SharePoint), workspaces, the last build's result, and the
+  search model's files in the app's folder.
+
 ## [0.1.40] - 2026-10-26
 
 ### Added

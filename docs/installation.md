@@ -57,7 +57,9 @@ The app folder holds:
 | `.env` | your settings and keys (mode 600) |
 | `.graphme/` | the app's working data: uploaded files, rendered pages, crops |
 | `neo4j/`, `jre/` | Neo4j Community and the Java runtime (replaced on update) |
-| `neo4j-data/` | the graph itself (kept on update) |
+| `neo4j-data/` | the graph itself (kept on update): the first workspace's |
+| `workspaces/`, `workspaces.json` | every other workspace's graph, and which one is open |
+| `models/`, `llama/` | the search model and the server that runs it, fetched on first start (about 640 MB for the general model) |
 | `web/`, `viewer/` | the web app and the document viewer |
 | `webview/` | the app window's storage (theme, language) |
 | `app.log` | the window app's log |
@@ -172,7 +174,7 @@ $env:GRAPHME_HOME='D:\gmm'; irm https://raw.githubusercontent.com/ToBeSuperior/G
 | `the graph DB (Neo4j) did not download` | No internet, or dist.neo4j.org, api.adoptium.net or github.com unreachable. Check the connection and open the app again. |
 | `the graph DB (Neo4j) did not start: …` | Neo4j's own words follow the colon; the full logs are in the app folder's `neo4j-data/logs/console.log` and `neo4j.log`. |
 | `the Microsoft Visual C++ runtime is missing` (Windows) | Let winget install it, or install the redistributable from the printed link and run the installer again. |
-| `OPENAI_API_KEY is required …` | No key yet: put it in **Manage › Keys and model**. The terminal's `graphme` reads the app folder's `.env`. |
+| `OPENAI_API_KEY is required …` | Search is set to OpenAI's embeddings and there is no key yet: put it in **Manage › Keys and model**, or choose a search model run on this machine there. The terminal's `graphme` reads the app folder's `.env`. |
 | `the Neo4j at … does not take the password` | `GRAPHME_NEO4J_PASSWORD` in `.env` is wrong. Fix it, or remove `GRAPHME_NEO4J_*` to use the app's own Neo4j. |
 | `the environment variables … take precedence over .env` (Keys and model page) | A shell variable of the same name overrides the file: `unset` it and restart. |
 | DOCX, PPTX or XLSX pages are not drawn | The viewer bundle is missing (`setup.sh` in a checkout), or Chrome is not where the app looks: set `GRAPHME_CHROME_EXECUTABLE`. |

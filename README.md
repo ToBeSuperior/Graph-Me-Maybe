@@ -40,6 +40,13 @@ leave it, to the provider you choose.
 - **Hybrid retrieval.** Vector search and full-text search (BM25) run side by side in Neo4j and are
   fused with weighted reciprocal rank fusion. A question about nothing in the graph gets "no related
   documents", not a guess.
+- **Search on this machine.** Passages are embedded by a small model run locally (a general one by
+  default, or one for Korean), so searching needs no key and sends nothing out. OpenAI or Gemini
+  embeddings remain a choice.
+- **Your cloud drives.** Box Drive, Google Drive for desktop and OneDrive (with the SharePoint
+  libraries it syncs) are browsed in the app as folders and built from; Box can also be signed in to
+  directly.
+- **Workspaces.** Graphs kept apart, each with its own documents and links, switched in seconds.
 - **A desktop app.** One-line installers for macOS and Windows; the graph database (Neo4j) is
   installed and run by the app itself, with no Docker and no account.
 - **Open graph.** Export to a `neo4j-admin` import bundle, a `.dump` for Neo4j Desktop or Aura, or
@@ -79,7 +86,9 @@ Drop a folder of documents on the **Ask** tab (or use the sample documents), wai
 and ask a question. The answer cites its documents; the documents found are shown as folders by how
 they were reached — found by the question, linked to those, linked to those in turn — with the
 matching passage highlighted on the rendered page. **Manage** holds the document list, the map of
-links, each document's outline, export and reset. A tour of every screen is in
+links, each document's outline, the cloud drives, export, keys and model, and the danger zone; the
+last build's result (how many went in, and why each failure failed) stays in its side menu. The
+workspace open is named in the top bar, where another is opened or made. A tour of every screen is in
 [docs/user-guide.md](docs/user-guide.md).
 
 ### Command line
@@ -168,14 +177,15 @@ then the environment. The installed app keeps its `.env` in its own folder; the 
 | Setting | What it is |
 |---|---|
 | `GRAPHME_PROVIDER` | who reads documents and answers: `openai` (default), `anthropic` or `gemini` |
-| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | that provider's key; Anthropic has no embeddings, so search also needs an OpenAI or Gemini key |
-| `GRAPHME_EMBEDDING_PROVIDER` | who embeds passages for search: `openai` (default) or `gemini` |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | that provider's key |
+| `GRAPHME_EMBEDDING_PROVIDER` | who embeds passages for search: `general` (default) or `korean`, run on this machine with no key; or `openai` / `gemini` with that provider's key |
 | `GRAPHME_NEO4J_URI` (+ `GRAPHME_NEO4J_PASSWORD`) | use a Neo4j you run yourself (Desktop, a server, Aura) instead of the app's own |
 | `GRAPHME_HOME` | the app's folder (settings, graph, viewer) |
 | `GRAPHME_RETRIEVAL_TOP_K` | how many passages a question starts from |
 | `GRAPHME_HIERARCHY_READINGS` | how many times each page is read (more readings, steadier outlines, more cost) |
 | `GRAPHME_NEO4J_HEAP` / `GRAPHME_NEO4J_PAGECACHE` | memory of the app's Neo4j, for large graphs |
 | `GRAPHME_API_KEY` | required by `graphme serve` before it opens beyond this machine |
+| `GRAPHME_BOX_CLIENT_ID` / `GRAPHME_BOX_CLIENT_SECRET` | your own Box app, to sign in to Box directly (Box Drive needs none) |
 
 ## 🛠 Develop from source
 
@@ -241,7 +251,8 @@ also read the [Code of Conduct](CODE_OF_CONDUCT.md); security issues go to
 - Never commit `.env`, real documents, API keys or OAuth files.
 - Open `graphme serve` beyond this machine only with `GRAPHME_API_KEY` set; without one it stays on
   127.0.0.1.
-- Check your model and embedding provider's data terms before sending confidential documents to it.
+- Check your model provider's data terms before sending confidential documents to it -- and the
+  embedding provider's, if you choose OpenAI or Gemini for search (the default runs on this machine).
 - Generated captions are kept apart from what the file says and are never used as a citation.
 
 ## 📜 License
