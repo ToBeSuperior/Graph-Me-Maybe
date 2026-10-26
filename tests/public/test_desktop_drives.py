@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from graphme.adapters.sources.box_drive import box_drive_root, listing
+from graphme.adapters.sources.desktop_drives import box_drive_root, google_drive_root, listing
 
 
 def _tree(root: Path) -> Path:
@@ -63,3 +63,40 @@ def test_nothing_above_box_drive_is_listed(tmp_path: Path, outside: str) -> None
 
     with pytest.raises(ValueError, match="outside"):
         listing(root, outside)
+
+
+def test_on_a_mac_google_drive_is_the_accounts_folder_under_cloud_storage(tmp_path: Path) -> None:
+    account = tmp_path / "Library" / "CloudStorage" / "GoogleDrive-someone@invented.test"
+    (account / "My Drive").mkdir(parents=True)
+
+    assert google_drive_root(tmp_path, platform="darwin", environ={}) == account
+
+
+def test_on_windows_google_drive_is_the_drive_letter_holding_my_drive(tmp_path: Path) -> None:
+    empty, mounted = tmp_path / "E", tmp_path / "G"
+    empty.mkdir()
+    (mounted / "내 드라이브").mkdir(parents=True)
+
+    assert google_drive_root(Path("/elsewhere"), platform="win32", environ={},
+                             volumes=[empty, mounted]) == mounted
+
+
+def test_on_windows_a_mirrored_my_drive_in_the_profile_is_found(tmp_path: Path) -> None:
+    (tmp_path / "My Drive").mkdir()
+
+    assert google_drive_root(Path("/elsewhere"), platform="win32",
+                             environ={"USERPROFILE": str(tmp_path)}, volumes=[]) == \
+        tmp_path / "My Drive"
+
+
+def test_without_google_drive_nothing_is_found(tmp_path: Path) -> None:
+    assert google_drive_root(tmp_path, platform="darwin", environ={}) is None
+    assert google_drive_root(tmp_path, platform="win32", environ={"USERPROFILE": str(tmp_path)},
+                             volumes=[tmp_path]) is None
+
+
+def test_a_drive_letter_is_named_by_itself_at_the_top(tmp_path: Path) -> None:
+    # `G:\` has no name of its own: the way back to the top must still say where it goes.
+    assert listing(tmp_path, "")["name"] == tmp_path.name
+    top = Path(tmp_path.anchor)
+    assert listing(top, "")["name"] == str(top)

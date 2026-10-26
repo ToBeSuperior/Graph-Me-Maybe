@@ -5,6 +5,34 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.37] - 2026-10-26
+
+### Added
+
+- Google Drive is read through Google Drive for desktop, as Box Drive is: Manage › Google Drive
+  finds the folder it keeps on this computer, asks once whether to connect, and is browsed as a
+  file browser. No Google Cloud project, OAuth client or company approval is needed.
+- The last build's result stays in the Manage side menu: how many went in, were already in and
+  failed, and **Show result** lists each failed document with why, beside its name.
+- An Office file locked by a password or rights protection says so, instead of "may be damaged".
+
+### Changed
+
+- Why a document failed is said in the chosen language.
+- Every picture sent to a model is held to 1568 pixels on its long edge and about 1.15 million
+  pixels, what a model reads whole; a huge picture inside an Office file is scaled down in a
+  copy before its pages are drawn, so the viewer no longer refuses it.
+
+### Fixed
+
+- A workbook whose chart plots a single cell, rather than a range, is read; it failed as
+  "could not be read".
+
+### Removed
+
+- Google Drive's sign-in with your own OAuth client and Google's picker, with its two settings
+  (`GRAPHME_GOOGLE_CLIENT_ID`, `GRAPHME_GOOGLE_CLIENT_SECRET`).
+
 ## [0.1.36] - 2026-10-26
 
 ### Changed

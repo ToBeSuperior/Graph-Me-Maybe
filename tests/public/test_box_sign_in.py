@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from graphme.adapters.sources.box_account import AUTH, REVOKE, TOKEN, BoxAccount
-from graphme.adapters.sources.google import Client, FileVault, NotConnected
+from graphme.adapters.sources.sign_in import Client, FileVault, NotConnected
 
 CLIENT = Client(id="invented-box-client", secret="invented-box-secret")
 LOOPBACK = "http://127.0.0.1:8765/v1/cloud/box/callback"

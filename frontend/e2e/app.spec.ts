@@ -185,7 +185,7 @@ test('Box Drive is read only once the user connects it, and then on every start'
   await expect(drive.getByRole('checkbox', { name: 'Plan.pdf' })).toBeVisible();
   await page.reload();
   await expect(page.getByTestId('box-drive').getByRole('checkbox', { name: 'Plan.pdf' })).toBeVisible();
-  expect(fake.boxDriveConnected).toBe(true);
+  expect(fake.connected).toEqual({ box: true, google: false });
 });
 
 test('Box Drive is browsed like a folder: double-click opens, only documents can be checked', async ({ page }) => {
@@ -274,6 +274,28 @@ test('the build under way is the newest build job, and its cancel names it', asy
   await page.goto('/manage');
   await page.getByRole('button', { name: '취소' }).click();
   await expect.poll(() => fake.cancelled).toEqual(['b1']);
+});
+
+test('a finished build says how many went in and why each failure failed, beside its name', async ({ page }) => {
+  await fakeApi(page, { jobs: [{ ...BUILD, state: 'done', done: 3, total: 3, documents: 3, known: 1, elapsed: 125,
+    failed: ['Sealed Budget.xlsx: the file is locked by a password or rights protection -- open it in Office, remove the protection, and add it again',
+      'Archive: the folder did not list in time -- not read'] }] });
+  await page.goto('/manage');
+  await expect(page.getByText('성공 3 · 실패 2')).toBeVisible();
+  await page.getByRole('button', { name: '결과 보기' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('이미 있음 1')).toBeVisible();
+  const row = dialog.getByRole('row', { name: /Sealed Budget\.xlsx/ });
+  await expect(row.getByRole('cell').nth(0)).toHaveText('Sealed Budget.xlsx');
+  await expect(row.getByRole('cell').nth(1)).toHaveText('암호나 권한으로 보호된 파일입니다 — Office에서 보호를 풀고 다시 넣어 주세요');
+  await expect(dialog.getByRole('row', { name: /Archive/ }).getByRole('cell').nth(1)).toHaveText('폴더 목록을 제때 받지 못해 읽지 않았습니다');
+});
+
+test('a build under way shows no result of the build before it', async ({ page }) => {
+  await fakeApi(page, { jobs: [BUILD] });
+  await page.goto('/manage');
+  await expect(page.getByRole('button', { name: '취소' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '결과 보기' })).toHaveCount(0);
 });
 
 test('a build under way says how far its reading is', async ({ page }) => {
@@ -371,19 +393,24 @@ test.describe('on a Korean browser', () => {
   });
 });
 
-test('Google Drive is connected in the browser, then its picked files are built', async ({ page }) => {
+test('Google Drive for desktop is connected once, then browsed and built from', async ({ page }) => {
   const fake = await fakeApi(page);
   await page.goto('/manage/drive');
-  await expect(page.getByText('연결되지 않았습니다.')).toBeVisible();
+  const drive = page.getByTestId('google-drive');
+  await expect(drive.getByText('/Users/me/Library/CloudStorage/GoogleDrive-me@invented.test')).toBeVisible();
+  await drive.getByRole('button', { name: '연결', exact: true }).click();
+  await drive.getByRole('checkbox', { name: 'Plan.pdf' }).check();
+  await drive.getByRole('button', { name: 'Google Drive에서 그래프 만들기' }).click();
+  await expect.poll(() => fake.boxDrive).toEqual([['/Users/me/Library/CloudStorage/GoogleDrive-me@invented.test/Plan.pdf']]);
+  expect(fake.connected).toEqual({ box: false, google: true });
+  await drive.getByRole('button', { name: '연결 해제' }).click();
+  await expect(drive.getByRole('button', { name: '연결', exact: true })).toBeVisible();
+});
 
-  await page.getByRole('button', { name: '연결하고 파일 고르기' }).click();
-  await expect(page.getByRole('link', { name: '이 링크를 여세요' })).toHaveAttribute('href', /trigger_onepick/);
-  await expect(page.getByText('연결됨 · 2개 골랐습니다')).toBeVisible();
-
-  await page.getByRole('button', { name: 'Drive에서 그래프 만들기' }).click();
-  await expect.poll(() => fake.drive.built).toBe(1);
-  await page.getByRole('button', { name: '연결 해제' }).click();
-  await expect(page.getByText('연결되지 않았습니다.')).toBeVisible();
+test('without Google Drive for desktop the page says how to get it', async ({ page }) => {
+  await fakeApi(page, { googleDrive: false });
+  await page.goto('/manage/drive');
+  await expect(page.getByText('Google Drive가 이 컴퓨터에 없습니다', { exact: false })).toBeVisible();
 });
 
 test('a file read and waiting for its turn in the build is not shown as left out', async ({ page }) => {
@@ -403,9 +430,8 @@ test('while a build runs the Drive page says so and does not start another', asy
   const fake = await fakeApi(page, {
     jobs: [{ id: 'b', kind: 'build', state: 'reading', done: 1, total: 2, source: 'Google Drive', failed: [] }],
   });
-  fake.drive.connected = true;
-  fake.drive.picked = 2;
+  fake.connected.google = true;
   await page.goto('/manage/drive');
-  await expect(page.getByRole('button', { name: 'Drive에서 그래프 만들기' })).toBeDisabled();
-  await expect(page.getByText('고른 파일을 읽고 있습니다', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Google Drive에서 그래프 만들기' })).toBeDisabled();
+  await expect(page.getByText('그래프를 만드는 중입니다', { exact: false })).toBeVisible();
 });

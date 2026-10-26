@@ -113,48 +113,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/cloud/google": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Google State */
-        get: operations["google_state_v1_cloud_google_get"];
-        put?: never;
-        post?: never;
-        /**
-         * Google Disconnect
-         * @description The sign-in revoked at Google and forgotten here, with the files picked.
-         */
-        delete: operations["google_disconnect_v1_cloud_google_delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/cloud/google/connect": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Google Connect
-         * @description Sign in to Google and pick files, in the browser: Google's own picker, which grants
-         *     this app the files picked and nothing else.
-         */
-        post: operations["google_connect_v1_cloud_google_connect_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/cloud/box": {
         parameters: {
             query?: never;
@@ -236,7 +194,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/box-drive": {
+    "/v1/drives/{kind}": {
         parameters: {
             query?: never;
             header?: never;
@@ -244,24 +202,24 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Box Drive
-         * @description Whether Box Drive's folder is on this machine, where, and whether the user said to
-         *     read it.
+         * Desktop Drive
+         * @description Whether the drive's desktop client shows it on this machine, where, and whether the
+         *     user said to read it.
          */
-        get: operations["box_drive_v1_box_drive_get"];
+        get: operations["desktop_drive_v1_drives__kind__get"];
         put?: never;
         post?: never;
         /**
-         * Box Drive Disconnect
-         * @description Box Drive no longer read; asked again next time.
+         * Desktop Drive Disconnect
+         * @description The drive no longer read; asked again next time.
          */
-        delete: operations["box_drive_disconnect_v1_box_drive_delete"];
+        delete: operations["desktop_drive_disconnect_v1_drives__kind__delete"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/v1/box-drive/connect": {
+    "/v1/drives/{kind}/connect": {
         parameters: {
             query?: never;
             header?: never;
@@ -271,17 +229,17 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Box Drive Connect
-         * @description Box Drive read from now on, and on every start.
+         * Desktop Drive Connect
+         * @description The drive read from now on, and on every start.
          */
-        post: operations["box_drive_connect_v1_box_drive_connect_post"];
+        post: operations["desktop_drive_connect_v1_drives__kind__connect_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/v1/box-drive/folders": {
+    "/v1/drives/{kind}/folders": {
         parameters: {
             query?: never;
             header?: never;
@@ -289,11 +247,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Box Drive Folder
-         * @description A Box Drive folder a level at a time, `path` relative to Box Drive's folder: every
-         *     file as a folder shows it, each said whether it can be read here.
+         * Desktop Drive Folder
+         * @description A folder of the drive's a level at a time, `path` relative to its top: every file as
+         *     a folder shows it, each said whether it can be read here.
          */
-        get: operations["box_drive_folder_v1_box_drive_folders_get"];
+        get: operations["desktop_drive_folder_v1_drives__kind__folders_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -728,27 +686,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/cloud/google/build": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Google Build
-         * @description The picked Drive files into the space: changed ones read again, unchanged ones
-         *     passed over by the content Drive states, without being fetched.
-         */
-        post: operations["google_build_v1_cloud_google_build_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/jobs/build": {
         parameters: {
             query?: never;
@@ -986,18 +923,6 @@ export interface components {
             /** Url */
             url: string;
         };
-        /** BoxDrive */
-        BoxDrive: {
-            /** Found */
-            found: boolean;
-            /** Root */
-            root?: string | null;
-            /**
-             * Connected
-             * @default false
-             */
-            connected: boolean;
-        };
         /** BoxFolder */
         BoxFolder: {
             /** Id */
@@ -1169,6 +1094,18 @@ export interface components {
             /** To */
             to: string;
         };
+        /** DesktopDrive */
+        DesktopDrive: {
+            /** Found */
+            found: boolean;
+            /** Root */
+            root?: string | null;
+            /**
+             * Connected
+             * @default false
+             */
+            connected: boolean;
+        };
         /** DocumentGraph */
         DocumentGraph: {
             /** Nodes */
@@ -1223,20 +1160,6 @@ export interface components {
         Found: {
             /** Sources */
             sources: components["schemas"]["Source"][];
-        };
-        /** GoogleConnect */
-        GoogleConnect: {
-            /** Url */
-            url: string;
-        };
-        /** GoogleDrive */
-        GoogleDrive: {
-            /** Configured */
-            configured: boolean;
-            /** Connected */
-            connected: boolean;
-            /** Picked */
-            picked: number;
         };
         /** GraphNode */
         GraphNode: {
@@ -1712,66 +1635,6 @@ export interface operations {
             };
         };
     };
-    google_state_v1_cloud_google_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GoogleDrive"];
-                };
-            };
-        };
-    };
-    google_disconnect_v1_cloud_google_delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GoogleDrive"];
-                };
-            };
-        };
-    };
-    google_connect_v1_cloud_google_connect_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GoogleConnect"];
-                };
-            };
-        };
-    };
     box_state_v1_cloud_box_get: {
         parameters: {
             query?: never;
@@ -1896,11 +1759,13 @@ export interface operations {
             };
         };
     };
-    box_drive_v1_box_drive_get: {
+    desktop_drive_v1_drives__kind__get: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                kind: "box" | "google";
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -1911,16 +1776,27 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoxDrive"];
+                    "application/json": components["schemas"]["DesktopDrive"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    box_drive_disconnect_v1_box_drive_delete: {
+    desktop_drive_disconnect_v1_drives__kind__delete: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                kind: "box" | "google";
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -1931,16 +1807,27 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoxDrive"];
+                    "application/json": components["schemas"]["DesktopDrive"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    box_drive_connect_v1_box_drive_connect_post: {
+    desktop_drive_connect_v1_drives__kind__connect_post: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                kind: "box" | "google";
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -1951,18 +1838,29 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoxDrive"];
+                    "application/json": components["schemas"]["DesktopDrive"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    box_drive_folder_v1_box_drive_folders_get: {
+    desktop_drive_folder_v1_drives__kind__folders_get: {
         parameters: {
             query?: {
                 path?: string;
             };
             header?: never;
-            path?: never;
+            path: {
+                kind: "box" | "google";
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -2617,26 +2515,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    google_build_v1_cloud_google_build_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BuildState"];
                 };
             };
         };

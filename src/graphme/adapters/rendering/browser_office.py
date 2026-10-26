@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from graphme import processes
+from graphme.adapters.rendering.embedded_images import lightened
 from graphme.adapters.rendering.xlsx_measurement import CellRange, measure_workbook
 from graphme.application.page_regions import PixelBox, SheetPixelGrid
 from graphme.domain.enums import DocumentFormat
@@ -334,10 +335,11 @@ class BrowserOfficeRenderer:
                     ),
                     encoding="utf-8",
                 )
+            # Pictures past what a page shows scaled down first: the viewer refuses one past
+            # 2^27 decoded pixels, and the whole file with it.
+            staged = lightened(source, workspace)
             if document_format is DocumentFormat.DOCX:
-                staged = _without_vml_copies(source, workspace)
-            else:
-                staged = source
+                staged = _without_vml_copies(staged, workspace)
             try:
                 pages = self._capture(staged, kind, workspace)
             except Exception as error:

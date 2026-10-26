@@ -309,20 +309,6 @@ class SettingField(_Model):
     """For a provider: what it can be, each with the variable its key is kept under."""
 
 
-class GoogleDrive(_Model):
-    configured: bool
-    """Whether the user's OAuth client is set (GRAPHME_GOOGLE_CLIENT_ID)."""
-    connected: bool
-    """Whether a Google account is signed in."""
-    picked: int
-    """How many Drive files (or folders) the user picked for the graph."""
-
-
-class GoogleConnect(_Model):
-    url: str
-    """Where the browser signs in and picks files; opened already when the server could."""
-
-
 class BoxItem(_Model):
     type: Literal["folder", "file"]
     id: str
@@ -370,9 +356,13 @@ class BoxFolder(_Model):
     """Its folders, then its documents; nothing else it holds."""
 
 
-class BoxDrive(_Model):
+DriveKind = Literal["box", "google"]
+"""A drive whose desktop client is read: Box Drive, Google Drive for desktop."""
+
+
+class DesktopDrive(_Model):
     found: bool
-    """Whether Box Drive's folder is on this machine."""
+    """Whether the drive's desktop client shows it on this machine."""
     root: str | None = None
     """Where it is."""
     connected: bool = False

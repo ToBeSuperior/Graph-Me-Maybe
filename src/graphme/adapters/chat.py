@@ -59,12 +59,42 @@ def refused(error: httpx.HTTPError) -> bool:
             and error.response.status_code in REFUSED_STATUS)
 
 
+MODEL_IMAGE_LONG_EDGE = 1568
+MODEL_IMAGE_PIXELS = 1_150_000
+"""The largest picture a model reads whole, whoever is asked. Anthropic counts a picture as
+width x height / 750 tokens and scales anything past 1568 pixels on its long edge or about
+1.15 megapixels down to that before it reads it (~1,530 tokens); OpenAI scales a page to 768
+pixels on its short side (~1,100 tokens); Gemini counts 258 tokens for every 768-pixel tile, so
+a larger picture only costs more. Held here, a page reads as it did and is never billed past
+this, and a picture is uploaded no larger than it is read."""
+
+
 def image_part(png: bytes) -> dict[str, Any]:
-    """A PNG as one part of a chat message."""
+    """A PNG as one part of a chat message, held to `MODEL_IMAGE_LONG_EDGE` and
+    `MODEL_IMAGE_PIXELS`. The model answers in normalised coordinates and by unit ids, so a
+    smaller picture of the same page changes no answer's meaning."""
     return {
         "type": "image_url",
-        "image_url": {"url": "data:image/png;base64," + base64.b64encode(png).decode("ascii")},
+        "image_url": {"url": "data:image/png;base64,"
+                      + base64.b64encode(_held(png)).decode("ascii")},
     }
+
+
+def _held(png: bytes) -> bytes:
+    try:
+        image = Image.open(BytesIO(png))
+        width, height = image.size
+    except (OSError, ValueError):
+        return png  # not a picture this side reads; the provider judges it
+    scale = min(1.0, MODEL_IMAGE_LONG_EDGE / max(width, height),
+                (MODEL_IMAGE_PIXELS / (width * height)) ** 0.5)
+    if scale >= 1.0:
+        return png
+    # Rounded down, so neither limit is passed; the long edge exactly at its limit when it binds.
+    size = (max(1, int(width * scale + 1e-9)), max(1, int(height * scale + 1e-9)))
+    out = BytesIO()
+    image.resize(size, Image.Resampling.LANCZOS).save(out, format="PNG")
+    return out.getvalue()
 
 
 @dataclass(frozen=True, slots=True)

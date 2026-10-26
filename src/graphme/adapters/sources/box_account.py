@@ -21,7 +21,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from graphme.adapters.sources.google import PENDING_SECONDS, Client, NotConnected, Vault
+from graphme.adapters.sources.sign_in import PENDING_SECONDS, Client, NotConnected, Vault
 
 AUTH = "https://account.box.com/api/oauth2/authorize"
 TOKEN = "https://api.box.com/oauth2/token"

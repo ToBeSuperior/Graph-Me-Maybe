@@ -602,3 +602,19 @@ def test_a_build_says_how_far_its_reading_is_and_ends_whole(
 
     assert until(lambda: build.state == "done"), build
     assert build.percent == 100
+
+
+def test_an_office_file_sealed_by_a_password_or_rights_says_so(demo: Demo) -> None:
+    # An encrypted or rights-protected .xlsx/.docx/.pptx is not a zip but an OLE container;
+    # it failed as a "damaged" file, and the reader could not tell it needed unlocking.
+    class _Refused:
+        def render(self, source: Any, document_format: Any) -> Any:
+            raise RuntimeError("File is not a zip file")
+
+    demo.renderer = _Refused()  # type: ignore[assignment]
+    sealed = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + bytes(504)
+    session = demo.session(demo.add("Sealed Budget.xlsx", sealed))
+
+    demo._steps(session, demo._prepare)
+
+    assert session.state == "error" and session.error == state.PROTECTED

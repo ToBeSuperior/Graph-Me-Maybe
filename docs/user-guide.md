@@ -39,28 +39,14 @@ documents gets **No related documents**.
 
 ## Documents in Google Drive
 
-Files kept in your Google Drive can go into the graph without being copied to this computer:
-the app fetches a file only while it reads it, draws one of its pages or puts it in a download,
-and removes it after. It reads only the files you pick in Google's own picker (the `drive.file`
-permission) and never writes to Drive.
-
-Setting it up takes your own OAuth client, once:
-
-1. In the [Google Cloud console](https://console.cloud.google.com/), create a project and enable
-   the **Google Drive API** and the **Google Picker API**.
-2. Set up the OAuth consent screen (External, Testing) and add your Google account as a test user.
-3. Create an OAuth client ID of the type **Desktop app**.
-4. In the app, **Manage › Keys and model**, put in its client ID and secret.
-
-Then **Manage › Google Drive › Connect and pick files** opens your browser: sign in, pick files
-(or folders), and come back. **Build from Drive** reads them; run it again after editing files
-in Drive, and only the changed ones are read again -- the others are passed over by the content
-Drive states, without being fetched. A Drive document opens its original in Drive from the
-library (the link icon). **Disconnect** revokes the sign-in. Google Docs, Sheets and Slides
-(web formats) are not read yet; DOCX, PPTX, XLSX and PDF files are.
-
-The sign-in is kept in your system's credential store (Keychain on macOS, Credential Manager on
-Windows), never in `.env`. An app in "Testing" status signs in again after seven days.
+With Google's own desktop client, **Google Drive for desktop**, on this computer, **Manage ›
+Google Drive** finds the folder it keeps the drive in (`~/Library/CloudStorage/GoogleDrive-<account>`
+on a Mac; on Windows the drive letter it adds, `G:` by default, or `%USERPROFILE%\My Drive` when
+mirrored). The first time, it asks whether to connect; once connected it connects every time the
+app opens. Browse the folders -- double-click opens one -- check folders and files, and **Build
+from Google Drive**: no sign-in of the app's own and no approval from your company. A file kept
+online only is fetched by Google Drive as it is read. Google Docs, Sheets and Slides are links to
+the web, not files, and are not read; DOCX, PPTX, XLSX and PDF files are.
 
 ## Documents in Box
 
@@ -84,7 +70,7 @@ Then **Manage › Box › Connect Box** signs you in in the browser. Back in the
 folders and check what to read -- a checked folder is read with everything under it -- and
 **Build from Box**. Run it again after files change in Box: a file is known by the version Box
 states, and only new versions are fetched and read. **Disconnect** revokes the sign-in, which is
-kept in your system's credential store like Google Drive's.
+kept in your system's credential store (Keychain on macOS, Credential Manager on Windows).
 
 ## Asking
 

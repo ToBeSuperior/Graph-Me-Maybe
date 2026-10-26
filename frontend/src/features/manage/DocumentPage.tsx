@@ -15,6 +15,7 @@ import { OutlineGraph } from '../../graph/OutlineGraph';
 import { kindOf, outlineOf } from '../../graph/outline';
 import { clip, formatOf, shownName, stem } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import { reason } from '../../lib/reasons';
 import { keys, useBuild } from '../../lib/queries';
 import { pageName, pageNameAt, usePages } from '../../lib/pages';
 import { PagesPending, PageTabs } from '../../components/PageTabs';
@@ -68,7 +69,7 @@ function DemoDocument({ doc }: { doc: string }) {
   const s = sheets.data;
   if ((sheets.error as { status?: number } | null)?.status === 404) return <NotFound />;
   const took = s?.elapsed != null ? t('took', s.elapsed) : null;
-  const status = !s ? null : s.state === 'error' ? { text: t('failed', s.error ?? ''), busy: false }
+  const status = !s ? null : s.state === 'error' ? { text: t('failed', reason(t, s.error ?? '')), busy: false }
     : s.state === 'cancelled' ? { text: t('cancelledRead'), busy: false }
     : WORKING.includes(s.state) ? { text: [s.progress
       ? t('readingProgress', s.progress.percent, t('stageName', s.progress.stage), s.progress.done, s.progress.total)

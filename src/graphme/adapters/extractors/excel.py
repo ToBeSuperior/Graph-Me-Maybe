@@ -73,6 +73,12 @@ def _ref_parts(match: re.Match[str], dollar: str = "") -> tuple[str, str]:
         cell_ref += f":{dollar}{match.group('c2')}{dollar}{match.group('r2')}"
     return sheet, cell_ref
 
+def _bounds(cell_ref: str) -> tuple[int, int, int, int]:
+    """`cell_ref` ("A1" or "A1:B2") as `iter_rows`' min_row, max_row, min_col, max_col."""
+    min_col, min_row, max_col, max_row = range_boundaries(cell_ref)
+    return min_row, max_row, min_col, max_col
+
+
 DATA_BLOCK_ROWS = 100
 """How many rows running, each holding two values or more, make a table with no border.
 
@@ -1444,7 +1450,8 @@ class ExcelExtractor:
             cell.value
             if cell.value is not None or fallback_target is None
             else fallback_target.cell(row=cell.row, column=cell.column).value
-            for row in target[cell_ref]
+            # A range of one cell is one cell to `target[...]`, not rows of cells.
+            for row in target.iter_rows(*_bounds(cell_ref))
             for cell in row
         ]
 

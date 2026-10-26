@@ -51,8 +51,6 @@ ENV_FIELDS = {
     "GRAPHME_NEO4J_HEAP": "neo4j_heap",
     "GRAPHME_API_KEY": "server_key",
     "GRAPHME_NEO4J_PAGECACHE": "neo4j_pagecache",
-    "GRAPHME_GOOGLE_CLIENT_ID": "google_client_id",
-    "GRAPHME_GOOGLE_CLIENT_SECRET": "google_client_secret",
     "GRAPHME_BOX_CLIENT_ID": "box_client_id",
     "GRAPHME_BOX_CLIENT_SECRET": "box_client_secret",
 }
@@ -188,9 +186,6 @@ class Settings(BaseModel):
     neo4j_password: str | None = Field(default=None, repr=False)
     """Only for a Neo4j run with a password; the one started here needs none."""
     server_key: str | None = Field(default=None, repr=False)
-    google_client_id: str | None = None
-    """The user's own OAuth client (Desktop app) that reads the Google Drive files they pick."""
-    google_client_secret: str | None = Field(default=None, repr=False)
     box_client_id: str | None = None
     """The user's own Box app (OAuth 2.0, user authentication) that reads what they pick."""
     box_client_secret: str | None = Field(default=None, repr=False)

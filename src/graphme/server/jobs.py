@@ -55,6 +55,8 @@ STARTING = "the graph DB is starting -- this carries on by itself once it is rea
 UNREAD = f"could not be read -- the file may be damaged or hold nothing readable {IN_LOG}"
 PAGE_UNREAD = f"this page could not be read {IN_LOG}"
 UNDRAWN = f"the pages could not be drawn {IN_LOG}"
+PROTECTED = ("the file is locked by a password or rights protection -- open it in Office, remove "
+             "the protection, and add it again")
 
 
 def _mark_failed(session: Session, pages: Iterable[RenderedPage], error: Exception) -> None:

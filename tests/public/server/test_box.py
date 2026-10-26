@@ -3,7 +3,6 @@ folders, files and values."""
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -13,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from graphme import processes
 from graphme.adapters.sources.box_account import REVOKE, TOKEN
-from graphme.adapters.sources.google import FileVault
+from graphme.adapters.sources.sign_in import FileVault
 from graphme.server import create_app, state
 from graphme.server.state import Demo
 from tests.public.server.conftest import FakeSpace, read_as, until
@@ -167,154 +166,3 @@ def test_another_sites_page_cannot_connect_or_build(demo: Demo, opened: list[str
     assert client.post("/v1/cloud/box/connect", headers=elsewhere).status_code == 403
     assert client.post("/v1/cloud/box/build", headers=elsewhere).status_code == 403
     assert opened == []
-
-
-def _box_drive(tmp_path: Any) -> Any:
-    root = tmp_path / "Box"
-    (root / "Specs").mkdir(parents=True)
-    (root / "Specs" / "Valve Spec.docx").write_bytes(b"docx")
-    (root / "Leak Test Procedure.pdf").write_bytes(b"%PDF-1.4")
-    return root
-
-
-def test_box_drive_on_this_machine_is_found_and_browsed(demo: Demo, tmp_path: Any) -> None:
-    root = _box_drive(tmp_path)
-    demo.box_drive = lambda: root  # type: ignore[method-assign]
-    client = TestClient(create_app(demo), base_url=BASE)
-
-    asked = client.get("/v1/box-drive").json()
-    refused = client.get("/v1/box-drive/folders", params={"path": "Specs"})
-    connected = client.post("/v1/box-drive/connect").json()
-    specs = client.get("/v1/box-drive/folders", params={"path": "Specs"}).json()
-
-    # Found, but not read until the user says to; then remembered for every start.
-    assert asked == {"found": True, "root": str(root), "connected": False}
-    assert refused.status_code == 409
-    assert connected == {"found": True, "root": str(root), "connected": True}
-    assert Demo(demo.settings, renderer=None,  # type: ignore[arg-type]
-                root=demo.root).box_drive_connected()
-    assert client.delete("/v1/box-drive").json()["connected"] is False
-    assert [i["name"] for i in specs["items"]] == ["Valve Spec.docx"]
-
-
-def test_without_box_drive_the_page_is_told_so(demo: Demo) -> None:
-    demo.box_drive = lambda: None  # type: ignore[method-assign]
-    client = TestClient(create_app(demo), base_url=BASE)
-
-    assert client.get("/v1/box-drive").json() == {"found": False, "root": None,
-                                                    "connected": False}
-    assert client.get("/v1/box-drive/folders", params={"path": ""}).status_code == 404
-
-
-def test_nothing_above_box_drive_is_listed_once_connected(demo: Demo, tmp_path: Any) -> None:
-    root = _box_drive(tmp_path)
-    demo.box_drive = lambda: root  # type: ignore[method-assign]
-    client = TestClient(create_app(demo), base_url=BASE)
-    client.post("/v1/box-drive/connect")
-
-    assert client.get("/v1/box-drive/folders", params={"path": ".."}).status_code == 400
-
-
-def test_another_sites_page_cannot_connect_box_drive(demo: Demo, tmp_path: Any) -> None:
-    demo.box_drive = lambda: _box_drive(tmp_path)  # type: ignore[method-assign]
-    client = TestClient(create_app(demo), base_url=BASE)
-
-    refused = client.post("/v1/box-drive/connect", headers={"origin": "https://elsewhere.invented"})
-
-    assert refused.status_code == 403
-
-
-def test_what_is_checked_in_box_drive_is_built_together(
-    demo: Demo, space: FakeSpace, tmp_path: Any
-) -> None:
-    root = _box_drive(tmp_path)
-    demo.box_drive = lambda: root  # type: ignore[method-assign]
-    demo._run = read_as("a", "a.docx")  # type: ignore[method-assign]
-    client = TestClient(create_app(demo), base_url=BASE)
-
-    started = client.post("/v1/jobs/build", json={"paths": [
-        str(root / "Specs"), str(root / "Leak Test Procedure.pdf")]})
-
-    assert started.status_code == 202
-    assert until(lambda: client.get(f"/v1/jobs/{started.json()['id']}").json()["state"] == "done")
-    assert sorted(Path(p).name for p in demo.catalog.values()) == [
-        "Leak Test Procedure.pdf", "Valve Spec.docx"]
-    assert client.post("/v1/jobs/build", json={"paths": [str(root / "nope")]}).status_code == 400
-
-
-def test_a_folder_slow_to_list_is_looked_through_behind_not_in_the_request(
-    demo: Demo, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Box Drive lists a folder by asking Box: a large one takes minutes, and a build that walked
-    # it inside the request answered nothing until it was done.
-    import threading
-    import time
-
-    from graphme.server import app as server_app
-
-    root = _box_drive(tmp_path)
-    gate = threading.Event()
-    walk = server_app.documents_at
-
-    def slow(path: Any, **options: Any) -> Any:
-        gate.wait(5)
-        return walk(path, **options)
-
-    monkeypatch.setattr(server_app, "documents_at", slow)
-    demo._run = read_as("a", "a.docx")  # type: ignore[method-assign]
-    client = TestClient(create_app(demo), base_url=BASE)
-
-    began = time.monotonic()
-    started = client.post("/v1/jobs/build", json={"paths": [str(root / "Specs")]})
-    answered = time.monotonic() - began
-    gate.set()
-
-    assert started.status_code == 202 and answered < 2
-    assert started.json()["state"] == "reading" and started.json()["total"] == 0
-    assert until(lambda: client.get(f"/v1/jobs/{started.json()['id']}").json()["state"] == "done")
-
-
-def test_a_folder_with_nothing_to_read_says_so_on_the_build(
-    demo: Demo, tmp_path: Any
-) -> None:
-    empty = tmp_path / "empty"
-    empty.mkdir()
-    client = TestClient(create_app(demo), base_url=BASE)
-
-    started = client.post("/v1/jobs/build", json={"paths": [str(empty)]})
-
-    assert started.status_code == 202
-    assert until(lambda: client.get(f"/v1/jobs/{started.json()['id']}").json()["state"] == "error")
-    assert "no readable document" in client.get(f"/v1/jobs/{started.json()['id']}").json()["error"]
-
-
-def test_a_folder_that_never_lists_is_said_and_the_rest_is_built(
-    demo: Demo, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import errno
-    import os
-
-    from graphme.application import ingest
-
-    root = _box_drive(tmp_path)
-    (root / "Stuck").mkdir()
-    real = os.scandir
-
-    def scandir(path: Any) -> Any:
-        if Path(path).name == "Stuck":
-            raise OSError(errno.ETIMEDOUT, "Operation timed out", str(path))
-        return real(path)
-
-    monkeypatch.setattr(ingest.os, "scandir", scandir)
-    monkeypatch.setattr(ingest, "RETRY_DELAYS", (0.0, 0.0))
-    monkeypatch.setattr(ingest, "REST_SECONDS", 0.0)
-    monkeypatch.setattr(ingest, "PACE_SECONDS", 0.0)
-    demo._run = read_as("a", "a.docx")  # type: ignore[method-assign]
-    client = TestClient(create_app(demo), base_url=BASE)
-
-    job = client.post("/v1/jobs/build", json={"paths": [str(root)]}).json()
-    assert until(lambda: client.get(f"/v1/jobs/{job['id']}").json()["state"] == "done")
-    done = client.get(f"/v1/jobs/{job['id']}").json()
-
-    assert done["looked"] == 2  # both documents found while looking
-    assert any(f.startswith("Stuck") for f in done["failed"])

@@ -2,7 +2,7 @@
 // invented documents, so the checks need no server, graph DB or model.
 import type { Page, Route } from '@playwright/test';
 
-interface Fake { boxDriveConnected: boolean; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; drive: { configured: boolean; connected: boolean; picked: number; built: number } }
+interface Fake { connected: { box: boolean; google: boolean }; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number }
 
 /** A job as `GET /v1/jobs` lists it, newest first. */
 type FakeJob = Record<string, unknown> & { id: string; kind: string; state: string };
@@ -30,7 +30,7 @@ const BUILD_STARTED = { id: 'bx', kind: 'build', state: 'reading', done: 0, tota
   known: 0, carried: 0, links: 0, skipped: 0, embedded: 0, error: null };
 
 export async function fakeApi(page: Page,
-  { box = true, boxDrive = true, empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[],
+  { box = true, boxDrive = true, googleDrive = true, empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[],
     progress = null as Record<string, unknown> | null, elapsed = null as number | null } = {}): Promise<Fake> {
   const fake: Fake = {
     searchModels: [
@@ -38,9 +38,8 @@ export async function fakeApi(page: Page,
         fetching: { done: 319724160, total: 639448320 }, error: null },
       { name: 'korean', model: 'KURE-v1', size: 437779008, installed: true, chosen: false, fetching: null, error: null },
     ],
-    boxDriveConnected: false, boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
-    installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0,
-    drive: { configured: true, connected: false, picked: 0, built: 0 } };
+    connected: { box: false, google: false }, boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
+    installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0 };
   const json = (route: Route, body: unknown, status = 200) =>
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/v1/**', async (route) => {
@@ -60,19 +59,25 @@ export async function fakeApi(page: Page,
       10: { name: 'Specs', path: [{ id: '0', name: 'All Files' }], items: [
         { id: 'f2', type: 'file', name: 'Valve Spec.docx', size: 64000 }] },
     };
-    const driveState = () => (boxDrive ? { found: true, root: '/Users/me/Library/CloudStorage/Box-Box', connected: fake.boxDriveConnected }
-      : { found: false, root: null, connected: false });
-    if (path === '/v1/box-drive' && method === 'DELETE') { fake.boxDriveConnected = false; return json(route, driveState()); }
-    if (path === '/v1/box-drive') return json(route, driveState());
-    if (path === '/v1/box-drive/connect') { fake.boxDriveConnected = true; return json(route, driveState()); }
-    if (path === '/v1/box-drive/folders') {
+    // A cloud drive's desktop client on this machine: Box Drive, Google Drive for desktop.
+    const desk = path.match(/^\/v1\/drives\/(box|google)(\/connect|\/folders)?$/);
+    if (desk) {
+      const kind = desk[1] as 'box' | 'google';
+      const top = kind === 'box' ? 'Box-Box' : 'GoogleDrive-me@invented.test';
+      const found = kind === 'box' ? boxDrive : googleDrive;
+      if (desk[2] === '/connect') fake.connected[kind] = true;
+      else if (!desk[2] && method === 'DELETE') fake.connected[kind] = false;
+      if (desk[2] !== '/folders') {
+        return json(route, found ? { found: true, root: `/Users/me/Library/CloudStorage/${top}`, connected: fake.connected[kind] }
+          : { found: false, root: null, connected: false });
+      }
       const at = url.searchParams.get('path') ?? '';
       const listed: Record<string, unknown> = {
-        '': { id: '', name: 'Box-Box', path: [], items: [
+        '': { id: '', name: top, path: [], items: [
           { id: 'Quality', type: 'folder', name: 'Quality', picked: false, readable: true, modified: 1767225600 },
           { id: 'Plan.pdf', type: 'file', name: 'Plan.pdf', picked: false, readable: true, size: 2400000, modified: 1767225600 },
           { id: 'notes.txt', type: 'file', name: 'notes.txt', picked: false, readable: false, size: 1200, modified: 1767225600 }] },
-        Quality: { id: 'Quality', name: 'Quality', path: [{ id: '', name: 'Box-Box' }], items: [
+        Quality: { id: 'Quality', name: 'Quality', path: [{ id: '', name: top }], items: [
           { id: 'Quality/Audit.docx', type: 'file', name: 'Audit.docx', picked: false, readable: true, size: 64000, modified: 1767225600 }] },
       };
       return json(route, listed[at]);
@@ -121,20 +126,6 @@ export async function fakeApi(page: Page,
     if (path === '/v1/graph/map') {
       return json(route, empty || fake.reset ? { documents: [], total: 0, links: [], similar: [] }
         : { documents: docs, total: docs.length, links: [{ from: 'proc', to: 'spec', count: 1, matched_by: ['number'] }], similar: [] });
-    }
-    if (path === '/v1/cloud/google') {
-      if (method === 'DELETE') Object.assign(fake.drive, { connected: false, picked: 0 });
-      const { configured, connected, picked } = fake.drive;
-      return json(route, { configured, connected, picked });
-    }
-    if (path === '/v1/cloud/google/connect') {
-      // The browser signs in and picks two files; the answer lands on the server meanwhile.
-      Object.assign(fake.drive, { connected: true, picked: 2 });
-      return json(route, { url: 'https://accounts.google.invented/o/oauth2/v2/auth?trigger_onepick=true' });
-    }
-    if (path === '/v1/cloud/google/build') {
-      fake.drive.built += 1;
-      return json(route, { id: 'drive-build', kind: 'build', state: 'reading', source: 'Google Drive' }, 202);
     }
     if (path === '/v1/jobs') return json(route, jobs);
     const cancel = path.match(/^\/v1\/jobs\/([^/]+)\/cancel$/);

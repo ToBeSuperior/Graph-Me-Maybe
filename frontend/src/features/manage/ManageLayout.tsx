@@ -5,6 +5,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { cn } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { BuildProgress } from '../upload/BuildProgress';
+import { BuildResult } from '../upload/BuildResult';
 import { AddFolderButton } from '../upload/FolderDrop';
 
 const item = ({ isActive }: { isActive: boolean }) =>
@@ -18,6 +19,7 @@ export function ManageLayout() {
       <aside className="flex flex-col gap-3 border-b border-line bg-subtle/50 p-3 md:border-r md:border-b-0">
         <AddFolderButton variant="primary" />
         <BuildProgress compact />
+        <BuildResult />
         <nav className="flex gap-1 overflow-x-auto md:flex-col" aria-label={t('navManage')}>
           <NavLink to="/manage" end className={item}><Files className="size-4" />{t('library')}</NavLink>
           <NavLink to="/manage/map" className={item}><Network className="size-4" />{t('mapTitle')}</NavLink>

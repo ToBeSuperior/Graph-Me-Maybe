@@ -38,11 +38,8 @@ from graphme.adapters.sources.box import Picked as BoxPicked
 from graphme.adapters.sources.box import web_url as box_web_url
 from graphme.adapters.sources.box_account import ACCOUNT as BOX_ACCOUNT
 from graphme.adapters.sources.box_account import BoxAccount
-from graphme.adapters.sources.box_drive import box_drive_root, listing
-from graphme.adapters.sources.drive import SCHEME as DRIVE_SCHEME
-from graphme.adapters.sources.drive import DriveSource
-from graphme.adapters.sources.drive import web_url as drive_web_url
-from graphme.adapters.sources.google import Client, GoogleAccount, Picked, vault
+from graphme.adapters.sources.desktop_drives import DESKTOP_DRIVES, listing
+from graphme.adapters.sources.sign_in import Client, vault
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import GraphRag
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
@@ -79,6 +76,7 @@ from graphme.server.jobs import (
     FINISHED,
     GONE,
     IN_LOG,
+    PROTECTED,
     STARTABLE,
     STARTING,
     STEP_STATES,
@@ -209,6 +207,21 @@ ROOT_PREFIX = "hierarchy-demo-"
 folder."""
 
 
+OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+"""How an OLE container begins. An Office file of the zip formats read here is in one only when
+Office sealed it -- a password or rights protection wraps the zip inside it."""
+
+
+def _sealed(session: Session) -> bool:
+    if session.format == DocumentFormat.PDF:
+        return False
+    try:
+        with open(session.source, "rb") as file:
+            return file.read(len(OLE_MAGIC)) == OLE_MAGIC
+    except OSError:
+        return False
+
+
 class Demo:
     def __init__(
         self, settings: Settings, renderer: PageRenderer, root: Path | None = None
@@ -257,11 +270,9 @@ class Demo:
         """Pages drawn for a reader, the latest PREVIEWS_KEPT: nothing is kept across starts."""
         self.previewing = threading.Lock()
         self.sources = Sources()
-        self._google: tuple[Client, GoogleAccount] | None = None
         self.origins: dict[str, tuple[str, dict[str, str | None]]] = {}
         """A file fetched from a cloud drive for a build: its address there, and what is
         recorded about it."""
-        self.sources.add(DRIVE_SCHEME, _Lazy(self._drive, drive_web_url))
         self.sources.add(BOX_SCHEME, _Lazy(self._box_source, box_web_url))
         self._box: tuple[Client, BoxAccount] | None = None
         """Where originals are read from: this machine, and a connected cloud drive."""
@@ -500,47 +511,6 @@ class Demo:
                 self.previews.popitem(last=False)
         return png
 
-    # Google Drive --------------------------------------------------------------------------
-
-    def google(self) -> GoogleAccount:
-        """The Google account the user signs in with, through their own OAuth client."""
-        client_id = self.settings.google_client_id
-        if not client_id:
-            raise LookupError("Google Drive is not set up -- put in your OAuth client (Desktop "
-                              "app) in Keys and model")
-        client = Client(id=client_id, secret=self.settings.google_client_secret)
-        with self.opening:
-            if self._google is None or self._google[0] != client:
-                self._google = (client, GoogleAccount(
-                    client, self.client, vault(self.root / "google.token")))
-            return self._google[1]
-
-    @property
-    def picked(self) -> list[str]:
-        """The Drive files the user picked, in the order picked."""
-        try:
-            said = json.loads((self.root / "google.json").read_text(encoding="utf-8"))
-            return [str(i) for i in said.get("picked", [])]
-        except (OSError, ValueError, AttributeError):
-            return []
-
-    def google_state(self) -> dict[str, Any]:
-        configured = bool(self.settings.google_client_id)
-        return {"configured": configured,
-                "connected": configured and self.google().connected(),
-                "picked": len(self.picked)}
-
-    def google_picked(self, picked: Picked) -> int:
-        """`picked` kept beside what was picked before; how many are kept now."""
-        kept = list(dict.fromkeys([*self.picked, *picked.file_ids]))
-        self.root.mkdir(parents=True, exist_ok=True)
-        (self.root / "google.json").write_text(json.dumps({"picked": kept}), encoding="utf-8")
-        return len(kept)
-
-    def google_disconnect(self) -> None:
-        self.google().disconnect()
-        (self.root / "google.json").unlink(missing_ok=True)
-
     def open_path(self, path: str) -> str:
         """A document on this machine, opened by its path, and its id. One kept under
         `uploads/<id>/` -- uploaded, or carried in another document -- is that id: opened
@@ -603,35 +573,6 @@ class Demo:
             for doc in docs:
                 if doc in self.origins:
                     shutil.rmtree(Path(self.catalog.get(doc, "")).parent, ignore_errors=True)
-
-    def build_google(self) -> CorpusBuild:
-        """The picked Drive files read into the space: what the space holds already, by the
-        content Drive states (`sha256Checksum`), is passed over without being fetched; the rest
-        is fetched for the build and removed after it. A file changed since is read again and
-        replaces its earlier reading."""
-        drive = self._drive()
-        found, lost = drive.documents(self.picked)
-        held = self.space().contents([f.sha256 for f in found if f.sha256])
-        docs: list[str] = []
-        for wanted in (f for f in found if f.sha256 not in held):
-            folder = self.root / "drive" / wanted.id
-            shutil.rmtree(folder, ignore_errors=True)
-            folder.mkdir(parents=True)
-            with drive.open_copy(wanted.origin) as copy:
-                kept = folder / copy.name
-                shutil.copyfile(copy, kept)
-            doc = self.open_path(str(kept))
-            self.origins[doc] = (wanted.origin, {
-                "drive_file_id": wanted.id, "drive_revision": wanted.revision,
-                "web_url": wanted.web_url or drive.web_url(wanted.origin)})
-            docs.append(doc)
-        build = self.build_corpus(docs, "Google Drive")
-        build.known += len(found) - len(docs)
-        build.failed += [f"{file_id}: no longer readable in Google Drive" for file_id in lost]
-        return build
-
-    def _drive(self) -> DriveSource:
-        return DriveSource(self.client, self.google().access_token, self.root / "drive-copies")
 
     # Box ------------------------------------------------------------------------------------
 
@@ -728,37 +669,39 @@ class Demo:
         build.failed += [f"{name}: no longer readable in Box" for name in lost]
         return build
 
-    @staticmethod
-    def box_drive() -> Path | None:
-        """Box Drive's folder on this machine, when it is here."""
-        return box_drive_root(Path.home(), platform=sys.platform, environ=os.environ)
+    # A cloud drive's desktop client ---------------------------------------------------------
 
-    def box_drive_connected(self) -> bool:
-        """Whether the user said to read Box Drive: asked once, then kept for every start."""
+    @staticmethod
+    def desktop_drive(kind: str) -> Path | None:
+        """The folder `kind`'s desktop client shows on this machine, when it is here."""
+        return DESKTOP_DRIVES[kind](Path.home(), platform=sys.platform, environ=os.environ)
+
+    def drive_connected(self, kind: str) -> bool:
+        """Whether the user said to read `kind`: asked once, then kept for every start."""
         try:
-            said = json.loads((self.root / "box-drive.json").read_text(encoding="utf-8"))
+            said = json.loads((self.root / f"{kind}-drive.json").read_text(encoding="utf-8"))
             return bool(said.get("connected"))
         except (OSError, ValueError, AttributeError):
             return False
 
-    def box_drive_connect(self, connected: bool) -> None:
+    def drive_connect(self, kind: str, connected: bool) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        (self.root / "box-drive.json").write_text(json.dumps({"connected": connected}),
-                                                  encoding="utf-8")
+        (self.root / f"{kind}-drive.json").write_text(json.dumps({"connected": connected}),
+                                                      encoding="utf-8")
 
-    def box_drive_state(self) -> dict[str, Any]:
-        root = self.box_drive()
+    def drive_state(self, kind: str) -> dict[str, Any]:
+        root = self.desktop_drive(kind)
         return {"found": root is not None, "root": str(root) if root else None,
-                "connected": root is not None and self.box_drive_connected()}
+                "connected": root is not None and self.drive_connected(kind)}
 
-    def box_drive_folder(self, relative: str) -> dict[str, Any]:
-        """A folder of Box Drive's, a level at a time; LookupError when Box Drive is not
-        here, Busy until the user has said to read it."""
-        root = self.box_drive()
+    def drive_folder(self, kind: str, relative: str) -> dict[str, Any]:
+        """A folder of `kind`'s, a level at a time; LookupError when its client is not here,
+        Busy until the user has said to read it."""
+        root = self.desktop_drive(kind)
         if root is None:
-            raise LookupError("Box Drive is not on this machine")
-        if not self.box_drive_connected():
-            raise Busy("Box Drive is not connected -- connect it first")
+            raise LookupError(f"{kind} drive is not on this machine")
+        if not self.drive_connected(kind):
+            raise Busy(f"{kind} drive is not connected -- connect it first")
         return listing(root, relative)
 
     def _box_source(self) -> BoxSource:
@@ -1086,10 +1029,10 @@ class Demo:
             session.state, session.error = "cancelled", CANCELLED
         except Undrawn:  # the renderer failed, not the file
             traceback.print_exc(file=sys.stderr)
-            session.state, session.error = "error", UNDRAWN
+            session.state, session.error = "error", PROTECTED if _sealed(session) else UNDRAWN
         except Exception:
             traceback.print_exc(file=sys.stderr)
-            session.state, session.error = "error", UNREAD
+            session.state, session.error = "error", PROTECTED if _sealed(session) else UNREAD
 
     def _builder(self, session: Session) -> DocumentGraphBuilder:
         """The same graph builder the corpus build uses, over this document's

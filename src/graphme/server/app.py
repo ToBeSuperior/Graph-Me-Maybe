@@ -179,26 +179,10 @@ def create_app(
 
     v1 = APIRouter(prefix="/v1", dependencies=[Depends(keyed)])
 
-    @app.get("/v1/cloud/google/callback", response_class=HTMLResponse, include_in_schema=False)
-    def google_callback(request: Request, state: str = "", code: str | None = None,
-                        picked_file_ids: str | None = None, error: str | None = None) -> str:
-        """Where Google sends the browser back. Outside the key: it is the browser's own
-        visit, carrying no cookie of the app's window -- the sign-in's state, started by this
-        process, is what proves it."""
-        if not from_here(request):
-            raise HTTPException(403, "only this machine's browser may finish a sign-in")
-        try:
-            kept = demo.google_picked(demo.google().finish(
-                state=state, code=code, picked_file_ids=picked_file_ids, error=error))
-        except (LookupError, ValueError) as refusal:
-            return _closing_page(f"Google Drive was not connected: {refusal}")
-        return _closing_page(f"Google Drive is connected; {kept} picked. You can close this tab "
-                             "and go back to Graph-Me-Maybe.")
-
     @app.get("/v1/cloud/box/callback", response_class=HTMLResponse, include_in_schema=False)
     def box_callback(request: Request, state: str = "", code: str | None = None,
                      error: str | None = None) -> str:
-        """Where Box sends the browser back -- outside the key, as Google's is: the sign-in's
+        """Where Box sends the browser back -- outside the key: the sign-in's
         state, started by this process, is what proves it."""
         if not from_here(request):
             raise HTTPException(403, "only this machine's browser may finish a sign-in")
@@ -267,34 +251,6 @@ def create_app(
         demo.search_models.remove(search_model(name))
         return demo.search_models.listed()
 
-    # Google Drive ---------------------------------------------------------------------------
-
-    @v1.get("/cloud/google", response_model=api.GoogleDrive)
-    def google_state() -> dict[str, Any]:
-        with refused():
-            return demo.google_state()
-
-    @v1.post("/cloud/google/connect", response_model=api.GoogleConnect)
-    def google_connect(request: Request) -> dict[str, str]:
-        """Sign in to Google and pick files, in the browser: Google's own picker, which grants
-        this app the files picked and nothing else."""
-        if not from_here(request):
-            raise HTTPException(403, "Google Drive can only be connected from this machine")
-        with refused():
-            url = demo.google().start(f"{request.base_url}v1/cloud/google/callback")
-        with contextlib.suppress(Exception):  # the page opens it when the server cannot
-            processes.open_in_browser(url)
-        return {"url": url}
-
-    @v1.delete("/cloud/google", response_model=api.GoogleDrive)
-    def google_disconnect(request: Request) -> dict[str, Any]:
-        """The sign-in revoked at Google and forgotten here, with the files picked."""
-        if not from_here(request):
-            raise HTTPException(403, "Google Drive can only be disconnected from this machine")
-        with refused():
-            demo.google_disconnect()
-            return demo.google_state()
-
     # Box ----------------------------------------------------------------------------------
 
     def here(request: Request, what: str) -> None:
@@ -337,36 +293,38 @@ def create_app(
         with refused():
             return demo.box_pick([BoxPicked(i.type, i.id, i.name) for i in change.items])
 
-    @v1.get("/box-drive", response_model=api.BoxDrive)
-    def box_drive() -> dict[str, Any]:
-        """Whether Box Drive's folder is on this machine, where, and whether the user said to
-        read it."""
-        return demo.box_drive_state()
+    # A cloud drive's desktop client --------------------------------------------------------
 
-    @v1.post("/box-drive/connect", response_model=api.BoxDrive)
-    def box_drive_connect(request: Request) -> dict[str, Any]:
-        """Box Drive read from now on, and on every start."""
+    @v1.get("/drives/{kind}", response_model=api.DesktopDrive)
+    def desktop_drive(kind: api.DriveKind) -> dict[str, Any]:
+        """Whether the drive's desktop client shows it on this machine, where, and whether the
+        user said to read it."""
+        return demo.drive_state(kind)
+
+    @v1.post("/drives/{kind}/connect", response_model=api.DesktopDrive)
+    def desktop_drive_connect(kind: api.DriveKind, request: Request) -> dict[str, Any]:
+        """The drive read from now on, and on every start."""
         if not from_here(request):
-            raise HTTPException(403, "Box Drive can only be connected from this machine")
-        if demo.box_drive() is None:
-            raise HTTPException(404, "Box Drive is not on this machine")
-        demo.box_drive_connect(True)
-        return demo.box_drive_state()
+            raise HTTPException(403, "a drive can only be connected from this machine")
+        if demo.desktop_drive(kind) is None:
+            raise HTTPException(404, f"{kind} drive is not on this machine")
+        demo.drive_connect(kind, True)
+        return demo.drive_state(kind)
 
-    @v1.delete("/box-drive", response_model=api.BoxDrive)
-    def box_drive_disconnect(request: Request) -> dict[str, Any]:
-        """Box Drive no longer read; asked again next time."""
+    @v1.delete("/drives/{kind}", response_model=api.DesktopDrive)
+    def desktop_drive_disconnect(kind: api.DriveKind, request: Request) -> dict[str, Any]:
+        """The drive no longer read; asked again next time."""
         if not from_here(request):
-            raise HTTPException(403, "Box Drive can only be disconnected from this machine")
-        demo.box_drive_connect(False)
-        return demo.box_drive_state()
+            raise HTTPException(403, "a drive can only be disconnected from this machine")
+        demo.drive_connect(kind, False)
+        return demo.drive_state(kind)
 
-    @v1.get("/box-drive/folders", response_model=api.BoxFolder)
-    def box_drive_folder(path: str = "") -> dict[str, Any]:
-        """A Box Drive folder a level at a time, `path` relative to Box Drive's folder: every
-        file as a folder shows it, each said whether it can be read here."""
+    @v1.get("/drives/{kind}/folders", response_model=api.BoxFolder)
+    def desktop_drive_folder(kind: api.DriveKind, path: str = "") -> dict[str, Any]:
+        """A folder of the drive's a level at a time, `path` relative to its top: every file as
+        a folder shows it, each said whether it can be read here."""
         with refused():
-            return demo.box_drive_folder(path)
+            return demo.drive_folder(kind, path)
 
     @v1.post("/cloud/box/build", status_code=202, response_model=api.BuildState)
     def box_build(request: Request, response: Response) -> dict[str, Any]:
@@ -796,14 +754,6 @@ def create_app(
         if not known:
             raise HTTPException(400, "no file to read -- POST /v1/files first")
         return known
-
-    @v1.post("/cloud/google/build", status_code=202, response_model=api.BuildState)
-    def google_build(response: Response) -> dict[str, Any]:
-        """The picked Drive files into the space: changed ones read again, unchanged ones
-        passed over by the content Drive states, without being fetched."""
-        opened()
-        with refused():
-            return started(demo.build_google(), response)
 
     @v1.post("/jobs/build", status_code=202, response_model=api.BuildState)
     def build(request: api.BuildRequest, response: Response) -> dict[str, Any]:
