@@ -20,6 +20,7 @@ export const keys = {
   exportJob: ['export'] as const,
   settings: ['settings'] as const,
   searchModels: ['searchModels'] as const,
+  workspaces: ['workspaces'] as const,
 };
 
 /** The graph changed: what is drawn from it is asked again. A question's search and answer are
@@ -100,3 +101,7 @@ export const useSearchModels = () =>
     refetchInterval: (query) => (query.state.data?.some((m) => m.fetching) ? 1000 : false),
   });
 
+
+/** The graphs kept apart, and the one open; `available` false on a server with its own graph DB. */
+export const useWorkspaces = () =>
+  useQuery({ queryKey: keys.workspaces, queryFn: () => call(api.GET('/v1/workspaces')) });

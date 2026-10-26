@@ -435,3 +435,48 @@ test('while a build runs the Drive page says so and does not start another', asy
   await expect(page.getByRole('button', { name: 'Google Drive에서 그래프 만들기' })).toBeDisabled();
   await expect(page.getByText('그래프를 만드는 중입니다', { exact: false })).toBeVisible();
 });
+
+test('the workspace open is named in the top bar; another is opened, made and renamed there', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto('/manage');
+  const menu = page.getByRole('button', { name: /워크스페이스: Default/ });
+  await menu.click();
+  await page.getByRole('menuitemradio', { name: 'Invented audits' }).click();
+  await expect(page.getByRole('button', { name: /워크스페이스: Invented audits/ })).toBeVisible();
+  expect(fake.opened).toEqual(['w2']);
+
+  await page.getByRole('button', { name: /워크스페이스: Invented audits/ }).click();
+  await page.getByRole('menuitem', { name: '새 워크스페이스' }).click();
+  await page.getByRole('dialog').getByRole('textbox').fill('Invented project');
+  await page.getByRole('dialog').getByRole('button', { name: '만들기' }).click();
+  await expect(page.getByRole('button', { name: /워크스페이스: Invented project/ })).toBeVisible();
+  expect(fake.opened).toEqual(['w2', 'w3']);  // made, then opened
+
+  await page.getByRole('button', { name: /워크스페이스: Invented project/ }).click();
+  await page.getByRole('menuitem', { name: '이름 바꾸기' }).click();
+  await expect(page.getByRole('dialog').getByRole('textbox')).toHaveValue('Invented project');
+  await page.getByRole('dialog').getByRole('textbox').fill('Invented pilot');
+  await page.getByRole('dialog').getByRole('button', { name: '저장' }).click();
+  await expect(page.getByRole('button', { name: /워크스페이스: Invented pilot/ })).toBeVisible();
+});
+
+test('a workspace is deleted only once its name is typed, and never the one open', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto('/manage/danger');
+  const section = page.getByTestId('delete-workspace');
+  await expect(section.getByRole('combobox')).not.toContainText('Default');  // the one open
+  const remove = section.getByRole('button', { name: '워크스페이스 삭제' });
+  await expect(remove).toBeDisabled();
+  await section.getByRole('textbox').fill('Invented audit');
+  await expect(remove).toBeDisabled();
+  await section.getByRole('textbox').fill('Invented audits');
+  await remove.click();
+  await expect.poll(() => fake.deletedWorkspaces).toEqual(['w2']);
+});
+
+test('a server with its own graph DB shows no workspaces', async ({ page }) => {
+  await fakeApi(page, { workspaces: false });
+  await page.goto('/manage/danger');
+  await expect(page.getByRole('button', { name: /워크스페이스:/ })).toHaveCount(0);
+  await expect(page.getByTestId('delete-workspace')).toHaveCount(0);
+});

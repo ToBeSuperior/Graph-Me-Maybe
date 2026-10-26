@@ -129,7 +129,7 @@ export function PageViewer({ src, alt, width, height, marks = [], className }: {
                   // Multiplied like a highlighter -- the page is white in either theme -- and drawn
                   // hugging its unit: side by side cells' marks overlap otherwise and hide the words.
                   className={cn('pointer-events-none absolute rounded-[3px] mix-blend-multiply',
-                    m.strong ? 'bg-mark/45 outline-1 outline-accent' : 'bg-mark/25')}
+                    m.strong ? 'bg-page-mark/45 outline-1 outline-accent' : 'bg-page-mark/25')}
                   style={{ left: l * fit - 1, top: tp * fit - 1, width: (r - l) * fit + 2, height: (b - tp) * fit + 2 }} />
               );
             })}

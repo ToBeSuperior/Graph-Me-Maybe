@@ -5,6 +5,22 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.38] - 2026-10-26
+
+### Added
+
+- Workspaces: graphs kept apart, each with its own documents, passages and links. The one open is
+  named in the top bar; its menu opens another, makes one or renames it. Opening another takes a
+  few seconds; the one left stops behind. Danger zone deletes a workspace once its name is typed.
+
+### Changed
+
+- Box Drive and Google Drive folders fill the page, the name column taking the room.
+
+### Fixed
+
+- A highlighted passage on a page is a highlighter's yellow in the dark theme too, not brown.
+
 ## [0.1.37] - 2026-10-26
 
 ### Added

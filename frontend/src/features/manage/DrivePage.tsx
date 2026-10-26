@@ -9,7 +9,7 @@ export function DrivePage() {
   return (
     <div>
       <PageHeader title={t('driveTitle')} description={t('driveBody')} />
-      <div className="grid max-w-3xl gap-4 p-6 text-sm">
+      <div className="grid gap-4 p-6 text-sm">
         <DesktopDrive kind="google" app="Google Drive" />
       </div>
     </div>

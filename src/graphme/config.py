@@ -182,6 +182,9 @@ class Settings(BaseModel):
     local_neo4j: Path | None = None
     """The app's home, whose own Neo4j is the graph space (`local_neo4j.py`): set whenever the
     settings name no GRAPHME_NEO4J_URI."""
+    local_graph: Path | None = None
+    """The folder of the workspace whose graph the app's own Neo4j runs over (`neo4j-data/`
+    in it); None for the home's own graph. Set by the server, never read from the environment."""
     neo4j_user: str = "neo4j"
     neo4j_password: str | None = Field(default=None, repr=False)
     """Only for a Neo4j run with a password; the one started here needs none."""

@@ -40,6 +40,7 @@ from graphme.adapters.sources.box_account import ACCOUNT as BOX_ACCOUNT
 from graphme.adapters.sources.box_account import BoxAccount
 from graphme.adapters.sources.desktop_drives import DESKTOP_DRIVES, listing
 from graphme.adapters.sources.sign_in import Client, vault
+from graphme.adapters.storage import local_neo4j
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import GraphRag
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
@@ -93,6 +94,7 @@ from graphme.server.jobs import (
     _mark_failed,
 )
 from graphme.server.search_models import SearchModels
+from graphme.server.workspaces import Workspaces
 
 VLM_CALLS_AT_ONCE = 24
 """Model calls in flight across every document, each reading and each settling call counted
@@ -222,10 +224,23 @@ def _sealed(session: Session) -> bool:
         return False
 
 
+def _let_go(graph: GraphMe, root: Path) -> None:
+    """A workspace's graph left: its connection closed, then the Neo4j over it stopped."""
+    try:
+        graph.close()
+    finally:
+        local_neo4j.stop_graph(root)
+
+
 class Demo:
     def __init__(
         self, settings: Settings, renderer: PageRenderer, root: Path | None = None
     ) -> None:
+        # The app's own Neo4j keeps a graph per workspace; the one open when the app ended opens.
+        self.workspaces = Workspaces(settings.local_neo4j) if settings.local_neo4j else None
+        if self.workspaces is not None:
+            settings = settings.model_copy(
+                update={"local_graph": self.workspaces.graph(self.workspaces.active)})
         # The same settings build-graph reads: model, endpoint, readings. A demo that picked its
         # own defaults showed an outline the pipeline would not have produced.
         self.settings = settings
@@ -291,17 +306,78 @@ class Demo:
         self._opener: threading.Thread | None = None
         self._starting_opener = threading.Lock()
         self._open_failed: Exception | None = None
+        self._letting_go: tuple[Path, threading.Thread] | None = None
+        """The graph left last, and what is stopping its Neo4j."""
 
     def reconfigure(self, settings: Settings) -> None:
         """New keys or model, taken up from the next reading and the next question. The graph
         space is kept: what it is reached by is not among what changes."""
         searched_with = self.settings.embedding_provider
+        settings = settings.model_copy(update={"local_graph": self.settings.local_graph})
         self.settings = settings
         self.graph.settings = settings
         with self.opening_space:
             self.graph.forget_rag()
         if settings.embedding_provider != searched_with:
             self.search_models.chosen_changed()
+
+    # Workspaces ---------------------------------------------------------------------------
+
+    def workspace_registry(self) -> Workspaces:
+        if self.workspaces is None:
+            raise Busy("workspaces are the app's own graph DB's -- this server uses another")
+        return self.workspaces
+
+    def switch_workspace(self, workspace: str) -> None:
+        """`workspace`'s graph opened and the app moved onto it once it answers -- a few
+        seconds; the one left is closed and stopped behind, not waited for."""
+        spaces = self.workspace_registry()
+        spaces.item(workspace)
+        if workspace == spaces.active:
+            return
+        with self.building:
+            busy = [s for s in self.sessions.values() if s.state not in (*STARTABLE, *FINISHED)]
+            if self.build.state in BUILDING or self.export.state in EXPORTING or busy:
+                raise Busy("a build, a reading or an export is running -- switch once it ends")
+            settings = self.settings.model_copy(update={"local_graph": spaces.graph(workspace)})
+            leaving = self._letting_go
+            if leaving is not None and leaving[0] == (settings.local_graph or spaces.home):
+                # Back to the graph just left: its Neo4j holds the folder until it has stopped.
+                leaving[1].join()
+            fresh = GraphMe(settings)
+            fresh.graph_space()  # the new one answers before the old one is let go
+            with self.opening_space:
+                old, self.graph, self.settings = self.graph, fresh, settings
+                self._forget_workspace()
+            spaces.activate(workspace)
+        left = old.settings.local_graph or spaces.home
+        going = threading.Thread(target=_let_go, args=(old, left), daemon=True)
+        self._letting_go = (left, going)
+        going.start()
+        self.search_models.embed_behind()  # a search model chosen while it was closed
+
+    def delete_workspace(self, workspace: str) -> None:
+        """`workspace` and its graph deleted; never the one open."""
+        spaces = self.workspace_registry()
+        if self._letting_go is not None:
+            self._letting_go[1].join()  # its Neo4j may be the one stopping
+        graph = spaces.graph(workspace)
+        if workspace != spaces.active:
+            local_neo4j.stop_graph(graph or spaces.home)
+        spaces.delete(workspace)
+
+    def _forget_workspace(self) -> None:
+        """What this start knew of the graph just left: its jobs, readings, files and pages."""
+        self.jobs.clear()
+        self.build, self.export = CorpusBuild(), ExportJob()
+        self.sessions.clear()
+        self.catalog.clear()
+        self.hashes.clear()
+        self.previews.clear()
+        self.putting = set()
+        self.origins.clear()
+        self._opener, self._open_failed = None, None
+        self.dump_path.unlink(missing_ok=True)
 
     def space(self, *, wait: float = -1) -> Neo4jGraphSpace:
         """The graph space every built document is put in, opened on first use. A build waits

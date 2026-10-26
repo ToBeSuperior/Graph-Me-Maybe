@@ -414,3 +414,20 @@ class SearchModel(_Model):
     error: str | None = None
     """Why its last install failed."""
 
+
+
+class Workspace(_Model):
+    id: str
+    name: str
+
+
+class Workspaces(_Model):
+    available: bool
+    """Whether this server keeps workspaces: the app's own graph DB does, another one not."""
+    active: str | None = None
+    """The workspace open now."""
+    items: list[Workspace] = Field(default_factory=list)
+
+
+class WorkspaceName(_Model):
+    name: str

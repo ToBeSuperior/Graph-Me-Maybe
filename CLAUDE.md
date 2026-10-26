@@ -450,6 +450,12 @@ or `stop_started()` before the window app's `os._exit`. A Neo4j answering on the
 recorded is adopted only if `server.directories.data` is this home's (WSL's app answers on
 Windows' loopback too). The server never opens it in a page's request: `Demo.space(wait=)` opens
 it behind and answers `GraphStarting` (503, Retry-After), which the page keeps asking through.
+Workspaces (`server/workspaces.py`) are graphs kept apart: Community opens one user database at
+a time, so each is a folder holding its own `neo4j-data/` (`Settings.local_graph`), run by the
+home's one install; the home's own graph is the first. Switching (`Demo.switch_workspace`) starts
+the new one on another port, moves onto it once it answers, and stops the old one behind
+(`local_neo4j.stop_graph`) -- going back to a graph still stopping waits for it, since its Neo4j
+holds the folder until it has stopped.
 An `export-corpus` bundle leaves out `source_path` (this machine's paths never
 leave it), so a graph moved through one has no files to draw or download until those are set again.
 

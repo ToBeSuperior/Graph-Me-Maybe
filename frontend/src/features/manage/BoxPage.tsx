@@ -73,7 +73,7 @@ export function BoxPage() {
   return (
     <div>
       <PageHeader title={t('boxTitle')} description={t('boxBody')} />
-      <div className="grid max-w-2xl gap-4 p-6 text-sm">
+      <div className="grid gap-4 p-6 text-sm">
         <DesktopDrive kind="box" app="Box Drive" />
         <h2 className="mt-2 text-sm font-medium">{t('boxApiTitle')}</h2>
         {!state ? <Spinner /> : !state.configured ? (

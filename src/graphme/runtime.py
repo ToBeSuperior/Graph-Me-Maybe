@@ -187,10 +187,11 @@ def create_graph_space(settings: Settings) -> Neo4jGraphSpace:
     started, and fetched first if need be -- or the one GRAPHME_NEO4J_URI names."""
     if settings.local_neo4j is not None:
         uri = ensure_local_neo4j(settings.local_neo4j,
-                                 (settings.neo4j_heap, settings.neo4j_pagecache))
+                                 (settings.neo4j_heap, settings.neo4j_pagecache),
+                                 graph=settings.local_graph)
         settings = settings.model_copy(update={
             "neo4j_uri": uri, "neo4j_user": USER,
-            "neo4j_password": neo4j_password(settings.local_neo4j)})
+            "neo4j_password": neo4j_password(settings.local_graph or settings.local_neo4j)})
     return Neo4jGraphSpace.from_settings(settings)
 
 

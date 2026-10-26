@@ -2,7 +2,7 @@
 // invented documents, so the checks need no server, graph DB or model.
 import type { Page, Route } from '@playwright/test';
 
-interface Fake { connected: { box: boolean; google: boolean }; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number }
+interface Fake { workspaces: { active: string; items: { id: string; name: string }[] }; opened: string[]; deletedWorkspaces: string[]; connected: { box: boolean; google: boolean }; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number }
 
 /** A job as `GET /v1/jobs` lists it, newest first. */
 type FakeJob = Record<string, unknown> & { id: string; kind: string; state: string };
@@ -30,7 +30,7 @@ const BUILD_STARTED = { id: 'bx', kind: 'build', state: 'reading', done: 0, tota
   known: 0, carried: 0, links: 0, skipped: 0, embedded: 0, error: null };
 
 export async function fakeApi(page: Page,
-  { box = true, boxDrive = true, googleDrive = true, empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[],
+  { box = true, boxDrive = true, googleDrive = true, workspaces = true, empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[],
     progress = null as Record<string, unknown> | null, elapsed = null as number | null } = {}): Promise<Fake> {
   const fake: Fake = {
     searchModels: [
@@ -38,6 +38,8 @@ export async function fakeApi(page: Page,
         fetching: { done: 319724160, total: 639448320 }, error: null },
       { name: 'korean', model: 'KURE-v1', size: 437779008, installed: true, chosen: false, fetching: null, error: null },
     ],
+    workspaces: { active: 'default', items: [{ id: 'default', name: 'Default' }, { id: 'w2', name: 'Invented audits' }] },
+    opened: [], deletedWorkspaces: [],
     connected: { box: false, google: false }, boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
     installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0 };
   const json = (route: Route, body: unknown, status = 200) =>
@@ -59,6 +61,27 @@ export async function fakeApi(page: Page,
       10: { name: 'Specs', path: [{ id: '0', name: 'All Files' }], items: [
         { id: 'f2', type: 'file', name: 'Valve Spec.docx', size: 64000 }] },
     };
+    // Graphs kept apart: one open at a time.
+    const listed = () => (workspaces ? { available: true, ...fake.workspaces } : { available: false, items: [] });
+    if (path === '/v1/workspaces' && method === 'GET') return json(route, listed());
+    if (path === '/v1/workspaces' && method === 'POST') {
+      if (!workspaces) return json(route, { detail: 'no workspaces' }, 409);
+      const made = { id: `w${fake.workspaces.items.length + 1}`, name: route.request().postDataJSON().name };
+      fake.workspaces.items.push(made);
+      return json(route, made);
+    }
+    const ws = path.match(/^\/v1\/workspaces\/([^/]+)(\/open)?$/);
+    if (ws) {
+      const item = fake.workspaces.items.find((i) => i.id === ws[1])!;
+      if (ws[2]) { fake.opened.push(ws[1]); fake.workspaces.active = ws[1]; return json(route, listed()); }
+      if (method === 'PATCH') { item.name = route.request().postDataJSON().name; return json(route, item); }
+      if (method === 'DELETE') {
+        if (ws[1] === fake.workspaces.active) return json(route, { detail: 'the workspace open now cannot be deleted' }, 409);
+        fake.deletedWorkspaces.push(ws[1]);
+        fake.workspaces.items = fake.workspaces.items.filter((i) => i.id !== ws[1]);
+        return json(route, listed());
+      }
+    }
     // A cloud drive's desktop client on this machine: Box Drive, Google Drive for desktop.
     const desk = path.match(/^\/v1\/drives\/(box|google)(\/connect|\/folders)?$/);
     if (desk) {

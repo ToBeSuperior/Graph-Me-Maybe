@@ -126,6 +126,15 @@ screen this slides in from the side.
   and every citation or similarity link to or from it; other documents' links stay. Not possible
   while a graph is being built. CLI: `graphme delete-document <document_id>...` (asks first; `--yes`
   does not).
+- **Workspaces** — graphs kept apart, like separate environments. The one open is named in the top
+  bar, beside the app's name; its menu opens another, makes a new one (an empty graph, opened once
+  made) or renames the one open. Opening another takes a few seconds -- its graph DB starts, and the
+  one left stops behind -- and is refused while a build, a reading or an export runs. Each
+  workspace has its own documents, passages, links and build history; the keys, the model, the
+  search model and connected drives are shared. A server on someone's own Neo4j (`GRAPHME_NEO4J_URI`)
+  has none.
+- **Danger zone — delete a workspace** deletes one other than the one open, with its graph, once
+  its name is typed.
 - **Danger zone — reset** shows how many documents will go and asks for a confirmation word. It
   empties the graph (indexes stay) and drops what the app had read, so documents added afterwards are
   read from scratch. CLI: `graphme reset-graph`.

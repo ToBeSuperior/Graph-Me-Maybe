@@ -9,6 +9,7 @@ import { useLang, useT, type Lang } from '../lib/i18n';
 import { useBuild, useBuildFollower, useCorpusMap, useSettings } from '../lib/queries';
 import { useTheme, type Theme } from '../lib/theme';
 import { useUpload } from '../features/upload/upload';
+import { WorkspaceMenu } from './WorkspaceMenu';
 import { Button, Menu, MenuContent, MenuLabel, MenuRadio, MenuRadioGroup, MenuSeparator, MenuTrigger, Spinner, Tip } from './ui';
 
 function StatusPill() {
@@ -113,6 +114,7 @@ export function AppShell() {
           <span className="grid size-6 place-items-center rounded-md bg-accent text-on-accent"><Network className="size-3.5" /></span>
           <span className="hidden sm:inline">Graph-Me-Maybe</span>
         </NavLink>
+        <WorkspaceMenu />
         <nav className="flex items-center gap-1" aria-label={t('navigation')}>
           <NavLink to="/" end className={tab}><FolderTree className="size-4" />{t('navAsk')}</NavLink>
           <NavLink to="/manage" className={tab}><Database className="size-4" />{t('navManage')}</NavLink>

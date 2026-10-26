@@ -328,3 +328,41 @@ def test_one_already_running_with_no_password_is_given_one_and_left_running(
         secure=lambda port, password: secured.append(port))
 
     assert secured == [7690] and local_neo4j.password(tmp_path) is not None
+
+
+def test_a_workspace_s_graph_runs_from_the_home_s_neo4j_over_its_own_folder_and_password(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(local_neo4j, "_started", [])
+    monkeypatch.setattr(local_neo4j, "stop", lambda child, **k: None)
+    graph = tmp_path / "workspaces" / "w1"
+    over: list[Path] = []
+
+    def starting(home: Neo4jHome, data: Path, port: int, memory: Any, *,
+                 auth: bool = False) -> _Child:
+        over.append(data)
+        assert home.neo4j == tmp_path / "neo4j"  # one install for every workspace
+        return _Child()
+
+    local_neo4j.ensure_local_neo4j(
+        tmp_path, ("1g", "512m"), graph=graph, installing=lambda root: Neo4jHome(root),
+        is_ours=lambda d, p: False, starting=starting,  # type: ignore[arg-type]
+        free=lambda p: True, answers=lambda p: True, secure=lambda port, password: None)
+
+    assert set(over) == {graph / "neo4j-data"}
+    assert local_neo4j.password(graph) is not None  # its own, beside its graph
+    assert local_neo4j.password(tmp_path) is None  # the home's graph untouched
+
+
+def test_one_workspace_s_graph_is_stopped_and_the_others_left_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stopped: list[object] = []
+    home, other = Neo4jHome(tmp_path), Neo4jHome(tmp_path, tmp_path / "workspaces" / "w1")
+    mine, theirs = _Child(), _Child()
+    monkeypatch.setattr(local_neo4j, "_started", [(home, theirs), (other, mine)])
+    monkeypatch.setattr(local_neo4j, "stop", stopped.append)
+
+    local_neo4j.stop_graph(tmp_path / "workspaces" / "w1")
+
+    assert stopped == [mine] and local_neo4j._started == [(home, theirs)]

@@ -129,6 +129,13 @@ class SearchModels:
             return
         self._embed()
 
+    def embed_behind(self) -> None:
+        """The space embedded with the chosen model, if it is installed: another graph opened
+        may hold passages embedded with another, or none."""
+        row = LOCAL_EMBEDDERS.get(self.demo.settings.embedding_provider)
+        if row is None or row.model_file is None or self.models.installed(row.model_file):
+            self._embed()
+
     def _embed(self) -> None:
         try:
             self.demo.start_embed()

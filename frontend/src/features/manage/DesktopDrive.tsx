@@ -44,8 +44,11 @@ export function FolderList({ listing, loading, disabled, isPicked, onPick, onPic
           </span>
         ))}
       </nav>
-      <div className="max-h-[28rem] overflow-y-auto rounded-lg border border-line bg-panel">
+      <div className="max-h-[max(20rem,calc(100vh-24rem))] overflow-y-auto rounded-lg border border-line bg-panel">
         <table className="w-full table-fixed text-left text-sm">
+          {/* A fixed table takes its widths from its first row, the Back row across all four
+              columns: without these the four would share the width evenly. */}
+          <colgroup><col className="w-9" /><col /><col className="hidden w-32 sm:table-column" /><col className="w-24" /></colgroup>
           <thead className="sticky top-0 bg-subtle text-xs text-muted">
             {/* Going back up is always the first row, disabled at the top; Select all under it. */}
             <tr className="border-b border-line bg-panel">

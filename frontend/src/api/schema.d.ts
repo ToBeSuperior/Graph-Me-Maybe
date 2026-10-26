@@ -194,6 +194,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Workspaces
+         * @description The graphs kept apart, and the one open.
+         */
+        get: operations["workspaces_v1_workspaces_get"];
+        put?: never;
+        /**
+         * Workspace Create
+         * @description A workspace made, its graph empty; not opened.
+         */
+        post: operations["workspace_create_v1_workspaces_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspace}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Workspace Delete
+         * @description `workspace` and its graph deleted for good -- refused (409) for the one open.
+         */
+        delete: operations["workspace_delete_v1_workspaces__workspace__delete"];
+        options?: never;
+        head?: never;
+        /** Workspace Rename */
+        patch: operations["workspace_rename_v1_workspaces__workspace__patch"];
+        trace?: never;
+    };
+    "/v1/workspaces/{workspace}/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Workspace Open
+         * @description `workspace`'s graph opened in place of the one open -- refused (409) while a build,
+         *     a reading or an export runs.
+         */
+        post: operations["workspace_open_v1_workspaces__workspace__open_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/drives/{kind}": {
         parameters: {
             query?: never;
@@ -1471,6 +1537,27 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** Workspace */
+        Workspace: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** WorkspaceName */
+        WorkspaceName: {
+            /** Name */
+            name: string;
+        };
+        /** Workspaces */
+        Workspaces: {
+            /** Available */
+            available: boolean;
+            /** Active */
+            active?: string | null;
+            /** Items */
+            items?: components["schemas"]["Workspace"][];
+        };
     };
     responses: never;
     parameters: never;
@@ -1746,6 +1833,156 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Box"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workspaces_v1_workspaces_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspaces"];
+                };
+            };
+        };
+    };
+    workspace_create_v1_workspaces_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceName"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workspace_delete_v1_workspaces__workspace__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspaces"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workspace_rename_v1_workspaces__workspace__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceName"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workspace_open_v1_workspaces__workspace__open_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspaces"];
                 };
             };
             /** @description Validation Error */

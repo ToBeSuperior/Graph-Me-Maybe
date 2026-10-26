@@ -92,6 +92,8 @@
   --color-cited: var(--rel-cited);
   --color-similar: var(--rel-similar);
   --color-mark: var(--mark);
+  /* A highlighter on a page's picture: the page is white in either theme, so its mark is too. */
+  --color-page-mark: #fde68a;
   --shadow-pop: var(--shadow-pop);
   --text-2xs: 11px;
   --text-xs: 12px;

@@ -35,7 +35,7 @@ import time
 import urllib.request
 import zipfile
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -57,6 +57,9 @@ class Neo4jHome:
     """Where the app keeps Neo4j, its Java runtime and its graph."""
 
     root: Path
+    graph: Path | None = None
+    """The folder holding the graph (`neo4j-data/`): a workspace's own, beside the one install;
+    None for the home's."""
 
     @property
     def neo4j(self) -> Path:
@@ -67,8 +70,12 @@ class Neo4jHome:
         return self.root / "jre"
 
     @property
+    def graph_root(self) -> Path:
+        return self.graph or self.root
+
+    @property
     def data(self) -> Path:
-        return self.root / "neo4j-data"
+        return self.graph_root / "neo4j-data"
 
     @property
     def password_file(self) -> Path:
@@ -366,8 +373,17 @@ def stop_started() -> None:
         (home.data / "run" / "graphme.json").unlink(missing_ok=True)
 
 
+def stop_graph(graph: Path) -> None:
+    """The Neo4j this process started over the graph in `graph` stopped; the others run on."""
+    for home, child in [(h, c) for h, c in _started if h.graph_root == graph]:
+        _started.remove((home, child))
+        stop(child)
+        (home.data / "run" / "graphme.json").unlink(missing_ok=True)
+
+
 def ensure_local_neo4j(
     root: Path, memory: tuple[str, str], *,
+    graph: Path | None = None,
     installing: Callable[[Path], Neo4jHome] = install,
     starting: Callable[..., subprocess.Popen[bytes]] = start,
     is_ours: Callable[[Path, int], bool] = _is_ours,
@@ -377,20 +393,21 @@ def ensure_local_neo4j(
     secure: Callable[[int, str], None] = _set_password,
 ) -> str:
     """The address of this home's Neo4j: the one running, else one started -- fetched first if
-    it is not installed yet. Its password is `password(root)`."""
+    it is not installed yet. Its password is `password(graph or root)`: `graph` is the folder of
+    a workspace's own graph, run by the home's install."""
     with _starting:  # the page asks for the list and the map at once: one start
-        home = Neo4jHome(root)
+        home = Neo4jHome(root, graph)
         record = _record(home.data)
         if record is not None and is_ours(home.data, record["port"]):
-            if password(root) is None:  # asks for one from its next start
+            if password(home.graph_root) is None:  # asks for one from its next start
                 _given_password(home, record["port"], secure)
             return f"bolt://127.0.0.1:{record['port']}"
         if not home.installed():
-            home = installing(root)
+            home = replace(installing(root), graph=graph)
         port = next(p for p in range(FIRST_PORT, FIRST_PORT + 100) if free(p))
         _log.warning("starting the graph DB (Neo4j) on 127.0.0.1:%s", port)
         child = _up(home, port, memory, starting, answers, sleep)
-        if password(root) is None:
+        if password(home.graph_root) is None:
             _given_password(home, port, secure)
             stop(child)
             _started.remove((home, child))
@@ -402,7 +419,7 @@ def _up(home: Neo4jHome, port: int, memory: tuple[str, str],
         starting: Callable[..., subprocess.Popen[bytes]], answers: Callable[[int], bool],
         sleep: Callable[[float], None]) -> subprocess.Popen[bytes]:
     """This home's Neo4j started on `port`, asking for its password if it has one."""
-    child = starting(home, home.data, port, memory, auth=password(home.root) is not None)
+    child = starting(home, home.data, port, memory, auth=password(home.graph_root) is not None)
     if not _started:
         atexit.register(stop_started)
     _started.append((home, child))

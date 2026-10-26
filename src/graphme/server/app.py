@@ -293,6 +293,53 @@ def create_app(
         with refused():
             return demo.box_pick([BoxPicked(i.type, i.id, i.name) for i in change.items])
 
+    # Workspaces ---------------------------------------------------------------------------
+
+    def listedworkspace_registry() -> dict[str, Any]:
+        if demo.workspaces is None:
+            return {"available": False}
+        return {"available": True, **demo.workspaces.listed()}
+
+    def changing(request: Request) -> None:
+        if not from_here(request):
+            raise HTTPException(403, "workspaces can only be changed from this machine")
+
+    @v1.get("/workspaces", response_model=api.Workspaces)
+    def workspaces() -> dict[str, Any]:
+        """The graphs kept apart, and the one open."""
+        return listedworkspace_registry()
+
+    @v1.post("/workspaces", response_model=api.Workspace)
+    def workspace_create(body: api.WorkspaceName, request: Request) -> dict[str, str]:
+        """A workspace made, its graph empty; not opened."""
+        changing(request)
+        with refused():
+            return demo.workspace_registry().create(body.name)
+
+    @v1.patch("/workspaces/{workspace}", response_model=api.Workspace)
+    def workspace_rename(workspace: str, body: api.WorkspaceName,
+                         request: Request) -> dict[str, str]:
+        changing(request)
+        with refused():
+            return demo.workspace_registry().rename(workspace, body.name)
+
+    @v1.post("/workspaces/{workspace}/open", response_model=api.Workspaces)
+    def workspace_open(workspace: str, request: Request) -> dict[str, Any]:
+        """`workspace`'s graph opened in place of the one open -- refused (409) while a build,
+        a reading or an export runs."""
+        changing(request)
+        with refused():
+            demo.switch_workspace(workspace)
+        return listedworkspace_registry()
+
+    @v1.delete("/workspaces/{workspace}", response_model=api.Workspaces)
+    def workspace_delete(workspace: str, request: Request) -> dict[str, Any]:
+        """`workspace` and its graph deleted for good -- refused (409) for the one open."""
+        changing(request)
+        with refused():
+            demo.delete_workspace(workspace)
+        return listedworkspace_registry()
+
     # A cloud drive's desktop client --------------------------------------------------------
 
     @v1.get("/drives/{kind}", response_model=api.DesktopDrive)
