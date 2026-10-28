@@ -37,6 +37,7 @@ from graphme.application.corpus_build import SpaceUnavailable, origin_of
 from graphme.application.corpus_links import DocumentIdentity, Mention, identity_of
 from graphme.application.file_titles import stated_titles
 from graphme.application.graph_chunks import Chunk, GraphUnit
+from graphme.application.visual_crops import CROP_ASSET_KEY
 from graphme.config import Settings
 from graphme.domain.enums import EdgeType
 from graphme.domain.models import ExtractedDocument, GraphEdge
@@ -244,6 +245,14 @@ class Neo4jGraphSpace:
             ids=list(document_ids),
         )
         return {record["id"]: record["file"] for record in records}
+
+    def crop_hashes(self) -> set[str]:
+        """The crop assets the space's nodes name -- the only assets anything reads once a
+        document is in (`read_node_crop`, `kept_from`, an answer's pictures)."""
+        records, _, _ = self.driver.execute_query(
+            f"MATCH (n:DocNode) WHERE n.meta_{CROP_ASSET_KEY} IS NOT NULL "
+            f"RETURN DISTINCT n.meta_{CROP_ASSET_KEY} AS h")
+        return {str(record["h"]) for record in records}
 
     def contents(self, hashes: Sequence[str]) -> set[str]:
         """Which of these file contents (SHA-256) the space already holds."""

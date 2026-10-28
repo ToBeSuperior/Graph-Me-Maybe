@@ -18,11 +18,27 @@ end to end, and the VLM hierarchy handles worksheets, slides, DOCX and PDF.
       document linking and export as separate APIs. Today the demo server
       (`tools/hierarchy_demo/app.py`) ties this flow into one block, so another project
       cannot easily take just part of it.
+- [ ] **A library to `pip install`.** `graphme.read` and `GraphMe` (add, embed, search, ask,
+      documents, delete, export) exist, but only inside the app's package. In order:
+      1. `py.typed`; the window and the server as extras (`graph-me-maybe[app]`, `[server]`) so the
+         core installs alone; `graphme.setup()` fetching the viewer, Neo4j, Java and the search
+         model (and doing so on first use when missing -- today only the installer fetches the
+         viewer); settings passed in code (`GraphMe(provider=..., api_key=..., neo4j_uri=...)`);
+         published on PyPI as `graph-me-maybe` (the name is free; the owner decides the account).
+      2. `GraphMe(workspace="...")`; the public API is what `graphme` exports, versioned by semver
+         with deprecations announced.
+      3. The per-feature APIs of the item above.
+      4. An API reference and example notebooks.
 - [ ] **Measure efficiency and performance on the latest GraphRAG benchmarks.** Record
       ingest time, model call count and tokens, and query latency, not only accuracy.
       Compare with other GraphRAG implementations under the same conditions.
 - [ ] **Ship the demo with an installer.** Let people start the demo from one installer,
       without installing dependencies such as Neo4j, Chrome and Node by hand.
+- [ ] **An MCP server, and the app running in the background.** Designed in
+      `docs/superpowers/specs/2026-10-27-mcp-server-design.md`: `graphme mcp` (stdio) over the
+      app's API; MCP allowed per workspace (off by default), a workspace not open read beside the
+      open one; the app split into a background agent with a tray / menu bar icon (open the app,
+      MCP on/off, start at login -- off by default --, quit completely) and a window of its own.
 - [ ] **A native installer and app.** Today one-line scripts install uv and the app as a Python
       package, and the Mac `.app` is a shortcut to that command. Bundle Python, the libraries
       and the app into one `Graph-Me-Maybe.app` / `.exe` (BeeWare Briefcase or PyInstaller) and

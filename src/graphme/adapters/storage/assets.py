@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
 from pathlib import Path
@@ -46,3 +47,23 @@ class LocalAssetStore:
         for other in sorted(exact.parent.glob(f"{content_hash}.*")):
             return other.read_bytes()
         return exact.read_bytes()  # the error names the path that was asked for
+
+    def sweep(self, keep: set[str], *, before: float) -> tuple[int, int]:
+        """Every asset not named in `keep` and written before `before` deleted, with any folder
+        left empty: how many, and how many bytes. One written since is a reading's, under way."""
+        removed = size = 0
+        if not self._root.is_dir():
+            return 0, 0
+        for folder in [f for f in self._root.iterdir() if f.is_dir()]:
+            for path in list(folder.iterdir()):
+                try:
+                    written = path.stat()
+                except OSError:
+                    continue
+                if path.name.split(".", 1)[0] in keep or written.st_mtime >= before:
+                    continue
+                path.unlink(missing_ok=True)
+                removed, size = removed + 1, size + written.st_size
+            with contextlib.suppress(OSError):
+                folder.rmdir()  # only when nothing is left in it
+        return removed, size

@@ -463,6 +463,7 @@ def create_app(
         with refused():
             demo.graph.delete([document_id])
         demo.forget(document_id)
+        demo.sweep_behind()  # its crops
         return {"deleted": document_id}
 
     @v1.get("/documents/{document_id}/graph", response_model=api.DocumentGraph)
@@ -540,6 +541,7 @@ def create_app(
         opened()
         deleted = demo.graph.reset()
         demo.drop(list(demo.catalog))
+        demo.sweep_behind()
         return {"deleted": deleted}
 
     @v1.get("/export/bundle")

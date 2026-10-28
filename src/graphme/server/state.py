@@ -4,8 +4,10 @@ runs the work in threads. The HTTP routes over it are `app.py`; nothing here kno
 a refusal is `Busy`, `LookupError` or `ValueError`, and the route says what it means."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import logging
 import os
 import shutil
 import sys
@@ -201,8 +203,12 @@ def _since(started: float) -> float:
 
 # What failed is said on the page plainly; what it was -- with this machine's paths in it --
 # is in the server's log, printed where it happened.
+_log = logging.getLogger(__name__)
 SPACE_WAIT = 2.0
 READ_TIMEOUT_SECONDS = 4 * 60 * 60
+SWEEP_GRACE = 600.0
+"""Seconds an asset just written is kept by a sweep, named or not: a reading under way writes
+its crops before the graph names them."""
 """How long a build waits for one document's reading before counting it as failed."""
 ROOT_PREFIX = "hierarchy-demo-"
 """What a working folder made for a moment (a test) is called in the system's temporary
@@ -355,6 +361,7 @@ class Demo:
         self._letting_go = (left, going)
         going.start()
         self.search_models.embed_behind()  # a search model chosen while it was closed
+        self.sweep_behind()
 
     def delete_workspace(self, workspace: str) -> None:
         """`workspace` and its graph deleted; never the one open."""
@@ -365,6 +372,69 @@ class Demo:
         if workspace != spaces.active:
             local_neo4j.stop_graph(graph or spaces.home)
         spaces.delete(workspace)
+
+    def sweep_assets(self) -> tuple[int, int]:
+        """The crops and pictures nothing names any more deleted from the open workspace's
+        folder -- a document deleted or read again, the graph reset, a reading long gone:
+        how many, and how many bytes. Kept: what the graph's nodes name, what a reading this
+        run still holds (one outside the graph is put in again at no cost), and whatever was
+        written in the last `SWEEP_GRACE` seconds. Not while a build or a reading runs."""
+        with self.building:
+            reading = [s for s in self.sessions.values()
+                       if s.state not in (*STARTABLE, *FINISHED)]
+            if self.build.state in BUILDING or reading:
+                return 0, 0
+            started = time.time()
+            space = self.graph.opened_space
+        if space is None:
+            return 0, 0  # swept once it is opened
+        keep = space.crop_hashes()
+        for session in list(self.sessions.values()):
+            if session.extracted is not None:
+                keep |= {h for n in session.extracted.nodes
+                         if isinstance(h := n.metadata.get(CROP_ASSET_KEY), str)}
+            if session.kept is not None:
+                keep |= set(session.kept.crops.values())
+        removed, size = LocalAssetStore(self.settings.asset_dir).sweep(
+            keep, before=started - SWEEP_GRACE)
+        for folder in [f for f in self.root.iterdir() if f.is_dir()]:
+            if folder.name not in self.sessions:  # a reading's folder, left empty
+                with contextlib.suppress(OSError):
+                    folder.rmdir()
+        if removed:
+            _log.info("let go of %s unused crops (%.1f MB)", removed, size / 1e6)
+        return removed, size
+
+    def sweep_behind(self) -> None:
+        threading.Thread(target=self._sweep_quietly, daemon=True).start()
+
+    def _sweep_quietly(self) -> None:
+        try:
+            self.sweep_assets()
+        except Exception:  # noqa: BLE001 -- disk kept a while longer; the next sweep tries again
+            traceback.print_exc(file=sys.stderr)
+
+    def _let_go_of_put(self, docs: list[str]) -> None:
+        """The documents this build put in the graph held as the graph keeps them -- where each
+        node is drawn -- not as read: a folder of thousands is not kept in memory whole."""
+        held = {doc: s for doc in docs if (s := self.sessions.get(doc)) is not None
+                and s.state == "done" and s.extracted is not None}
+        if not held:
+            return
+        space = self.space()
+        inside = space.files([s.extracted.document.id for s in held.values()
+                              if s.extracted is not None])
+        for doc, session in held.items():
+            document_id = session.extracted.document.id if session.extracted else ""
+            if document_id not in inside:
+                continue  # outside the graph: kept to be put in again at no cost
+            found = kept_from(space.document_graph(document_id), session.format)
+            with self.opening, session.lock:
+                if found is None:  # drawn again from the file when it is next looked at
+                    self.sessions.pop(doc, None)
+                    continue
+                session.kept, session.pages = found
+                session.extracted, session.state = None, "rendered"
 
     def _forget_workspace(self) -> None:
         """What this start knew of the graph just left: its jobs, readings, files and pages."""
@@ -412,6 +482,7 @@ class Demo:
         try:
             with self.opening_space:
                 self.graph.graph_space()
+            self.sweep_behind()  # what an earlier start left
         except Exception as error:  # noqa: BLE001 -- said to the next request
             self._open_failed = error
 
@@ -649,6 +720,12 @@ class Demo:
             for doc in docs:
                 if doc in self.origins:
                     shutil.rmtree(Path(self.catalog.get(doc, "")).parent, ignore_errors=True)
+            if put and build.state not in BUILDING:
+                try:
+                    self._let_go_of_put(docs)
+                except Exception:  # noqa: BLE001 -- held a while longer, not lost
+                    traceback.print_exc(file=sys.stderr)
+                self.sweep_behind()
 
     # Box ------------------------------------------------------------------------------------
 

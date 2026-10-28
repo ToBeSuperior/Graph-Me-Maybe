@@ -261,7 +261,9 @@ class Settings(BaseModel):
 
     @property
     def asset_dir(self) -> Path:
-        return self.data_dir / "assets"
+        """Where crops and pictures are kept: a workspace's beside its graph, so deleting the
+        workspace takes them and a sweep of one graph's never touches another's."""
+        return self.local_graph / "assets" if self.local_graph else self.data_dir / "assets"
 
 
 def read_yaml(path: Path) -> dict[str, Any]:

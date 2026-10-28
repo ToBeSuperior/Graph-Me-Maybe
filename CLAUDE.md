@@ -456,6 +456,12 @@ home's one install; the home's own graph is the first. Switching (`Demo.switch_w
 the new one on another port, moves onto it once it answers, and stops the old one behind
 (`local_neo4j.stop_graph`) -- going back to a graph still stopping waits for it, since its Neo4j
 holds the folder until it has stopped.
+Crops and pictures go in `Settings.asset_dir` (a workspace's own beside its graph) and are swept
+(`Demo.sweep_assets`, `LocalAssetStore.sweep`) after a build, a delete, a reset and on opening:
+kept is what the graph's nodes name (`crop_asset_hash`, the only asset read once a document is
+in), what a reading this run holds, and anything written in the last `SWEEP_GRACE` seconds; never
+while a build or a reading runs. A document a build put in is then held as the graph keeps it
+(`kept_from`), not as read.
 An `export-corpus` bundle leaves out `source_path` (this machine's paths never
 leave it), so a graph moved through one has no files to draw or download until those are set again.
 

@@ -35,6 +35,8 @@ class FakeSpace:
         self.documents: list[dict[str, Any]] = []
         self.links: list[dict[str, Any]] = []
         self.similar: list[dict[str, Any]] = []
+        self.crops: set[str] = set()
+        """The crop assets the space's nodes name."""
 
     def put_document(self, extracted: Any) -> None:
         self.put.append(extracted.document.id)
@@ -108,6 +110,9 @@ class FakeSpace:
 
         return rows_of(self.corpus(document_ids))
 
+    def crop_hashes(self) -> set[str]:
+        return set(self.crops)
+
     def close(self) -> None:
         pass
 
@@ -144,7 +149,9 @@ def demo(
 ) -> Demo:
     """A server state over the fake space and admin, its folder under the test's own."""
     monkeypatch.setattr(api, "create_neo4j_admin", lambda settings: admin)
-    made = Demo(SETTINGS, renderer=None, root=tmp_path / "server")  # type: ignore[arg-type]
+    # Its data under the test's own folder: the shared settings name the working directory's.
+    settings = SETTINGS.model_copy(update={"data_dir": tmp_path / "data"})
+    made = Demo(settings, renderer=None, root=tmp_path / "server")  # type: ignore[arg-type]
     made.graph._space = space  # type: ignore[assignment]
     made.admin = lambda: admin  # type: ignore[assignment,method-assign,return-value]
     return made

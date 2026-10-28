@@ -5,6 +5,17 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.42] - 2026-10-28
+
+### Fixed
+
+- Crops and pictures no document uses any more are deleted: after a build, after deleting a
+  document or resetting the graph, and when the app starts. They were never deleted before, and a
+  graph read again and again kept every old one -- on one machine 98% of the folder (over 700 MB).
+- Documents a build puts in the graph are no longer held in memory as read until the app quits;
+  they are held as the graph keeps them, as after a restart.
+- Each workspace keeps its crops beside its graph, so deleting it takes them too.
+
 ## [0.1.41] - 2026-10-26
 
 ### Changed
