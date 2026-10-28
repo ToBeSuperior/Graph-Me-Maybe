@@ -5,6 +5,32 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.43] - 2026-10-28
+
+### Added
+
+- Pages looked at are kept on disk (500 MB by default, `GRAPHME_PREVIEW_CACHE_MB` in Keys and
+  model's advanced settings; the oldest go first), so looking at a page again needs no file -- a
+  cloud drive's file is no longer downloaded again to show it, even after a restart. A document
+  deleted, or the graph reset, takes its pages kept.
+- A cloud drive's file downloaded to draw a page is given back to the cloud once it has not been
+  looked at for five minutes, and the files put in a download are given back once zipped -- only
+  those that were online only before.
+- Each drive's page says how much of it is kept on this computer (bytes and files), measured in
+  a second or two without asking the cloud for folders never opened.
+
+### Changed
+
+- A build gives back to the cloud what it read: a Box Drive, Google Drive or OneDrive file kept
+  online only before the build is made online-only again as soon as it is read, so building from
+  a large folder no longer leaves every file on this computer. Files you keep downloaded yourself
+  are left as they are. A file macOS's Spotlight downloads again to index it is given back again
+  (during the build, and 30 seconds, 2 and 10 minutes after it).
+- A build lets documents in a few at a time -- as many as it reads at once (16) and as many again
+  waiting -- instead of reading the whole folder first to see what is in the graph already and
+  what each file carries: a cloud folder fetched ahead filled the disk faster than it was read.
+  The total grows as files carried inside documents are found.
+
 ## [0.1.42] - 2026-10-28
 
 ### Fixed

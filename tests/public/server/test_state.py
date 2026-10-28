@@ -198,8 +198,9 @@ def test_a_document_that_fails_says_so_plainly_and_its_paths_stay_in_the_log(
 def test_a_build_counts_the_files_its_documents_carry_and_says_its_total_once_known(
     demo: Demo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Files carried inside a document are found while the build starts; until they are, the
-    build says no total rather than one that grows a moment later."""
+    """Files carried inside a document are found as it is let in, not by reading the whole
+    folder first (a cloud drive keeps every file read): the total starts at the documents given
+    and grows by those found, which `carried` says."""
     looked = threading.Event()
 
     def carried(path: Path) -> list[Any]:
@@ -216,7 +217,7 @@ def test_a_build_counts_the_files_its_documents_carry_and_says_its_total_once_kn
     (tmp_path / "outer.pdf").write_bytes(b"%PDF-1.4")
     build = demo.build_corpus([demo.open_path(str(tmp_path / "outer.pdf"))], "test")
 
-    assert build.total == 0
+    assert build.total == 1
     looked.set()
     assert until(lambda: build.state == "done"), build
     assert build.carried == 1 and build.documents == 2

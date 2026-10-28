@@ -70,7 +70,7 @@ test('the graph is reset only once the word is typed', async ({ page }) => {
   await page.goto('/manage/danger');
   const reset = page.getByRole('button', { name: '그래프 초기화' });
   await expect(reset).toBeDisabled();
-  await page.getByLabel(/확인하려면/).fill('초기화');
+  await page.getByLabel(/확인하려면 ‘초기화’/).fill('초기화');
   await reset.click();
   await expect.poll(() => fake.reset).toBe(1);
 });
@@ -511,4 +511,13 @@ test('without OneDrive the page links to its download', async ({ page }) => {
   await page.goto('/manage/onedrive');
   await expect(page.getByTestId('onedrive-drive').getByRole('link', { name: 'OneDrive 설치하기' }))
     .toHaveAttribute('href', 'https://www.microsoft.com/microsoft-365/onedrive/download');
+});
+
+test('a connected drive says how much of it is kept on this computer', async ({ page }) => {
+  await fakeApi(page);
+  await page.goto('/manage/box');
+  const drive = page.getByTestId('box-drive');
+  await drive.getByRole('button', { name: '연결', exact: true }).click();
+  await expect(drive.getByText('이 컴퓨터에서 차지하는 용량 · 991.9 MB (파일 102개)')).toBeVisible();
+  await expect(drive.getByText('빌드가 읽은 온라인 전용 파일은', { exact: false })).toBeVisible();
 });

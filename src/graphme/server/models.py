@@ -370,6 +370,12 @@ class DesktopDrive(_Model):
     """Whether the user said to read it: asked once, then kept for every start."""
 
 
+class DriveUsage(_Model):
+    bytes: int
+    """What the drive's downloaded files take on this machine."""
+    files: int
+
+
 class BoxPick(_Model):
     items: list[BoxItem]
     """Everything picked: what was picked before is replaced."""

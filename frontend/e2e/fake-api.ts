@@ -83,6 +83,8 @@ export async function fakeApi(page: Page,
       }
     }
     // A cloud drive's desktop client on this machine: Box Drive, Google Drive for desktop.
+    const usage = path.match(/^\/v1\/drives\/(box|google|onedrive)\/usage$/);
+    if (usage) return json(route, { bytes: 991_900_000, files: 102 });
     const desk = path.match(/^\/v1\/drives\/(box|google|onedrive)(\/connect|\/folders)?$/);
     if (desk) {
       const kind = desk[1] as 'box' | 'google' | 'onedrive';

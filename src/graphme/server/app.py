@@ -366,6 +366,13 @@ def create_app(
         demo.drive_connect(kind, False)
         return demo.drive_state(kind)
 
+    @v1.get("/drives/{kind}/usage", response_model=api.DriveUsage)
+    def desktop_drive_usage(kind: api.DriveKind) -> dict[str, int]:
+        """What the drive keeps on this machine -- files downloaded, by a build or by hand --
+        in bytes and files. A file kept online only takes nothing."""
+        with refused():
+            return demo.drive_usage(kind)
+
     @v1.get("/drives/{kind}/folders", response_model=api.BoxFolder)
     def desktop_drive_folder(kind: api.DriveKind, path: str = "") -> dict[str, Any]:
         """A folder of the drive's a level at a time, `path` relative to its top: every file as
@@ -459,10 +466,13 @@ def create_app(
         """A document gone from the graph space, with every node, passage and link of its. Not
         while a build is putting documents in and linking them."""
         unbuilt()
-        opened()
+        space = opened()
+        path = space.source_path(document_id)
         with refused():
             demo.graph.delete([document_id])
         demo.forget(document_id)
+        if path:
+            demo.forget_previews(path)  # its pages kept for readers
         demo.sweep_behind()  # its crops
         return {"deleted": document_id}
 
@@ -541,6 +551,7 @@ def create_app(
         opened()
         deleted = demo.graph.reset()
         demo.drop(list(demo.catalog))
+        demo.forget_previews()
         demo.sweep_behind()
         return {"deleted": deleted}
 

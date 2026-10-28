@@ -51,6 +51,7 @@ ENV_FIELDS = {
     "GRAPHME_NEO4J_HEAP": "neo4j_heap",
     "GRAPHME_API_KEY": "server_key",
     "GRAPHME_NEO4J_PAGECACHE": "neo4j_pagecache",
+    "GRAPHME_PREVIEW_CACHE_MB": "preview_cache_mb",
     "GRAPHME_BOX_CLIENT_ID": "box_client_id",
     "GRAPHME_BOX_CLIENT_SECRET": "box_client_secret",
 }
@@ -195,6 +196,9 @@ class Settings(BaseModel):
     """GRAPHME_API_KEY: what `graphme serve` asks every `/v1` request for. Unset, it asks for
     nothing, and serves this machine only."""
     neo4j_heap: str = Field(default="1g", pattern=r"^[1-9][0-9]*[kmg]$")
+    preview_cache_mb: int = Field(default=500, ge=0)
+    """How much the pages drawn for a reader may take on disk, kept to be shown again with no
+    file (a cloud drive downloads one to draw it); the oldest go first. 0 keeps none."""
     neo4j_pagecache: str = Field(default="512m", pattern=r"^[1-9][0-9]*[kmg]$")
     """The heap and page cache of the app's own Neo4j. The page cache holds the passages'
     vectors: a space of thousands of documents wants it at least their size. Changed, it is

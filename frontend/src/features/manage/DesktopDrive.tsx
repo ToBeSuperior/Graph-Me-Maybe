@@ -132,6 +132,12 @@ export function DesktopDrive({ kind, app }: { kind: keyof typeof INSTALL; app: s
   const building = isBuilding(useBuild().data);
   const params = { params: { path: { kind } } };
   const drive = useQuery({ queryKey: ['desktopDrive', kind], queryFn: () => call(api.GET('/v1/drives/{kind}', params)) });
+  // What the drive keeps here: asked again once a build ends, which gives back what it read.
+  const usage = useQuery({
+    queryKey: ['desktopDriveUsage', kind, building],
+    enabled: !!drive.data?.connected,
+    queryFn: () => call(api.GET('/v1/drives/{kind}/usage', params)),
+  });
   const folder = useQuery({
     queryKey: ['desktopDriveFolder', kind, at],
     enabled: !!drive.data?.connected,
@@ -178,6 +184,12 @@ export function DesktopDrive({ kind, app }: { kind: keyof typeof INSTALL; app: s
         </>
       ) : (
         <>
+          {usage.data && (
+            <div className="text-xs text-muted">
+              <p>{t('deskUsage', sizeOf(usage.data.bytes) || '0 B', usage.data.files)}</p>
+              <p className="text-faint">{t('deskGivenBack')}</p>
+            </div>
+          )}
           <FolderList listing={folder.data} loading={folder.isLoading} disabled={building}
             isPicked={(item) => checked.includes(item.id)} onOpen={setAt}
             onPick={(item, on) => setChecked(on ? [...checked, item.id] : checked.filter((id) => id !== item.id))}

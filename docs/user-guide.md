@@ -77,6 +77,15 @@ folders and check what to read -- a checked folder is read with everything under
 states, and only new versions are fetched and read. **Disconnect** revokes the sign-in, which is
 kept in your system's credential store (Keychain on macOS, Credential Manager on Windows).
 
+**What stays on this computer.** A drive keeps a file online only until it is read, and keeps it
+here once read. A build downloads only what it reads at once and as many again waiting their
+turn, notes which were online only, and makes each online-only again as soon as it is read;
+files you keep downloaded are left alone. Looking at a page downloads its file to draw it once:
+the page is kept on disk (up to **Page preview cache**, 500 MB by default, in Keys and model's
+advanced settings) and shown from there next time, and the file is given back after five minutes
+not looked at. A download of documents gives back the files it zipped. Each drive's page shows
+how much of it is kept on this computer.
+
 ## Documents in OneDrive and SharePoint
 
 With Microsoft's **OneDrive** desktop app signed in to your work account, **Manage ›

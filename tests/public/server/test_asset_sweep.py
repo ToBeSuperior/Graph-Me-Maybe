@@ -113,3 +113,25 @@ def test_documents_put_in_the_graph_are_not_held_in_memory_after_the_build(
     assert space.put == ["a"]
     # Held as the graph keeps it (where each node is drawn), or not at all -- never as read.
     assert until(lambda: doc not in demo.sessions or demo.sessions[doc].extracted is None)
+
+
+def test_a_build_gives_back_to_the_cloud_only_what_was_online_only_before_it_read(
+    demo: Demo, space: FakeSpace, monkeypatch: Any
+) -> None:
+    from graphme.server import state
+    from tests.public.server.conftest import read_as
+
+    online = demo.root / "online.pdf"
+    kept = demo.root / "kept.pdf"
+    for path in (online, kept):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"%PDF-1.4 invented")
+    monkeypatch.setattr(state, "online_only", lambda path: Path(path) == online)
+    given_back: list[Path] = []
+    monkeypatch.setattr(state, "evict", lambda paths: given_back.extend(paths) or len(paths))
+    demo._run = read_as("a", "online.pdf")  # type: ignore[method-assign]
+
+    build = demo.build_corpus([demo.open_path(str(online)), demo.open_path(str(kept))], "test")
+
+    assert until(lambda: build.state == "done" and given_back), build
+    assert given_back == [online]  # a file the user keeps here is left as it is

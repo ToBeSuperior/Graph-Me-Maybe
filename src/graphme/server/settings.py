@@ -41,6 +41,7 @@ _CHOICES = (
     ("GRAPHME_MODEL_BASE_URL", False),
     ("GRAPHME_MODEL", False),
     ("GRAPHME_HIERARCHY_READINGS", False),
+    ("GRAPHME_PREVIEW_CACHE_MB", False),
     ("GRAPHME_BOX_CLIENT_ID", False),
     ("GRAPHME_BOX_CLIENT_SECRET", True),
 )

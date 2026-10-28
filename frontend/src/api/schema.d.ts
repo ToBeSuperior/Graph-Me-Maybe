@@ -305,6 +305,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/drives/{kind}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Desktop Drive Usage
+         * @description What the drive keeps on this machine -- files downloaded, by a build or by hand --
+         *     in bytes and files. A file kept online only takes nothing.
+         */
+        get: operations["desktop_drive_usage_v1_drives__kind__usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/drives/{kind}/folders": {
         parameters: {
             query?: never;
@@ -1186,6 +1207,13 @@ export interface components {
             };
             /** Crops */
             crops?: string[];
+        };
+        /** DriveUsage */
+        DriveUsage: {
+            /** Bytes */
+            bytes: number;
+            /** Files */
+            files: number;
         };
         /** ExportJob */
         ExportJob: {
@@ -2076,6 +2104,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DesktopDrive"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    desktop_drive_usage_v1_drives__kind__usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: "box" | "google" | "onedrive";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriveUsage"];
                 };
             };
             /** @description Validation Error */

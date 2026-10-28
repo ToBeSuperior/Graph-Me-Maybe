@@ -18,7 +18,7 @@ import traceback
 import uuid
 import weakref
 import zipfile
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
@@ -40,6 +40,7 @@ from graphme.adapters.sources.box import Picked as BoxPicked
 from graphme.adapters.sources.box import web_url as box_web_url
 from graphme.adapters.sources.box_account import ACCOUNT as BOX_ACCOUNT
 from graphme.adapters.sources.box_account import BoxAccount
+from graphme.adapters.sources.cloud_files import evict, local_usage, online_only
 from graphme.adapters.sources.desktop_drives import DESKTOP_DRIVES, Drive, listing
 from graphme.adapters.sources.sign_in import Client, vault
 from graphme.adapters.storage import local_neo4j
@@ -118,6 +119,48 @@ def _stamp(path: str | Path) -> tuple[int, int] | None:
 
 
 PREVIEWS_KEPT = 24
+PREVIEW_HOLD_SECONDS = 300.0
+"""How long a cloud drive's file downloaded to draw a page is kept after it was last looked at:
+the next page of the same document is drawn from it, not downloaded again."""
+GIVE_BACK_TICK = 30.0
+"""How often what was looked at is checked for being given back."""
+
+
+def preview_limit(settings: Settings) -> int:
+    """The bytes the pages kept for readers may take on disk."""
+    return settings.preview_cache_mb * 1_000_000
+
+
+def _keep_page(folder: Path, name: str, png: bytes, limit: int) -> None:
+    """`png` kept as `name`, then the oldest pages let go until what is kept fits `limit`."""
+    if limit <= 0:
+        return
+    folder.mkdir(parents=True, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(dir=folder, suffix=".tmp")
+    with os.fdopen(handle, "wb") as out:
+        out.write(png)
+    os.replace(temporary, folder / name)
+    kept = []
+    for path in folder.glob("*.png"):
+        with contextlib.suppress(OSError):
+            found = path.stat()
+            kept.append((found.st_mtime, found.st_size, path))
+    total = sum(size for _, size, _ in kept)
+    for _, size, path in sorted(kept):
+        if total <= limit:
+            break
+        path.unlink(missing_ok=True)
+        total -= size
+
+
+def _give_back_for_good(paths: list[Path]) -> None:
+    """`paths` given back to their cloud drive now, and again at each of `SETTLE_SECONDS` if
+    an indexer had the drive download them since."""
+    if not paths:
+        return
+    evict(paths)
+    threading.Thread(target=_settle, args=(
+        lambda: evict([p for p in paths if not online_only(p)]),), daemon=True).start()
 
 
 def kept_from(records: dict[str, Any], fmt: DocumentFormat
@@ -206,6 +249,10 @@ def _since(started: float) -> float:
 _log = logging.getLogger(__name__)
 SPACE_WAIT = 2.0
 READ_TIMEOUT_SECONDS = 4 * 60 * 60
+SETTLE_SECONDS: tuple[float, ...] = (30.0, 120.0, 600.0)
+"""When, after a build, the files it gave back are looked at again: macOS's Spotlight indexes a
+file the build downloaded -- reading it after it was given back, so the drive downloads it
+again -- and leaves it alone once indexed."""
 SWEEP_GRACE = 600.0
 """Seconds an asset just written is kept by a sweep, named or not: a reading under way writes
 its crops before the graph names them."""
@@ -228,6 +275,18 @@ def _sealed(session: Session) -> bool:
             return file.read(len(OLE_MAGIC)) == OLE_MAGIC
     except OSError:
         return False
+
+
+def _settle(again: Callable[[], None]) -> None:
+    """`again` once at each of `SETTLE_SECONDS` after a build."""
+    waited = 0.0
+    for at in SETTLE_SECONDS:
+        time.sleep(at - waited)
+        waited = at
+        try:
+            again()
+        except Exception:  # noqa: BLE001 -- the file stays here; the next look tries again
+            traceback.print_exc(file=sys.stderr)
 
 
 def _let_go(graph: GraphMe, root: Path) -> None:
@@ -281,6 +340,8 @@ class Demo:
         # Every image and every poll looks a document up here: every document a folder brought.
         self.catalog: dict[str, str] = {}
         self.readers = ThreadPoolExecutor(max_workers=READERS, thread_name_prefix="read")
+        self.reading_at_once = READERS
+        """Documents read at once by `readers`: a build lets in twice as many, no more."""
         """Documents read at once: a folder of thousands queues here, not in a thread each."""
         self._running = 0
         """Documents being read now, which share the calls in flight (`_workers`)."""
@@ -290,6 +351,12 @@ class Demo:
         self.previews: OrderedDict[tuple[str, int, tuple[int, int] | None], bytes] = OrderedDict()
         """Pages drawn for a reader, the latest PREVIEWS_KEPT: nothing is kept across starts."""
         self.previewing = threading.Lock()
+        self.preview_dir = self.root / "previews"
+        """The pages drawn for readers, kept on disk under `preview_cache_mb`."""
+        self.viewed: dict[str, tuple[Path, float]] = {}
+        """Files a cloud drive downloaded to be drawn, and when each was last looked at."""
+        self.viewing = threading.Lock()
+        self._watching: threading.Thread | None = None
         self.sources = Sources()
         self.origins: dict[str, tuple[str, dict[str, str | None]]] = {}
         """A file fetched from a cloud drive for a build: its address there, and what is
@@ -505,6 +572,8 @@ class Demo:
         document the space does not hold, or whose file is gone, is named in
         `missing-files.txt` rather than passed over."""
         space = self.space()
+        clouded: list[Path] = []
+        """Online only before they were zipped: given back once they are."""
         place = Path(tempfile.mkdtemp(prefix="graphme-files-"))  # a dropped download: temp
         archive = place / "files.zip"
         taken: set[str] = set()
@@ -522,6 +591,10 @@ class Demo:
                 while name in taken:  # two files of one name in one folder: both kept
                     n += 1
                     name = f"{where}/{stem} ({n}){suffix}"
+                local = Path(path)
+                if "://" not in path and local.name and online_only(local) \
+                        and self.doc_id(path) not in self.viewed:  # one looked at: kept a while
+                    clouded.append(local)
                 try:
                     with self.sources.open_copy(path) as copy:
                         out.write(copy, name)
@@ -533,6 +606,7 @@ class Demo:
             if missing:
                 out.writestr("missing-files.txt", "These could not be added:\n"
                              + "\n".join(missing) + "\n")
+        _give_back_for_good(clouded)
         return archive
 
     def start_export(
@@ -635,16 +709,33 @@ class Demo:
         return doc
 
     def preview(self, doc: str, index: int) -> bytes:
-        """Page `index` of a document drawn for a reader, now: no page is kept for every
-        document, and only the latest PREVIEWS_KEPT for this start."""
+        """Page `index` of a document drawn for a reader: no page is kept for every document,
+        only the pages looked at -- the latest PREVIEWS_KEPT in memory, and on disk as many as
+        `preview_cache_mb` holds, so a page looked at before needs no file, and a cloud drive
+        does not download it again to show it."""
         session = self.session(doc)
         key = (doc, index, session.stamp)
         with self.previewing:
             if key in self.previews:
                 self.previews.move_to_end(key)
                 return self.previews[key]
+        original = session.origin or str(session.source)
+        local = None if "://" in original else Path(original)  # a cloud address: fetched
+        stamp = _stamp(local) if local is not None else session.stamp
+        page = (f"{doc}-{stamp[0]}-{stamp[1]}-{index}.png" if stamp is not None
+                else None)
+        if page is not None and (kept := self.preview_dir / page).is_file():
+            with contextlib.suppress(OSError):
+                png = kept.read_bytes()
+                os.utime(kept)  # looked at again: the last to go
+                with self.previewing:
+                    self.previews[key] = png
+                return png
+        # A cloud drive's file kept online only is downloaded to be drawn: given back once it
+        # has not been looked at for a while (the next page is drawn from it meanwhile).
+        if local is not None and (online_only(local) or doc in self.viewed):
+            self._viewed(doc, local)
         try:
-            original = session.origin or str(session.source)
             with self.sources.open_copy(original) as source, self.drawing:
                 try:
                     png = self.renderer.preview(source, session.format, index)
@@ -656,6 +747,9 @@ class Demo:
             self.previews[key] = png
             while len(self.previews) > PREVIEWS_KEPT:
                 self.previews.popitem(last=False)
+        if page is not None:
+            with contextlib.suppress(OSError):  # not kept: drawn again next time
+                _keep_page(self.preview_dir, page, png, preview_limit(self.settings))
         return png
 
     def open_path(self, path: str) -> str:
@@ -857,6 +951,16 @@ class Demo:
             raise Busy(f"{kind} drive is not connected -- connect it first")
         return listing(drive.base, relative, drive.top)
 
+    def drive_usage(self, kind: str) -> dict[str, int]:
+        """What `kind` keeps on this machine: its bytes and how many files. Never a listing
+        asked of the cloud -- a folder never opened holds nothing here and is passed over."""
+        drive = self.desktop_drive(kind)
+        if drive is None:
+            raise LookupError(f"{kind} drive is not on this machine")
+        if not self.drive_connected(kind):
+            raise Busy(f"{kind} drive is not connected -- connect it first")
+        return local_usage(drive.base, drive.top)
+
     def _box_source(self) -> BoxSource:
         return BoxSource(self.client, self.box().access_token, self.root / "box-copies")
 
@@ -892,31 +996,88 @@ class Demo:
 
     def _build_corpus(self, docs: list[str], put: bool, embed: bool) -> None:
         build, stop = self.build, self.build_stop
-        # A file a document carries -- a Word file on a slide -- is read as a document of its
-        # own, kept the way an upload is; one level, not what it carries in turn. Found here,
-        # off the request: a large PDF takes a while to look through.
-        given = list(dict.fromkeys(docs))
-        docs = list(dict.fromkeys([*given, *(
-            self.add(each.name, each.content)
-            for doc in given if doc in self.catalog
-            for each in embedded_in(Path(self.catalog[doc])) if each.content
-        )]))
-        # A file whose content the space already holds is not read again: reading costs a
-        # model call a page. A reading alone never asks the space.
-        known = set(self.already_in(docs)) if put else set()
-        if known:
-            relocated(self.space(), {self.catalog[doc]: self.content_hash(doc) for doc in known
-                                     if doc in self.catalog})
-        build.carried = sum(doc not in known for doc in docs[len(given):])
-        docs = [doc for doc in docs if doc not in known]
-        build.known, build.total = len(known), len(docs)
-        for doc in docs:
-            self.start(doc, stop)  # every document reads side by side, under the shared slots
+        # Documents are let in a few at a time: as many as are read at once, and as many again
+        # waiting their turn. Letting one in reads its content (is it in the graph already? what
+        # files does it carry?), and a cloud drive downloads a file read and keeps it: a whole
+        # folder let in at once filled the disk faster than it was read.
+        waiting = deque(dict.fromkeys(docs))
+        given = set(waiting)
+        admitted: list[str] = []
+        carried: set[str] = set()
+        clouded: set[str] = set()
+        """Online only before this build read them: given back to the cloud once read."""
+        given_back: set[str] = set()
+        fed = threading.Event()
+        window = 2 * self.reading_at_once
+        build.total = len(waiting)
+
+        giving = threading.Lock()
+
+        def give_back(chosen: Iterable[str]) -> None:
+            with giving:  # the feeder and the putting both give back: each file once
+                chosen = [doc for doc in chosen if doc in clouded and doc not in given_back]
+                given_back.update(chosen)
+            paths = [Path(self.catalog[doc]) for doc in chosen if doc in self.catalog]
+            if paths and (freed := evict(paths)):
+                _log.info("gave %s files read back to their cloud drive", freed)
+
+        def give_back_again() -> None:
+            """What was given back and downloaded again since (an indexer read it) given back."""
+            with giving:
+                again = [Path(self.catalog[doc]) for doc in given_back
+                         if doc in self.catalog and not online_only(Path(self.catalog[doc]))]
+            if again:
+                evict(again)
+
+        def feed() -> None:
+            try:
+                while waiting and not stop.is_set():
+                    # A document read is given back before another is let in in its place.
+                    give_back(d for d in admitted if self.sessions[d].state in FINISHED)
+                    give_back_again()
+                    if sum(self.sessions[d].state not in FINISHED for d in admitted) >= window:
+                        time.sleep(0.2)
+                        continue
+                    doc = waiting.popleft()
+                    path = self.catalog.get(doc)
+                    if path and online_only(Path(path)):
+                        clouded.add(doc)
+                    # A file whose content the space already holds is not read again: reading
+                    # costs a model call a page. A reading alone never asks the space.
+                    if put and self.already_in([doc]):
+                        build.known += 1
+                        build.total -= 1
+                        if doc in carried:
+                            build.carried -= 1
+                        if path:
+                            relocated(self.space(), {path: self.content_hash(doc)})
+                        give_back([doc])
+                        continue
+                    # A file a document carries -- a Word file on a slide -- is read as a
+                    # document of its own, kept the way an upload is; one level, not what it
+                    # carries in turn.
+                    if doc in given and path:
+                        found = [self.add(each.name, each.content)
+                                 for each in embedded_in(Path(path)) if each.content]
+                        fresh = [c for c in dict.fromkeys(found) if c not in given
+                                 and c not in carried and c not in admitted]
+                        carried.update(fresh)
+                        waiting.extendleft(reversed(fresh))
+                        build.carried += len(fresh)
+                        build.total += len(fresh)
+                    admitted.append(doc)
+                    if put:
+                        self.putting.add(doc)
+                    self.start(doc, stop)  # read side by side, under the shared slots
+            except Exception:  # noqa: BLE001 -- the documents let in are still read and put
+                traceback.print_exc(file=sys.stderr)
+            finally:
+                fed.set()
 
         def finished() -> int:
             # The documents are read side by side and finish in any order, and are put in the
             # order they finish, so how far it is is how many are read.
-            return sum(self.sessions[doc].state in FINISHED for doc in docs)
+            return sum(self.sessions[doc].state in FINISHED for doc in list(admitted))
 
         def share() -> int:
             """How far the reading is: each document read is whole, each being read as far as
@@ -927,28 +1088,36 @@ class Demo:
                     return 1.0
                 done, planned = session.progress.counts()
                 return done / planned if planned else 0.0
-            return int(100 * sum(one(doc) for doc in docs) / len(docs)) if docs else 100
+            let_in = list(admitted)
+            whole = len(let_in) + len(waiting)
+            return int(100 * sum(one(doc) for doc in let_in) / whole) if whole else 100
 
         def counted() -> int:
             build.percent = max(build.percent or 0, share())  # an estimate replaced: no step back
             return finished()
 
-        def in_turn(paths: Sequence[Path]) -> Iterator[Path]:
-            """Each document once it is read; when a cancel or a reading that never ends stops
-            the wait, the rest, which `process` then says were not read."""
-            left = list(paths)
+        def in_turn(_: Sequence[Path]) -> Iterator[Path]:
+            """Each document let in, once it is read -- its file given back to the cloud then;
+            when a cancel or a reading that never ends stops the wait, the rest, which
+            `process` then says were not read."""
+            yielded: set[str] = set()
             deadline = time.monotonic() + READ_TIMEOUT_SECONDS
-            while left:
-                read = [p for p in left if self.sessions[p.name].state in FINISHED]
-                if not read and (stop.is_set() or time.monotonic() > deadline):
+            while True:
+                done_feeding = fed.is_set()
+                left = [doc for doc in admitted if doc not in yielded]
+                if not left and done_feeding:
+                    return
+                read = [doc for doc in left if self.sessions[doc].state in FINISHED]
+                if not read and left and (stop.is_set() or time.monotonic() > deadline):
                     read = left
                 if not read:
                     build.done = counted()
-                    time.sleep(1)
+                    time.sleep(0.2)
                     continue
-                left = [p for p in left if p not in read]
+                yielded.update(read)
                 deadline = time.monotonic() + READ_TIMEOUT_SECONDS
-                yield from read
+                give_back(doc for doc in read if self.sessions[doc].state in FINISHED)
+                yield from (Path(doc) for doc in read)
 
         def process(handle: Path) -> ExtractedDocument:
             session = self.sessions[handle.name]
@@ -964,24 +1133,29 @@ class Demo:
             return session.extracted
 
         def step(name: BuildStep, done: int, total: int) -> None:
-            build.state, build.total = STEP_STATES[name], total
-            build.done = done if name == BuildStep.LINK else counted()
+            build.state = STEP_STATES[name]
+            if name == BuildStep.LINK:  # the reading's total is the build's, as it grows
+                build.total, build.done = total, done
+            else:
+                build.done = counted()
 
         def read_only() -> BuildReport:
             failed = []
-            for path in in_turn([Path(doc) for doc in docs]):
+            for path in in_turn([]):
                 try:
                     process(path)
                 except RuntimeError as error:
                     failed.append((path, str(error)))
             build.done = counted()
-            return BuildReport(processed=len(docs) - len(failed), failed=tuple(failed), links=0)
+            return BuildReport(processed=len(admitted) - len(failed), failed=tuple(failed),
+                               links=0)
 
-        self.putting = set(docs) if put else set()
+        self.putting = set()
+        threading.Thread(target=feed, daemon=True).start()
         try:
+            # The documents arrive as they are let in and read (`in_turn`), not as a list.
             report = build_graph(
-                [Path(doc) for doc in docs], process=process, space=self.space(), on_step=step,
-                in_turn=in_turn,
+                [], process=process, space=self.space(), on_step=step, in_turn=in_turn,
             ) if put else read_only()
         except Exception:  # noqa: BLE001 -- the build's state says what happened
             traceback.print_exc(file=sys.stderr)
@@ -989,6 +1163,13 @@ class Demo:
             return
         finally:
             self.putting = set()
+            fed.wait()
+            # Whatever was read and not given back yet -- one passed over, one that failed.
+            give_back(doc for doc in list(clouded) if doc not in self.sessions
+                      or self.sessions[doc].state in FINISHED or doc not in admitted)
+            build.skipped += len(waiting)  # a cancel left them waiting: never let in
+            if given_back:
+                threading.Thread(target=_settle, args=(give_back_again,), daemon=True).start()
         # What failed, said by file name -- the server's folders are this machine's, not the
         # reader's; what a cancel passed over is not a failure.
         # Kept beside what was said before the reading: a folder passed over while looking.
@@ -1032,6 +1213,37 @@ class Demo:
                 self.sessions.pop(doc, None)
                 self.catalog.pop(doc, None)
                 self.hashes.pop(doc, None)
+
+    def forget_previews(self, path: str | None = None) -> None:
+        """The pages kept for readers of the document read from `path` let go -- of every
+        document, without one."""
+        prefix = f"{self.doc_id(path)}-" if path else ""
+        for kept in self.preview_dir.glob(f"{prefix}*.png"):
+            kept.unlink(missing_ok=True)
+
+    def _viewed(self, doc: str, path: Path) -> None:
+        with self.viewing:
+            self.viewed[doc] = (path, time.monotonic())
+            if self._watching is None or not self._watching.is_alive():
+                self._watching = threading.Thread(target=self._give_back_unviewed, daemon=True)
+                self._watching.start()
+
+    def _give_back_unviewed(self) -> None:
+        """The files downloaded to be looked at, given back once not looked at for
+        `PREVIEW_HOLD_SECONDS`; ends when none is left to watch."""
+        while True:
+            time.sleep(GIVE_BACK_TICK)
+            with self.viewing:
+                due = [doc for doc, (_, at) in self.viewed.items()
+                       if time.monotonic() - at >= PREVIEW_HOLD_SECONDS]
+                paths = [self.viewed.pop(doc)[0] for doc in due]
+                left = bool(self.viewed)
+            try:
+                _give_back_for_good(paths)
+            except Exception:  # noqa: BLE001 -- the file stays here
+                traceback.print_exc(file=sys.stderr)
+            if not left:
+                return
 
     def forget(self, document_id: str) -> None:
         """The server's own reading of a document deleted from the graph let go too: a document
