@@ -326,13 +326,56 @@ def start(
                                "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL}
     if platform != "win32":  # Windows' windowless start is `processes.popen`'s
         options["start_new_session"] = True  # one group: the launcher and the server it starts
+        options["preexec_fn"] = _ending_unblocked
     try:
         child = popen([*home.command("neo4j", platform), "console"], **options)
     finally:
         log.close()  # the child has its own
     (data / "run" / "graphme.json").write_text(json.dumps({"pid": child.pid, "port": port}),
                                                encoding="utf-8")
+    if platform != "win32" and popen is processes.popen:  # a real one: its group is its pid
+        watch(child.pid, platform=platform)
     return child
+
+
+_WATCHER = """
+import os, signal, sys, time
+parent, group = int(sys.argv[1]), int(sys.argv[2])
+while os.getppid() == parent:
+    time.sleep(1)
+    try:
+        os.killpg(group, 0)
+    except OSError:
+        sys.exit(0)  # stopped already, as it should be
+try:
+    os.killpg(group, signal.SIGTERM)
+    for _ in range(60):
+        time.sleep(1)
+        os.killpg(group, 0)
+    os.killpg(group, signal.SIGKILL)
+except OSError:
+    pass
+"""
+
+
+def _ending_unblocked() -> None:
+    """Run in a child before its program: the signals that end it unblocked. The app blocks
+    SIGTERM and SIGHUP in every thread but the one waiting for them, and a child inherits its
+    parent's mask -- its Neo4j took no SIGTERM and ran until killed."""
+    signal.pthread_sigmask(signal.SIG_SETMASK, set())
+
+
+def watch(group: int, *, platform: str = sys.platform) -> None:
+    """The Neo4j whose process group is `group` stopped if this process ends without stopping
+    it -- killed, or a test run timed out: no atexit runs then, and a Neo4j in a session of its own
+    ran on with nobody to stop it. A small process of its own watches for this one to go."""
+    # ponytail: POSIX only; a Windows job object if a Neo4j left there turns up
+    if platform == "win32":
+        return
+    processes.popen([sys.executable, "-c", _WATCHER, str(os.getpid()), str(group)],
+                    start_new_session=True, preexec_fn=_ending_unblocked,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def stop(child: subprocess.Popen[bytes], *, platform: str = sys.platform) -> None:

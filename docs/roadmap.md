@@ -1,6 +1,6 @@
 # Graph-Me-Maybe — What Is Left to Do
 
-> Updated: 2026-10-15
+> Updated: 2026-10-28
 >
 > Finished work is not listed here. Confirmed behavior is in
 > [`../finalized_source.md`](../finalized_source.md), and the history is in
@@ -9,15 +9,17 @@
 ## Current state in one line
 
 Extraction → browser render → unit crop → VLM hierarchy → graph space → question runs
-end to end, and the VLM hierarchy handles worksheets, slides, DOCX and PDF.
+end to end for worksheets, slides, DOCX and PDF, in an installed app (macOS, Windows) with its
+own Neo4j, search run on this machine, workspaces, and folders read from Box, Google Drive and
+OneDrive/SharePoint through their desktop apps.
 
-## 0 · Next plan (2026-10-15)
+## 0 · Next plan
 
 - [ ] **Make the open-source release easier to use with per-feature APIs.** Expose reading
       (extraction, rendering, VLM hierarchy), graph loading, search, question answering,
-      document linking and export as separate APIs. Today the demo server
-      (`tools/hierarchy_demo/app.py`) ties this flow into one block, so another project
-      cannot easily take just part of it.
+      document linking and export as separate APIs. Today `GraphMe.add` and the server's build
+      (`server/state.py`) tie this flow into one block, so another project cannot easily take
+      just part of it.
 - [ ] **A library to `pip install`.** `graphme.read` and `GraphMe` (add, embed, search, ask,
       documents, delete, export) exist, but only inside the app's package. In order:
       1. `py.typed`; the window and the server as extras (`graph-me-maybe[app]`, `[server]`) so the
@@ -32,15 +34,15 @@ end to end, and the VLM hierarchy handles worksheets, slides, DOCX and PDF.
 - [ ] **Measure efficiency and performance on the latest GraphRAG benchmarks.** Record
       ingest time, model call count and tokens, and query latency, not only accuracy.
       Compare with other GraphRAG implementations under the same conditions.
-- [ ] **Ship the demo with an installer.** Let people start the demo from one installer,
-      without installing dependencies such as Neo4j, Chrome and Node by hand.
 - [ ] **An MCP server, and the app running in the background.** Designed in
       `docs/superpowers/specs/2026-10-27-mcp-server-design.md`: `graphme mcp` (stdio) over the
       app's API; MCP allowed per workspace (off by default), a workspace not open read beside the
       open one; the app split into a background agent with a tray / menu bar icon (open the app,
       MCP on/off, start at login -- off by default --, quit completely) and a window of its own.
 - [ ] **A native installer and app.** Today one-line scripts install uv and the app as a Python
-      package, and the Mac `.app` is a shortcut to that command. Bundle Python, the libraries
+      package (Neo4j, Java, the viewer and a browser fetched for it), and the Mac `.app` is a
+      two-line shell script calling that command: the process is `python`, unsigned, so macOS
+      may ask again for a drive's folder after an update, or name `python` when it asks. Bundle Python, the libraries
       and the app into one `Graph-Me-Maybe.app` / `.exe` (BeeWare Briefcase or PyInstaller) and
       ship a `.dmg` and an `.msi`/setup `.exe`, built by the release workflow for each platform;
       Neo4j, the Java runtime and the search model stay fetched on first start. Unsigned, macOS
@@ -51,12 +53,11 @@ end to end, and the VLM hierarchy handles worksheets, slides, DOCX and PDF.
 
 ## 1 · Wire the hierarchy into production indexing
 
-- [ ] Index the whole corpus once in `derived` mode and measure how hierarchy edges change
-      search results. So far it has only been run in the demo.
-- [ ] Decide from per-page call cost and latency whether the default is `off` or whether to
-      turn it on by format and size. Put the reading count (`GRAPHME_HIERARCHY_READINGS`) on
-      the same scale — with 2 readings the calls double, and only pages where the readings
-      differ cost one more.
+- [ ] Measure on a real corpus how the outline (hierarchy edges) changes search results.
+      Every build reads the outline off the page now; what it buys in answers is not measured.
+- [ ] Decide the readings per page (`GRAPHME_HIERARCHY_READINGS`, 1; the app 2) from per-page
+      call cost and latency -- with 2 readings the calls double, and only pages where the
+      readings differ cost one more.
 - [ ] Decide whether to record the places where readings differ. Today which reading was
       chosen and why stays in the log only, not in the graph.
 - [ ] Check the page-carry rule for flowing documents on longer documents. Today, within a
@@ -81,17 +82,16 @@ end to end, and the VLM hierarchy handles worksheets, slides, DOCX and PDF.
       only the block's left coordinate.
 - [ ] Check the frame-detection thresholds (area 15%, fill 50%, longest cell 200 characters)
       on other PDFs. They are values tuned on only two documents.
-- [ ] Load the Neo4j export into a real instance and check it. So far only the shape of the
-      scripts and records has been verified (there is no local Neo4j). Also decide whether to
-      give top-level units an `OUTLINE_PARENT` from the page root, so that the hierarchy
-      relations alone form a complete tree.
+- [ ] Check an Aura upload end to end (the `.dump` is checked by loading it into an empty Neo4j
+      5.26). Also decide whether to give top-level units an `OUTLINE_PARENT` from the page root,
+      so that the hierarchy relations alone form a complete tree.
 
 ## 1.5 · Search and the web app
 
-- [ ] (Refinement) A preview still starts a process and a browser for each page drawn, and
-      the viewer reads the whole file again: a browser kept running for a few minutes after a
-      preview (with the document loaded) would take most of that away, at the memory a running
-      browser holds.
+- [ ] (Refinement) A page not drawn yet still starts a process and a browser, and the viewer
+      reads the whole file again (a page drawn once is kept on disk and shown from there): a
+      browser kept running for a few minutes after a preview, with the document loaded, would
+      take most of that away, at the memory a running browser holds.
 - [ ] (Later) Draw a preview in the app's own window with the same viewer: no server render at
       all, and sharp at any zoom. The boxes come from the server's Chromium, and macOS's window is
       WebKit, so text measured differently would move them; check that first.
@@ -107,17 +107,20 @@ end to end, and the VLM hierarchy handles worksheets, slides, DOCX and PDF.
       or to drop the common word from the full-text query.
 - [ ] One document sometimes takes over the first-round results. Decide whether to limit the
       number of passages per document.
-- [ ] Tune RRF `k` (60), the weight (0.6) and the floor (0.3) on a real question set. Today
-      they are set from literature values and sample documents only.
+- [ ] Tune RRF `k` (60), the weight (0.6) and each search model's relevance floor (0.39 general,
+      0.46 Korean, 0.2 OpenAI) on a real question set. Today they are set from literature values
+      and the invented samples only.
 - [ ] Some pages keep watermarks and repeated header elements without `drop`. Since we chose
       not to use a rule filter (method.md), we reduce them through the context the model sees
       and the prompt.
-- [ ] The "N / total" in the progress display is the number of documents put into the graph.
-      Reading runs in parallel, so the number looks stuck until a long document earlier in
-      the order finishes. Decide whether to show the number read separately.
 - [ ] Changing the passage count asks the question again without confirmation. A citation
       chip in the answer does not jump to the evidence passage.
-
+- [ ] Check OneDrive/SharePoint on a machine with OneDrive signed in and a SharePoint library
+      synced: the folders it finds (`OneDrive-*`, `OneDrive-SharedLibraries-*`; on Windows the
+      registry's mount points) and a build from them. Only invented folders have checked it.
+- [ ] Windows: giving a file back to the cloud after it is read is OneDrive's alone (`attrib +U
+      -P`); Google Drive and Box Drive there keep what is read in their own capped caches. Not
+      yet run on Windows at all.
 - [ ] (Later) ONLYOFFICE as a source. It has no desktop client that syncs files to a folder, so
       it cannot be read like Box Drive, Google Drive or OneDrive, and DocSpace has no WebDAV
       server yet. Read DocSpace through its REST API with a personal access token (its address
@@ -163,8 +166,6 @@ end to end, and the VLM hierarchy handles worksheets, slides, DOCX and PDF.
 
 ## 6 · Reconciling documents
 
-- [ ] Align the README onboarding with the real CLI and web surface.
-
 Diagrams are no longer maintained. The pipeline is covered by the stage table in
 `finalized_source.md` and the final code list, and keeping a second copy of the same content
 as a picture let it drift while nobody was looking — a picture you cannot trust is worse than
@@ -174,13 +175,6 @@ no picture. If one is needed, draw a fresh one then.
 
 - [ ] `tools/hierarchy_demo/` is excluded from mypy. Renaming a field breaks it silently (this
       actually happened with the `bbox` → `crop` change). Decide whether to include it.
-- [x] Removed the traces of the marker-based hierarchy (`application/hierarchy.py`,
-      `hierarchy_reconciliation.py`, `hierarchy_benchmark.py`, `hierarchy_features.py`,
-      `hierarchy_prompt_evaluation.py`) and the unconnected caption modules
-      (`caption_generation.py`, `caption_validation.py`). The `derived` mode and
-      `visual_captions.py` do the same job.
-- [ ] The demo keeps document results only in server memory, so a restart starts again from
-      scratch.
 - [ ] Decoding metafiles (EMF, WMF) relies on a viewer patch. 16-bit DIB support was added,
       but compressed DIBs (`BI_JPEG`, `BI_PNG`) and `BI_BITFIELDS` are still not drawn — add
       them in the same place if they show up in a real document. A whole picture can vanish

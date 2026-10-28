@@ -149,8 +149,9 @@ graph (`with_geometry`: a node's `page` and `box`, the document node's `pages` -
 width, height), and a preview of a document in the space is shown by those
 (`server/state.py` `kept_from`): no extraction, no binding, and only the page looked at drawn,
 when it is looked at, at a preview's resolution (`PageRenderer.preview`: one page, device pixel
-ratio 1, nothing measured), the latest `PREVIEWS_KEPT` held in memory. A reading's page files are
-removed when it ends (`_lighten`). A document built before geometry was written is drawn and
+ratio 1, nothing measured), the latest `PREVIEWS_KEPT` held in memory and every page looked at
+kept on disk (`<server root>/previews`, under `preview_cache_mb`, the oldest going first), so a
+page looked at again needs no file. A reading's page files are removed when it ends (`_lighten`). A document built before geometry was written is drawn and
 bound again when opened. Keeping every page image and the bound graph across starts (an earlier
 page cache) grew with every document; the server clears what it left (`_forget_kept_pages`).
 
@@ -446,7 +447,8 @@ update never touches it, started as a child (`neo4j console`, its own `NEO4J_CON
 (mode 600, made on first start and set over Bolt, never on a command line; a graph from
 before it is given one when next started or found running) -- Bolt takes WebSocket
 connections, so with none any page open in a browser could reach the graph and stopped when that process ends -- atexit,
-or `stop_started()` before the window app's `os._exit`. A Neo4j answering on the port the home
+or `stop_started()` before the window app's `os._exit`; and should what started it be killed (no
+atexit runs), a watcher process of its own (`local_neo4j.watch`, POSIX) stops it. A Neo4j answering on the port the home
 recorded is adopted only if `server.directories.data` is this home's (WSL's app answers on
 Windows' loopback too). The server never opens it in a page's request: `Demo.space(wait=)` opens
 it behind and answers `GraphStarting` (503, Retry-After), which the page keeps asking through.
@@ -456,6 +458,15 @@ home's one install; the home's own graph is the first. Switching (`Demo.switch_w
 the new one on another port, moves onto it once it answers, and stops the old one behind
 (`local_neo4j.stop_graph`) -- going back to a graph still stopping waits for it, since its Neo4j
 holds the folder until it has stopped.
+A cloud drive's desktop app downloads a file kept online only when it is read, and keeps it
+(`adapters/sources/cloud_files.py`). A build therefore lets its documents in a few at a time --
+`reading_at_once` read and as many again waiting, each checked against the graph and searched
+for carried files as it is let in, never the whole folder first -- notes which were online only
+(`online_only`), and gives each back (`evict`: NSFileManager on macOS, `attrib +U -P` for
+OneDrive on Windows) once it is read; a preview gives its file back after `PREVIEW_HOLD_SECONDS`
+not looked at, a download once zipped. macOS's Spotlight reads a file just downloaded and has
+the drive download it again, so what was given back is looked at again (`SETTLE_SECONDS`).
+`local_usage` measures what a drive keeps here without walking a folder never opened.
 Crops and pictures go in `Settings.asset_dir` (a workspace's own beside its graph) and are swept
 (`Demo.sweep_assets`, `LocalAssetStore.sweep`) after a build, a delete, a reset and on opening:
 kept is what the graph's nodes name (`crop_asset_hash`, the only asset read once a document is

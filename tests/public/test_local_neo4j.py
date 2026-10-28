@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 import sys
 import tarfile
@@ -366,3 +367,67 @@ def test_one_workspace_s_graph_is_stopped_and_the_others_left_running(
     local_neo4j.stop_graph(tmp_path / "workspaces" / "w1")
 
     assert stopped == [mine] and local_neo4j._started == [(home, theirs)]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="process groups are POSIX's")
+def test_a_neo4j_whose_starter_is_killed_is_stopped_too(tmp_path: Path) -> None:
+    # A test run timed out, an app killed: atexit never ran, and its Neo4j -- in a session of its
+    # own -- ran on with nobody to stop it, twenty at once under pytest's folders.
+    import os
+    import signal
+    import time
+
+    neo4j = subprocess.Popen(["sleep", "300"], start_new_session=True)  # stands for the server
+    starter = subprocess.Popen([sys.executable, "-c", (
+        "import sys, time\n"
+        "from graphme.adapters.storage import local_neo4j\n"
+        f"local_neo4j.watch({neo4j.pid})\n"
+        "print('watching', flush=True)\n"
+        "time.sleep(300)\n")], stdout=subprocess.PIPE, text=True)
+    try:
+        assert starter.stdout is not None and starter.stdout.readline().strip() == "watching"
+        os.kill(starter.pid, signal.SIGKILL)  # no atexit, no handler
+        starter.wait()
+
+        for _ in range(100):
+            if neo4j.poll() is not None:
+                break
+            time.sleep(0.1)
+        assert neo4j.poll() is not None  # stopped by the watcher
+    finally:
+        for process in (neo4j, starter):
+            if process.poll() is None:
+                process.kill()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="signal masks are POSIX's")
+def test_a_neo4j_started_by_an_app_that_blocks_its_ending_signals_still_takes_them(
+    tmp_path: Path,
+) -> None:
+    # The app blocks SIGTERM and SIGHUP everywhere but the thread that waits for them, and a
+    # child inherits its parent's mask: its Neo4j took no SIGTERM, and ran until SIGKILL.
+    import signal
+    import time
+
+    script = tmp_path / "neo4j" / "bin" / "neo4j"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/sh\nexec sleep 300\n")  # stands for the server
+    script.chmod(0o755)
+    home = Neo4jHome(tmp_path)
+    previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGHUP})
+    try:
+        child = local_neo4j.start(home, home.data, 7699, ("1g", "512m"),
+                                  popen=lambda args, **o: subprocess.Popen(args, **o))
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+    try:
+        time.sleep(0.3)
+        os.kill(-child.pid, signal.SIGTERM)  # the group, as `stop` signals it
+        for _ in range(50):
+            if child.poll() is not None:
+                break
+            time.sleep(0.1)
+        assert child.poll() is not None  # ended by SIGTERM, as a stop sends
+    finally:
+        if child.poll() is None:
+            child.kill()

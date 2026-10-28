@@ -45,7 +45,8 @@ leave it, to the provider you choose.
   embeddings remain a choice.
 - **Your cloud drives.** Box Drive, Google Drive for desktop and OneDrive (with the SharePoint
   libraries it syncs) are browsed in the app as folders and built from; Box can also be signed in to
-  directly.
+  directly. A file kept online only is given back to the cloud once read, so a large folder does not
+  fill the disk.
 - **Workspaces.** Graphs kept apart, each with its own documents and links, switched in seconds.
 - **A desktop app.** One-line installers for macOS and Windows; the graph database (Neo4j) is
   installed and run by the app itself, with no Docker and no account.
@@ -245,6 +246,8 @@ also read the [Code of Conduct](CODE_OF_CONDUCT.md); security issues go to
 - Mixed-column layouts and borderless tables in PDFs are read on a best-effort basis.
 - The `.dump` export is checked by loading it into an empty Neo4j 5.26; Aura upload has not been
   checked end to end.
+- Giving a cloud file back after it is read works on macOS (Box Drive, Google Drive, OneDrive) and,
+  on Windows, for OneDrive only; OneDrive/SharePoint has been checked with invented folders only.
 
 ## 🔒 Security and data
 

@@ -5,6 +5,21 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.44] - 2026-10-28
+
+### Fixed
+
+- A Neo4j the app or a command started is stopped when what started it is killed or crashes,
+  instead of running on with nobody to stop it (a small watcher process stops it). Test runs cut
+  short left them running, twenty at once.
+- The app's Neo4j takes SIGTERM: the app blocks its ending signals in every thread but the one
+  waiting for them, and its Neo4j inherited them blocked, stopping only when killed after a minute.
+
+### Changed
+
+- The roadmap, README, CLAUDE.md and the install guide brought up to date: what is done, what is
+  open now, and where pages looked at and crops are kept.
+
 ## [0.1.43] - 2026-10-28
 
 ### Added

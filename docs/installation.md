@@ -55,7 +55,7 @@ The app folder holds:
 | Path | What |
 |---|---|
 | `.env` | your settings and keys (mode 600) |
-| `.graphme/` | the app's working data: uploaded files, rendered pages, crops |
+| `.graphme/` | the app's working data: uploaded files, crops (unused ones swept away), pages looked at (`server/previews`, 500 MB at most by default) |
 | `neo4j/`, `jre/` | Neo4j Community and the Java runtime (replaced on update) |
 | `neo4j-data/` | the graph itself (kept on update): the first workspace's |
 | `workspaces/`, `workspaces.json` | every other workspace's graph, and which one is open |

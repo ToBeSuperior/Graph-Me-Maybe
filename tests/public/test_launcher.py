@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import socket
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,19 @@ import pytest
 from graphme import launcher, model_endpoint, processes
 from graphme.config import load_settings, read_dotenv
 
+
+@pytest.fixture(autouse=True)
+def _signals_as_they_were() -> Iterator[None]:
+    """`main` blocks the ending signals in the thread that runs it -- here pytest's own: put
+    back after each test, or every child a later test starts inherits them blocked."""
+    import signal
+
+    if not hasattr(signal, "pthread_sigmask"):
+        yield
+        return
+    before = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+    yield
+    signal.pthread_sigmask(signal.SIG_SETMASK, before)
 
 def test_the_home_is_the_platform_s_app_folder_unless_named() -> None:
     assert launcher.home({"GRAPHME_HOME": "/x/y"}, "darwin") == Path("/x/y")
