@@ -408,9 +408,9 @@ class GraphRag:
         return GraphAnswer(text=text, sources=[_source(item) for item in items])
 
     def _pictures(self, items: Sequence[RetrieverResultItem]) -> list[tuple[str, bytes]]:
-        """The crops of the tables, pictures and charts the found passages hold, in the order
-        the passages were found, each named by its file and label -- at most
-        ANSWER_PICTURES of them."""
+        """The crops of the tables, pictures and charts the found passages hold, and the scans
+        their words were read off, in the order the passages were found, each named by its
+        file and label -- at most ANSWER_PICTURES of them."""
         if self._assets is None:
             return []
         members = list(dict.fromkeys(
@@ -421,10 +421,12 @@ class GraphRag:
         )
         by_id = {record["id"]: record for record in records}
         pictures: list[tuple[str, bytes]] = []
+        sent: set[str] = set()
         for member in members:
             record = by_id.get(member)
-            if record is None:
+            if record is None or record["picture"] in sent:
                 continue
+            sent.add(record["picture"])
             # A crop not kept is a picture the passage's words still describe.
             if (png := read_crop(record["crop"], self._assets)) is None:
                 continue
@@ -698,12 +700,15 @@ def _checked(documents: int) -> None:
 
 
 _PICTURES = f"""
-MATCH (n:{NODE_LABEL}) WHERE n.id IN $ids AND (n:Table OR n:PivotTable OR n:Chart OR n:Image)
-  AND n[$key] IS NOT NULL
+MATCH (m:{NODE_LABEL}) WHERE m.id IN $ids
+OPTIONAL MATCH (s:{NODE_LABEL} {{id: m.meta_scan_of}})
+WITH m, coalesce(s, m) AS n
+WHERE (n:Table OR n:PivotTable OR n:Chart OR n:Image) AND n[$key] IS NOT NULL
 MATCH (d:Document {{id: n.document_id}})
-RETURN n.id AS id, n.label AS label, n[$key] AS crop, d.file_name AS file
+RETURN m.id AS id, n.id AS picture, n.label AS label, n[$key] AS crop, d.file_name AS file
 """
-"""Which of a passage's members are pictures with a stored crop (`VISUAL_TYPES`)."""
+"""Which of a passage's members are pictures with a stored crop (`VISUAL_TYPES`), and for
+words read off a scan, the scan they were read from."""
 
 
 def _item(record: neo4j.Record) -> RetrieverResultItem:

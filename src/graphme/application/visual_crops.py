@@ -269,7 +269,15 @@ def bind_page_visuals(
         covered = box.area / page_area
         band = paper and (_bleeds(box.x0, box.x1, box.y0, box.y1, page.width, page.height)
                           or _bleeds(box.y0, box.y1, box.x0, box.x1, page.height, page.width))
-        if node.type is NodeType.IMAGE and (covered >= BACKGROUND_COVERAGE or band):
+        # A backdrop is what something else is printed on; a picture filling the page with
+        # nothing over it -- a scan pasted onto a slide -- is what the page says. A scan read
+        # for its words is the page they are printed on, whatever its margins.
+        printed_on = any(other is not node and box.covered_fraction(over) > 0
+                         for other, over in shown)
+        if node.type is NodeType.IMAGE and (
+            ((covered >= BACKGROUND_COVERAGE or band) and printed_on)
+            or node.metadata.get("background")
+        ):
             background.add(node.id)
             continue
         if node.type in FIGURE_TYPES and ink:

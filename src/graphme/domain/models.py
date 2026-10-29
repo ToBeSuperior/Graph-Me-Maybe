@@ -490,6 +490,22 @@ class VisualCaption(DomainModel):
     saying "a decorative icon" are not what the passage it stood in is about."""
 
 
+class ScannedBlock(DomainModel):
+    """One piece of a scanned page's text as the model read it, and where: `box` is
+    (x0, y0, x1, y1) as shares of the page's width and height."""
+
+    text: str = Field(min_length=1, max_length=8000)
+    box: tuple[float, float, float, float]
+
+
+class ScannedPage(DomainModel):
+    """What the model read off a page that is a picture. `has_text` false is a picture with
+    nothing to read -- a photograph, a drawing, a logo."""
+
+    has_text: bool
+    blocks: tuple[ScannedBlock, ...] = Field(default=(), max_length=300)
+
+
 class VisualCaptionResult(DomainModel):
     captions: tuple[VisualCaption, ...] = Field(max_length=100)
 

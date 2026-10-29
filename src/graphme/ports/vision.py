@@ -11,6 +11,7 @@ from graphme.domain.models import (
     HierarchyScopeResult,
     JoinPlacement,
     PageJoinRequest,
+    ScannedPage,
     UnitGroupingRequest,
     UnitGroupingResult,
     VisualCaptionRequest,
@@ -58,6 +59,8 @@ class VisionProvider(Protocol):
         image: bytes,
         unit_images: Mapping[str, bytes] | None = None,
     ) -> DocumentReferenceResult: ...
+
+    def read_scanned_page(self, image: bytes) -> ScannedPage: ...
 
     def join_page(self, *, request: PageJoinRequest) -> tuple[JoinPlacement, ...]: ...
 

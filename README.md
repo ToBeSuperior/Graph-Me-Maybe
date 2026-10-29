@@ -163,7 +163,7 @@ what failed on the way, is in [`docs/method.md`](docs/method.md).
 
 | Format | Read | Drawn by | Notes |
 |---|---|---|---|
-| PDF | text, tables, images, attachments | PyMuPDF | scanned (image-only) pages are flagged; OCR text is not promoted into the graph |
+| PDF | text, tables, images, attachments, scanned pages | PyMuPDF; scanned pages read by the page-reading model | text read off a scan is marked as the model's reading |
 | DOCX | paragraphs, tables, pictures, embedded files | browser viewer (WASM) | headers, footers and comments are not extracted |
 | PPTX | slides, shapes, tables, charts, pictures, embedded files | browser viewer (WASM) | slides keep their order |
 | XLSX | sheets, tables, charts, pictures, formulas, embedded files | browser viewer (WASM) | formulas are linked, not recalculated |

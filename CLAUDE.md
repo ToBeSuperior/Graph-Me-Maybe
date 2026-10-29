@@ -99,7 +99,10 @@ stay readable while newly emitted data is held to the stricter contract.
 ### Native-first authority
 
 Extraction owns the graph. Rendered and VLM observations may only **add** evidence to
-conservatively matched native nodes; an unmatched observation is not promoted. There are
+conservatively matched native nodes; an unmatched observation is not promoted. The one
+exception is a scanned PDF page (`pdf.py` `_is_scan`): the file holds a picture and no words
+for it, so the page-reading model's reading becomes its text units at extraction, each with
+`GENERATED_EXTRACTION` evidence beside the `SOURCE_MEDIA` of the scan it was read from. There are
 no page nodes in an authoritative graph — pages are a rendering artifact, not a semantic
 parent — and every persisted `NEXT` edge must join siblings under one `CONTAINS` parent.
 

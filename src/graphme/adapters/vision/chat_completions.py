@@ -36,6 +36,8 @@ from graphme.adapters.vision.prompts import (
     HIERARCHY_SYSTEM_PROMPT,
     REFERENCE_SCHEMA_NAME,
     REFERENCE_SYSTEM_PROMPT,
+    SCAN_SCHEMA_NAME,
+    SCAN_SYSTEM_PROMPT,
 )
 from graphme.domain.ids import canonical_json, sha256_bytes
 from graphme.domain.models import (
@@ -54,6 +56,8 @@ from graphme.domain.models import (
     JoinPlacement,
     PageJoinRequest,
     ReferenceKind,
+    ScannedBlock,
+    ScannedPage,
     UnitGroupingRequest,
     UnitGroupingResult,
     UnitLabel,
@@ -325,6 +329,26 @@ class _ShortIdCaptionResult(BaseModel):
         return VisualCaptionResult(captions=tuple(described))
 
 
+class _ScanBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+class _ScanAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    has_text: bool
+    blocks: list[_ScanBlock]
+
+    def to_scanned_page(self) -> ScannedPage:
+        return ScannedPage(has_text=self.has_text, blocks=tuple(
+            ScannedBlock(text=block.text, box=(block.x0, block.y0, block.x1, block.y1))
+            for block in self.blocks if block.text.strip()))
+
+
 class _ShortIdFigure(BaseModel):
     """A picture and the units drawn as part of it, in shortened unit IDs."""
 
@@ -573,6 +597,19 @@ class ChatCompletionsVLMAdapter:
             user_content=content,
             read=read,
             failure="the model endpoint returned a malformed caption response",
+        )
+
+    def read_scanned_page(self, image: bytes) -> ScannedPage:
+        """The text of a page that is a picture, as the model reads it off the page."""
+        if not image:
+            raise ValueError("scanned page image must not be empty")
+        return self._asked_until_answered(
+            schema_name=SCAN_SCHEMA_NAME,
+            schema=strict_response_schema(_ScanAnswer),
+            system=SCAN_SYSTEM_PROMPT,
+            user_content=[{"type": "text", "text": "Read this page."}, image_part(image)],
+            read=lambda generated: _ScanAnswer.model_validate(generated).to_scanned_page(),
+            failure="the model endpoint returned a malformed scanned-page response",
         )
 
     def group_page_units(

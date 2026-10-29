@@ -5,6 +5,29 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.49] - 2026-10-29
+
+### Added
+
+- Scanned PDF pages are read. A page that is a picture of a page -- its only content one
+  picture, or pictures covering most of it with at most a stamped line or three of the file's
+  own words over them (a filing header, a page number) -- goes to the page-reading model,
+  which copies its text with where each piece sits; words the file already holds are not
+  read twice. The text
+  is searched and outlined like the file's own, marked as read by the model, and an answer
+  that uses it is shown the scan it was read from. A page with nothing to read, or nothing
+  but words the model could not make out, stays a picture. Each scanned page is noted in the
+  document's warnings.
+- A scanned or photographed page pasted into a DOCX, PPTX or XLSX -- a letter, a form, a fax
+  -- has its text copied in full into its caption, in reading order, instead of a summary of
+  what it is about.
+
+### Fixed
+
+- A picture filling a page or slide with nothing printed over it -- a scan pasted onto a
+  slide -- is what the page says: it is cropped and captioned. Before, it was taken for the
+  backdrop and left out of search.
+
 ## [0.1.48] - 2026-10-29
 
 ### Fixed

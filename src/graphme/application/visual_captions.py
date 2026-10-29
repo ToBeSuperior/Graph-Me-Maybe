@@ -74,7 +74,9 @@ def caption_visuals(
         for page in pages
         if (crops := crops_of(by_page.get(page.index, ()), asset_store))
         for part, batch in enumerate(
-            _batched([node for node in by_page[page.index] if node.id in crops]), start=1
+            # A backdrop with a crop is a scan whose words were read as the page's own.
+            _batched([node for node in by_page[page.index]
+                      if node.id in crops and not node.metadata.get("background")]), start=1
         )
     ]
 
