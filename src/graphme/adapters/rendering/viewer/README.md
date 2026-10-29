@@ -51,8 +51,11 @@ a run leaving a flat stretch of zeros dips below zero. Excel scales the automati
 that drawn curve, which is how an all-positive series gets a -1 minimum; the viewer scaled to
 the points only. Line charts and the line overlay of a combo now include the curve's extent.
 
-Only the XLSX bundle is compiled here, so the fix reaches XLSX; DOCX and PPTX charts come from
-the published build.
+Only the XLSX bundle is compiled here, so the fix reaches XLSX; DOCX and PPTX get it from the
+dist patch `0003` below. The combo fix (`0002`) is in the Rust chart parser compiled into the
+published WebAssembly and cannot be patched there. Instead `../chart_axes.py` folds the deleted
+secondary category axis onto the one beside it in a copy of the file before it is drawn, which
+is what Office draws; drop it once a published version carries the fix (upstream #1984).
 
 `0004-emf-16-bit-dib-pictures.patch` -- `core/src/image/dib.ts`: the same 16-bit metafile
 bitmap the dist patch below fixes. Both builds carry their own copy of the decoder, so the
@@ -67,6 +70,7 @@ build is copied into the bundle.
 | --- | --- |
 | `0001-docx-metric-only-segments-do-not-merge.patch` | A paragraph that only hosts an anchored drawing gets an empty, height-only segment with no script. Sizing a table cell merges adjacent text segments by fingerprint, and fingerprinting that segment threw `Cannot fingerprint undefined`, failing the whole document; merged, it would also have carried its height-only flag onto real text. Height-only segments are no longer merged. |
 | `0002-emf-16-bit-dib-pictures.patch` | A picture pasted as a metafile keeps its photographs as device-independent bitmaps inside the EMF. The DIB decoder reads 32, 24, 8, 4 and 1 bits per pixel and returns nothing for 16 — the depth a screen capture pasted from a 16-bit display carries — so the metafile drew its frames, arrows and circles and left every photograph out, with no error anywhere. 16-bit `BI_RGB` is RGB555; it is decoded like the others. |
+| `0003-smoothed-line-axis-covers-the-drawn-curve.patch` | The same smoothed-line axis as the XLSX source patch `0003`, in the published `renderer-*.js` that draws DOCX and PPTX charts: a smoothed line leaving a run of zeros dipped below an axis that stopped at zero. The line chart and a line drawn over columns now include the curve's extent (`$smoothExtent`). |
 
 The published build carries the metafile player twice: once in the chunk the viewers import
 on the main thread, which is what draws a document here, and once inside

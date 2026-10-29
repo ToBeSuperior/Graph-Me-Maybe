@@ -1,0 +1,62 @@
+--- a/dist/renderer-XFSCOT6m.js	2026-10-29 10:04:22
++++ b/dist/renderer-XFSCOT6m.js	2026-10-29 10:04:22
+@@ -1530,10 +1530,18 @@
+ 			r && (gt = Math.max(gt, o), _t = Math.min(_t, s));
+ 		}
+ 	}
+-	for (let e of [...O, ...k]) if (!(I && e.useSecondaryAxis === !0)) for (let t = 0; t < z; t++) {
+-		if (e.values[t] == null) continue;
+-		let n = xe(e, t);
+-		gt = Math.max(gt, n), _t = Math.min(_t, n);
++	for (let e of [...O, ...k]) if (!(I && e.useSecondaryAxis === !0)) {
++		let $d = [];
++		for (let t = 0; t < z; t++) {
++			if (e.values[t] == null) {
++				$d.push(null);
++				continue;
++			}
++			let n = xe(e, t);
++			$d.push(n), gt = Math.max(gt, n), _t = Math.min(_t, n);
++		}
++		let $c = e.smooth === !0 ? $smoothExtent($d) : null;
++		$c && (gt = Math.max(gt, $c[1]), _t = Math.min(_t, $c[0]));
+ 	}
+ 	for (let e of ae) {
+ 		let t = x.indexOf(e);
+@@ -2638,6 +2646,23 @@
+ function Kr(e, t, n) {
+ 	return Gr(e.catAxisCrossesAt, e.catAxisCrosses, t, n);
+ }
++/** The value range a smoothed line draws: its Bezier overshoots its points, and Excel's axis
++ * covers the curve (an all-positive series leaving a run of zeros gets a negative minimum). */
++function $smoothExtent(e) {
++	let t = Infinity, n = -Infinity, r = [], i = () => {
++		for (let e of r) t = Math.min(t, e), n = Math.max(n, e);
++		if (r.length >= 3) for (let e = 0; e < r.length - 1; e++) {
++			let i = r[e - 1] ?? r[e], a = r[e], o = r[e + 1], s = r[e + 2] ?? o, c = a + (o - i) / 6, l = o - (s - a) / 6;
++			for (let e = 1; e < 32; e++) {
++				let r = e / 32, i = 1 - r, s = i * i * i * a + 3 * i * i * r * c + 3 * i * r * r * l + r * r * r * o;
++				t = Math.min(t, s), n = Math.max(n, s);
++			}
++		}
++		r = [];
++	};
++	for (let t of e) t == null || !Number.isFinite(t) ? i() : r.push(t);
++	return i(), Number.isFinite(t) ? [t, n] : null;
++}
+ function qr(e, t, r, i, a = 0) {
+ 	let { x: o, y: s, w: c, h: l } = r, u = pr(t), d = u.length;
+ 	if (d === 0) return;
+@@ -2681,6 +2706,12 @@
+ 	}
+ 	for (let e = 0; e < t.series.length; e++) {
+ 		let n = t.series[e];
++		if (F(n) || _[e] || n.smooth !== !0) continue;
++		let r = $smoothExtent(n.values.slice(0, d));
++		r && (ne = Math.min(ne, r[0]), re = Math.max(re, r[1]));
++	}
++	for (let e = 0; e < t.series.length; e++) {
++		let n = t.series[e];
+ 		F(n) || nr(n, "y", (t) => n.values[t] == null ? null : w(e, t), (e) => {
+ 			ne = Math.min(ne, e), re = Math.max(re, e);
+ 		});

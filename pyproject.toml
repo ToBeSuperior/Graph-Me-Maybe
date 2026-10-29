@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph-me-maybe"
-version = "0.1.44"
+version = "0.1.45"
 description = "Graph-Me-Maybe: local-first multimodal graph RAG over documents"
 readme = "README.md"
 license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
@@ -31,6 +31,7 @@ dependencies = [
   "playwright>=1.55,<2",
   "pywebview>=5.4,<7 ; sys_platform == 'darwin' or sys_platform == 'win32'",
   "keyring>=25,<26",
+  "lxml>=5,<7",
 ]
 
 [project.optional-dependencies]

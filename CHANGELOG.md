@@ -5,6 +5,16 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.45] - 2026-10-29
+
+### Fixed
+
+- A smoothed line chart in a Word or PowerPoint file is drawn with its axis covering the curve,
+  as Excel draws it: a line leaving a run of zeros dipped below an axis that stopped at zero.
+  Workbooks had this already.
+- A combo chart in a Word or PowerPoint file with its columns on the secondary axis is drawn
+  instead of `Unsupported chart`. Workbooks had this already.
+
 ## [0.1.44] - 2026-10-28
 
 ### Fixed

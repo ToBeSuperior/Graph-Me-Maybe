@@ -244,12 +244,13 @@ wheels = [
 
 [[package]]
 name = "graph-me-maybe"
-version = "0.1.44"
+version = "0.1.45"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "keyring" },
+    { name = "lxml" },
     { name = "neo4j" },
     { name = "neo4j-graphrag", extra = ["openai"] },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -282,6 +283,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.116,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "keyring", specifier = ">=25,<26" },
+    { name = "lxml", specifier = ">=5,<7" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.17,<2" },
     { name = "neo4j", specifier = ">=6.4.0" },
     { name = "neo4j-graphrag", extras = ["openai"], specifier = ">=1.22.0" },
