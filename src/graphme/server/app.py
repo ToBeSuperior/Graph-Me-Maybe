@@ -44,7 +44,7 @@ from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.rendering.visual_binding import page_name, placed_units
 from graphme.adapters.sources.box import Picked as BoxPicked
 from graphme.adapters.storage.assets import LocalAssetStore
-from graphme.adapters.storage.graph_rag import MAX_TOP_K, GraphNotEmbedded, GraphRag
+from graphme.adapters.storage.graph_rag import MAX_DOCUMENTS, GraphNotEmbedded, GraphRag
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, modified_at
 from graphme.application.embedded_documents import name_part
 from graphme.application.ingest import documents_at
@@ -748,7 +748,8 @@ def create_app(
     # Questions ------------------------------------------------------------------------------
 
     def asked(request: api.Question, run: Callable[[GraphRag, str, int], T]) -> T:
-        """A question and its top_k checked, then `run` on the graph space's GraphRAG."""
+        """A question and how many documents it asks for checked, then `run` on the graph
+        space's GraphRAG."""
         question = request.question.strip()
         if not question:
             raise HTTPException(400, "the question is empty")
@@ -756,16 +757,17 @@ def create_app(
             raise HTTPException(
                 400, f"the question is too long -- at most {MAX_QUESTION_CHARS:,} characters"
             )
-        top_k = request.top_k if request.top_k is not None else demo.settings.retrieval_top_k
-        if not 1 <= top_k <= MAX_TOP_K:
-            raise HTTPException(400, f"top_k must be between 1 and {MAX_TOP_K}")
+        asked_for = request.documents if request.documents is not None else request.top_k
+        documents = asked_for if asked_for is not None else demo.settings.retrieval_documents
+        if not 1 <= documents <= MAX_DOCUMENTS:
+            raise HTTPException(400, f"documents must be between 1 and {MAX_DOCUMENTS}")
         opened()
         try:
             rag = demo.rag()
         except ValueError as error:  # a key or the graph DB not configured
             raise HTTPException(503, str(error)) from error
         try:
-            return run(rag, question, top_k)
+            return run(rag, question, documents)
         except (GraphNotEmbedded, Neo4jError, ServiceUnavailable, SessionExpired):
             raise  # the graph DB's, not the model's: the handlers say them (409, 500)
         except Exception as error:  # noqa: BLE001 -- said to the caller, not a crash
@@ -778,13 +780,13 @@ def create_app(
     def search(request: api.Question) -> dict[str, Any]:
         """What a question finds -- the passages and the documents linked to theirs, hop by
         hop -- with no answer written."""
-        found = asked(request, lambda rag, question, top_k: rag.find(question, top_k=top_k))
+        found = asked(request, lambda rag, question, n: rag.find(question, documents=n))
         return {"sources": [asdict(source) for source in found]}
 
     @v1.post("/ask", response_model=api.Answer)
     def ask(request: api.Question) -> dict[str, Any]:
         """A question answered from the graph space, with the passages it was answered from."""
-        answer = asked(request, lambda rag, question, top_k: rag.ask(question, top_k=top_k))
+        answer = asked(request, lambda rag, question, n: rag.ask(question, documents=n))
         return {"answer": answer.text, "sources": [asdict(source) for source in answer.sources]}
 
     # Jobs -----------------------------------------------------------------------------------

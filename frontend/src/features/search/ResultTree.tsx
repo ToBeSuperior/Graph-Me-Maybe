@@ -180,9 +180,9 @@ export const ResultTree = memo(function ResultTree({ trail, selected, onSelect, 
               'focus-visible:ring-2 focus-visible:ring-accent/40',
               on ? 'bg-accent-soft' : lit === doc.id ? 'bg-mark/40' : 'hover:bg-hover',
               !fits(entry) && 'opacity-45')}
-            style={{ paddingLeft: 4 + (level - 1) * 22 }}
+            style={{ paddingLeft: 4 + (level - 1) * 24 }}
           >
-            {level > 1 && <span aria-hidden className="absolute top-0 bottom-0 w-px bg-line" style={{ left: 13 + (level - 2) * 22 }} />}
+            {level > 1 && <span aria-hidden className="absolute top-0 bottom-0 w-0.5 rounded-full bg-line-strong" style={{ left: 13 + (level - 2) * 24 }} />}
             <button
               tabIndex={-1}
               aria-hidden
@@ -192,14 +192,20 @@ export const ResultTree = memo(function ResultTree({ trail, selected, onSelect, 
               <ChevronRight className={cn('size-3.5 transition-transform', opened && 'rotate-90')} />
             </button>
             <div className="min-w-0 flex-1">
+              {/* The name has the first line to itself: in a narrow column the labels around it
+                  left it a few letters. Every row says its hop, so the badges match the legend
+                  above -- the found documents' order is their rank. */}
               <div className="flex h-6 min-w-0 items-center gap-1.5">
-                {/* A found document is said by its rank; a linked one by its hop, so the two
-                    numbers never stand side by side. */}
-                {level === 1 ? <span className="w-4 shrink-0 text-right font-mono text-2xs text-faint">{doc.rank}</span> : <HopBadge hop={doc.hop} />}
-                {entry.direction && row.parent && <RelationChip direction={entry.direction} of={row.parent.entry.doc.label} />}
+                <HopBadge hop={doc.hop} />
                 <FileIcon file={doc.label} />
-                <span className={cn('truncate text-sm', on || level === 1 ? 'font-medium' : '')} title={shownName(doc.label)}>{stem(doc.label)}</span>
-                <span className="shrink-0 font-mono text-2xs text-faint uppercase">{formatOf(doc.label)}</span>
+                <span className={cn('min-w-0 flex-1 truncate text-sm', on || level === 1 ? 'font-medium' : '')} title={shownName(doc.label)}>{stem(doc.label)}</span>
+                <span className="shrink-0 pl-2 text-2xs text-faint" title={changedAt(doc.modified, lang, true)}>
+                  {changedAt(doc.modified, lang)}
+                </span>
+              </div>
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5 pl-[22px]">
+                {entry.direction && row.parent && <RelationChip direction={entry.direction} of={row.parent.entry.doc.label} />}
+                <span className="shrink-0 font-mono text-2xs text-muted uppercase">{formatOf(doc.label)}</span>
                 {cited.has(doc.id) && (
                   <span title={t('citedInAnswer')} className="inline-flex shrink-0 items-center gap-0.5 rounded bg-accent-soft px-1 text-2xs font-medium text-accent-fg">
                     <Quote className="size-2.5" />{t('cited')}
@@ -207,11 +213,8 @@ export const ResultTree = memo(function ResultTree({ trail, selected, onSelect, 
                 )}
                 {more > 0 && <span title={t('alsoElsewhereTip')} className="shrink-0 text-2xs text-faint">{t('alsoElsewhere', more)}</span>}
                 {holds && !opened && <span className="shrink-0 rounded bg-surface px-1 font-mono text-2xs text-muted">+{under(entry)}</span>}
-                <span className="ml-auto shrink-0 pl-2 text-2xs text-faint" title={changedAt(doc.modified, lang, true)}>
-                  {changedAt(doc.modified, lang)}
-                </span>
               </div>
-              {why && <p className="line-clamp-1 text-xs text-muted">{why}</p>}
+              {why && <p className="line-clamp-1 pl-[22px] text-xs text-muted">{why}</p>}
             </div>
           </div>
         );

@@ -7,7 +7,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from graphme.adapters.storage.graph_rag import (
-    MAX_TOP_K,
+    MAX_DOCUMENTS,
     GraphAnswer,
     GraphNotEmbedded,
     GraphSource,
@@ -22,23 +22,23 @@ class FakeRag:
         self.asked: list[int] = []
         self.failure = failure
 
-    def ask(self, question: str, *, top_k: int) -> GraphAnswer:
+    def ask(self, question: str, *, documents: int) -> GraphAnswer:
         if self.failure:
             raise self.failure
-        self.asked.append(top_k)
+        self.asked.append(documents)
         return GraphAnswer(
             text="합격 [spec.docx]",
             sources=[GraphSource(id="d:0", score=0.9, document_id="d", file="spec.docx",
                                  members=["n1"], context="spec.docx\n합격")],
         )
 
-    def find(self, question: str, *, top_k: int) -> list[GraphSource]:
+    def find(self, question: str, *, documents: int) -> list[GraphSource]:
         if self.failure:
             raise self.failure
         return [GraphSource(id="d:0", score=0.9, document_id="d", file="memo.docx",
                             members=["n1"], context="memo", linked=[LinkedDocument(
                                 document_id="s", file="spec.docx", hop=2, via="d",
-                                direction="cites", passages=[])])][:top_k]
+                                direction="cites", passages=[])])][:documents]
 
 
 def _asking(demo: Demo, rag: Any) -> None:
@@ -54,18 +54,21 @@ def test_a_question_is_answered_with_its_sources_and_a_bad_one_is_told_why(
     answered = client.post("/v1/ask", json={"question": "판정은?"})
     assert answered.status_code == 200
     assert answered.json()["sources"][0]["members"] == ["n1"]
-    assert rag.asked == [demo.settings.retrieval_top_k]
+    assert rag.asked == [demo.settings.retrieval_documents]
 
-    for top_k in ("many", 0, MAX_TOP_K + 1):
-        told = client.post("/v1/ask", json={"question": "판정은?", "top_k": top_k})
-        assert told.status_code == 400, top_k
+    for documents in ("many", 0, MAX_DOCUMENTS + 1):
+        told = client.post("/v1/ask", json={"question": "판정은?", "documents": documents})
+        assert told.status_code == 400, documents
+    # The old name is read as the number of documents.
+    assert client.post("/v1/ask", json={"question": "판정은?", "top_k": 3}).status_code == 200
+    assert rag.asked[-1] == 3
     assert client.post("/v1/ask", json={"question": " "}).status_code == 400
 
 
 def test_a_search_finds_documents_with_no_answer_written(demo: Demo, client: TestClient) -> None:
     _asking(demo, FakeRag())
 
-    found = client.post("/v1/search", json={"question": "누설", "top_k": 10})
+    found = client.post("/v1/search", json={"question": "누설", "documents": 10})
 
     assert found.status_code == 200
     [source] = found.json()["sources"]

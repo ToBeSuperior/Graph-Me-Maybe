@@ -54,12 +54,12 @@ class _Rag:
     def __init__(self) -> None:
         self.asked: list[tuple[str, int]] = []
 
-    def find(self, question: str, *, top_k: int) -> list[Any]:
-        self.asked.append((question, top_k))
+    def find(self, question: str, *, documents: int) -> list[Any]:
+        self.asked.append((question, documents))
         return []
 
-    def ask(self, question: str, *, top_k: int) -> Any:
-        self.asked.append((question, top_k))
+    def ask(self, question: str, *, documents: int) -> Any:
+        self.asked.append((question, documents))
         return graphme.GraphAnswer(text="ok", sources=[])
 
 
@@ -80,7 +80,7 @@ def fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 def _settings() -> graphme.Settings:
-    return graphme.load_settings({"GRAPHME_PROFILE": "test", "GRAPHME_RETRIEVAL_TOP_K": "7"})
+    return graphme.load_settings({"GRAPHME_PROFILE": "test", "GRAPHME_RETRIEVAL_DOCUMENTS": "7"})
 
 
 def test_one_connection_is_opened_once_and_closed_with_the_block(fakes: dict[str, Any]) -> None:
@@ -98,11 +98,20 @@ def test_used_again_after_close_it_opens_again(fakes: dict[str, Any]) -> None:
     assert _Space.opened == 2
 
 
-def test_no_top_k_is_the_settings_one(fakes: dict[str, Any]) -> None:
+def test_no_number_of_documents_is_the_settings_one(fakes: dict[str, Any]) -> None:
     with graphme.GraphMe(_settings()) as g:
         g.search("q")
-        g.ask("q", top_k=3)
-    assert fakes["rag"].asked == [("q", 7), ("q", 3)]
+        g.ask("q", documents=3)
+        with pytest.warns(DeprecationWarning, match="documents"):
+            g.ask("q", top_k=4)  # the old name, read as the number of documents
+    assert fakes["rag"].asked == [("q", 7), ("q", 3), ("q", 4)]
+
+
+def test_the_old_setting_name_is_read_and_the_new_one_wins() -> None:
+    old = graphme.load_settings({"GRAPHME_PROFILE": "test", "GRAPHME_RETRIEVAL_TOP_K": "9"})
+    both = graphme.load_settings({"GRAPHME_PROFILE": "test", "GRAPHME_RETRIEVAL_TOP_K": "9",
+                                  "GRAPHME_RETRIEVAL_DOCUMENTS": "4"})
+    assert (old.retrieval_documents, both.retrieval_documents) == (9, 4)
 
 
 def test_deleting_an_unknown_document_deletes_nothing(fakes: dict[str, Any]) -> None:

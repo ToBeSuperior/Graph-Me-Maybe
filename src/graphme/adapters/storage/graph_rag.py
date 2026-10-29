@@ -49,6 +49,7 @@ from graphme.adapters.strict_schema import strict_response_schema
 from graphme.application.graph_chunks import CHUNK_RULE, chunks
 from graphme.application.passage_scores import IMPORTANCE_RULE, centroid, importance
 from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop
+from graphme.domain.text_match import estimated_tokens
 from graphme.ports.storage import AssetStore
 
 VECTOR_INDEX = "chunk_embedding"
@@ -73,13 +74,64 @@ LINKED_DOCUMENTS = 4
 """Linked documents a found passage brings along at each hop, the ones nearest the question:
 a much-cited paper is linked to dozens, and all of them is a context nobody answers from."""
 ANSWER_PICTURES = 16
-"""Most crops one answer is sent: two a passage at the default top_k. A passage of a slide
+"""Most crops one answer is sent: about two a passage it reads. A passage of a slide
 full of icons would otherwise send each of them."""
 PICTURES_FOLLOW = (
     "\n\nThe tables, pictures and charts the context describes follow, each named by the file "
     "it is in. Read them where the description leaves something out, and cite their file."
 )
-MAX_TOP_K = 20
+MAX_DOCUMENTS = 20
+"""Most documents a question may ask to find."""
+PASSAGES_PER_DOCUMENT = 5
+"""Most passages one found document brings: a document holding the answer in several sections
+gives all of them, and one taking the whole ranking still leaves room for the others."""
+ANSWER_TOKENS = 12_000
+"""What the passages an answer is written from may cost, linked documents included: the page
+shows every document found, the model reads the best of them."""
+
+
+def collected(ranked: Sequence[Any], documents: int) -> list[Any]:
+    """The passages a question finds, `ranked` best first: walked down until `documents`
+    documents are reached, the passage reaching the last one included, each document giving
+    at most PASSAGES_PER_DOCUMENT. Asking for fewer documents takes the front of the same walk."""
+    taken: list[Any] = []
+    given: dict[str, int] = {}
+    for passage in ranked:
+        doc = passage["document_id"]
+        if given.get(doc, 0) == PASSAGES_PER_DOCUMENT:
+            continue
+        given[doc] = given.get(doc, 0) + 1
+        taken.append(passage)
+        if len(given) == documents and given[doc] == 1:
+            break  # the passage that reached the last document is the walk's end
+    return taken
+
+
+def relevant_links(linked: Sequence[dict[str, Any]], floor: float) -> list[dict[str, Any]]:
+    """The linked documents something says are about the question: each keeps only its
+    passages whose cosine reaches `floor` (`vector.similarity.cosine` gives (1 + cos) / 2, as
+    the index does), and one with none left is not brought along -- a link says two documents
+    belong together, not that the other one answers this question."""
+    kept = []
+    for doc in linked:
+        near = [p for p in doc["passages"] if 2 * p["score"] - 1 >= floor]
+        if near:
+            kept.append({**doc, "passages": near})
+    return kept
+
+
+def within_budget(items: Sequence[RetrieverResultItem], budget: int = ANSWER_TOKENS
+                  ) -> list[RetrieverResultItem]:
+    """The front of `items` the answer reads: as many as fit in `budget` tokens, in order --
+    the first always, however long."""
+    read: list[RetrieverResultItem] = []
+    spent = 0
+    for item in items:
+        spent += estimated_tokens(str(item.content))
+        if read and spent > budget:
+            break
+        read.append(item)
+    return read
 """More passages than this is a prompt too long to answer from, not a better answer."""
 
 ASK_RETRY_DELAYS = (2.0, 5.0)
@@ -320,9 +372,9 @@ class GraphRag:
         with self._driver.session() as session:
             session.execute_write(write)
 
-    def ask(self, question: str, *, top_k: int) -> GraphAnswer:
-        _checked(top_k)
-        items = [_item(record) for record in _once(self._found(question, top_k))]
+    def ask(self, question: str, *, documents: int) -> GraphAnswer:
+        _checked(documents)
+        items = within_budget([_item(record) for record in _once(self._found(question, documents))])
         if not items:
             # Nothing near the question: no passage to answer from, and no model call for it.
             return GraphAnswer(text=_nothing_found(question), sources=[])
@@ -363,29 +415,57 @@ class GraphRag:
                 break
         return pictures
 
-    def find(self, question: str, *, top_k: int) -> list[GraphSource]:
+    def find(self, question: str, *, documents: int) -> list[GraphSource]:
         """The passages a question finds and the documents linked to theirs, with no answer
         written -- what the Q folder page shows: as `ask` reads them, but with
         LINKED_DOCUMENTS hop-3 documents under each hop-2 one rather than in all."""
-        _checked(top_k)
-        found = self._found(question, top_k)
+        _checked(documents)
+        found = self._found(question, documents)
         return [_source(_item(record)) for record in _once(found, each_folder=True)]
 
-    def _found(self, question: str, top_k: int) -> list[neo4j.Record]:
+    def _found(self, question: str, documents: int) -> list[neo4j.Record]:
         """The fused search for each thing the question asks (`_queries`), the passages taken
-        from each search in turn, best first, each once, top_k in all. An answer and its
-        folder page ask side by side: the search runs once for both."""
+        from each search in turn, best first, each once -- walked until `documents` documents
+        are reached (`collected`) -- then the documents linked to each one found, walked once
+        a document. An answer and its folder page ask side by side: the search runs once for
+        both, and asking for fewer documents takes the front of the same passages."""
         def search() -> list[neo4j.Record]:
             retriever = self._retriever()
-            searches = [retriever.fused(query, top_k) for query in self._queries(question)]
+            searches = [retriever.fused(query) for query in self._queries(question)]
             found: dict[str, neo4j.Record] = {}
-            for rank in range(top_k):
+            for rank in range(max(map(len, searches), default=0)):
                 for one in searches:
-                    if rank < len(one) and len(found) < top_k:
+                    if rank < len(one):
                         found.setdefault(one[rank]["id"], one[rank])
             return list(found.values())
 
-        return cast(list[neo4j.Record], self._shared(("found", question, top_k), search))
+        ranked = cast(list[neo4j.Record], self._shared(("found", question), search))
+        return self._linked(collected(ranked, documents), question)
+
+    def _linked(self, found: list[neo4j.Record], question: str) -> list[neo4j.Record]:
+        """`found` with the documents linked to each document in it, hop by hop, given to the
+        document's best passage: the walk is the document's, so it is made once a document,
+        however many of its passages were found."""
+        first: dict[str, int] = {}
+        for at, record in enumerate(found):
+            first.setdefault(record["document_id"], at)
+        if not first:
+            return found
+        retriever = self._retriever()
+        assert retriever.embedder is not None
+        records, _, _ = self._driver.execute_query(
+            self._links_query(), ids=list(first),
+            query_vector=retriever.embedder.embed_query(question),
+            routing_=neo4j.RoutingControl.READ,
+        )
+        links = {record["document_id"]: relevant_links(record["linked"], self._floor)
+                 for record in records}
+        return [
+            neo4j.Record({**dict(record),  # type: ignore[no-untyped-call]
+                          "linked": links.get(record["document_id"], [])
+                          if first[record["document_id"]] == at else []})
+            for at, record in enumerate(found)
+        ]
 
     def _queries(self, question: str) -> tuple[str, ...]:
         """What the question asks, one search query each (`SPLIT_SYSTEM`) -- or the question
@@ -490,6 +570,19 @@ class GraphRag:
         return self._rag
 
     def _retrieval_query(self) -> str:
+        """A passage found, as the search hands it on: what it says and whose it is."""
+        return """
+        WITH node AS chunk, score
+        MATCH (start:Document {id: chunk.document_id})
+        RETURN chunk.id AS id, score,
+               start.id AS document_id, start.label AS file,
+               chunk.text AS text, chunk.members AS members,
+               start.modified_at AS modified
+        """
+
+    def _links_query(self) -> str:
+        """The documents linked to each of `$ids`, hop by hop, each with its passages nearest
+        the question (`$query_vector`)."""
         vector = f"c.`{self._vector}`"
         # The linked documents nearest the question as a whole, before any passage is read.
         nearest = f"""MATCH (linked:Document {{id: other}})
@@ -497,8 +590,8 @@ class GraphRag:
             linked.`{self._centroid}`, $query_vector), 0.0) AS whole
           ORDER BY whole DESC LIMIT {LINK_CANDIDATES}"""
         return f"""
-        WITH node AS chunk, score
-        MATCH (start:Document {{id: chunk.document_id}})
+        UNWIND $ids AS found
+        MATCH (start:Document {{id: found}})
         CALL (start) {{
           WITH start AS doc
           {_LINKED}
@@ -536,10 +629,7 @@ class GraphRag:
                           modified: reached.modified_at}})
             AS linked
         }}
-        RETURN chunk.id AS id, score,
-               start.id AS document_id, start.label AS file,
-               chunk.text AS text, chunk.members AS members, linked,
-               start.modified_at AS modified
+        RETURN start.id AS document_id, linked
         """
 
 
@@ -565,9 +655,9 @@ _WAY = ("CASE WHEN 'cites' IN ways THEN 'cites' WHEN 'cited_by' IN ways THEN 'ci
 citation over a likeness."""
 
 
-def _checked(top_k: int) -> None:
-    if not 1 <= top_k <= MAX_TOP_K:
-        raise ValueError(f"top_k must be between 1 and {MAX_TOP_K}, not {top_k}")
+def _checked(documents: int) -> None:
+    if not 1 <= documents <= MAX_DOCUMENTS:
+        raise ValueError(f"documents must be between 1 and {MAX_DOCUMENTS}, not {documents}")
 
 
 _PICTURES = f"""

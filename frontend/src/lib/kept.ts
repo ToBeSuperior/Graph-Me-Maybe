@@ -4,7 +4,8 @@
 // again rather than shown stale.
 import type { CorpusMap } from '../api/client';
 
-const KEY = 'kept';
+// Named for what the count means: what was kept when it counted passages is not read again.
+const KEY = 'kept.documents';
 const KEPT = 20;
 
 /** FNV-1a over the graph's shape: which documents (by content), and how they are linked. */

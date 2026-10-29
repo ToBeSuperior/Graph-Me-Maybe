@@ -1439,7 +1439,12 @@ export interface components {
              * @default
              */
             question: string;
-            /** Top K */
+            /** Documents */
+            documents?: number | null;
+            /**
+             * Top K
+             * @deprecated
+             */
             top_k?: number | null;
         };
         /** ReadRequest */

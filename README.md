@@ -182,7 +182,7 @@ then the environment. The installed app keeps its `.env` in its own folder; the 
 | `GRAPHME_EMBEDDING_PROVIDER` | who embeds passages for search: `general` (default) or `korean`, run on this machine with no key; or `openai` / `gemini` with that provider's key |
 | `GRAPHME_NEO4J_URI` (+ `GRAPHME_NEO4J_PASSWORD`) | use a Neo4j you run yourself (Desktop, a server, Aura) instead of the app's own |
 | `GRAPHME_HOME` | the app's folder (settings, graph, viewer) |
-| `GRAPHME_RETRIEVAL_TOP_K` | how many passages a question starts from |
+| `GRAPHME_RETRIEVAL_DOCUMENTS` | how many documents a question finds when it does not say (5; `GRAPHME_RETRIEVAL_TOP_K` is its old name) |
 | `GRAPHME_HIERARCHY_READINGS` | how many times each page is read (more readings, steadier outlines, more cost) |
 | `GRAPHME_NEO4J_HEAP` / `GRAPHME_NEO4J_PAGECACHE` | memory of the app's Neo4j, for large graphs |
 | `GRAPHME_API_KEY` | required by `graphme serve` before it opens beyond this machine |

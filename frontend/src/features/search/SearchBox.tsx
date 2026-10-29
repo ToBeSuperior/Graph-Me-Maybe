@@ -60,7 +60,9 @@ export function SearchBox({ initial = '', topK = DEFAULT_K, large = false, autoF
         <span className="hidden sm:inline">{t('topK')}</span>
         <select value={k} onChange={(e) => {
           setK(Number(e.target.value));
-          // On a results page the open question is asked again with it at once.
+          // On a results page the open question is asked again with it at once: the search is
+          // run here again (the question's split is kept), and the answer, its evidence changed,
+          // is written again.
           if (initial && text.trim()) ask(text, Number(e.target.value));
         }}
           className="rounded border border-line bg-subtle px-1 py-0.5 font-mono text-xs text-muted outline-none">

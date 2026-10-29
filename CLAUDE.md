@@ -76,7 +76,7 @@ matters more than any single module:
 ```
 extract → validate → visual binding → validate
         → [derived only] figure grouping → widen figures → validate
-                       → text grouping (PDF, PPTX) → validate
+                       → text grouping (PDF, PPTX, DOCX) → validate
                        → outline decisions + figure-part placement
         → enrichment (captions, references) → validate
         → put in the graph space → link mentions (SAME_AS)
@@ -232,7 +232,8 @@ without its items carries how many it holds (`outline_omitted`). Headings are se
 separately.
 
 Text grouping (`application/unit_grouping.py`) explodes PDF blocks into printed lines and
-slide shapes into paragraphs, then asks `PIECES_PER_ASK` pieces at a time, carrying the last
+slide shapes into paragraphs (a Word paragraph, already whole, is offered as it is -- a hand-wrapped
+sentence arrives as two), then asks `PIECES_PER_ASK` pieces at a time, carrying the last
 `CARRY_PIECES` of the previous ask as settled. Small print -- smaller than the page's modal
 size, with no body text above or below it in the same x-span -- is moved to the page's end
 and never carried. A joined unit's box is measured only from pieces on its first piece's
@@ -368,8 +369,11 @@ number a question names below passages that only sound alike -- and walks
 `REFERENCES -> SAME_AS` to bring the cited document's nearest passages along. The two
 rankings are fused by weighted reciprocal rank fusion in our own query (`hybrid_search.py`, `_FUSED`, k =
 `GRAPHME_RRF_K`, vector weight `GRAPHME_HYBRID_DENSE_WEIGHT`, flipped toward the words for a
-question naming a document number), each index searched well past top_k; the library's own
-max-normalised ranker is not used. The fulltext index uses the `cjk` analyzer -- the standard
+question naming a document number), each index searched to `SEARCH_DEPTH` whatever is asked for; the library's own
+max-normalised ranker is not used. A question asks for documents, not passages: the fused passages are walked best
+first until that many documents are reached, at most `PASSAGES_PER_DOCUMENT` a document (`collected`), so fewer
+documents are the front of the same walk; links are walked once a document (`_linked`), a linked document kept only for its passages past the
+relevance floor (`relevant_links`), and the answer reads the front of it within `ANSWER_TOKENS` (`within_budget`) while the page shows all of it. The fulltext index uses the `cjk` analyzer -- the standard
 one keeps a Korean word whole with its particle -- and an index made otherwise is dropped and
 made again when the space opens. Rank cannot say whether anything was found, so a
 passage is fused only with evidence: cosine at least `GRAPHME_RELEVANCE_FLOOR`, or it holds

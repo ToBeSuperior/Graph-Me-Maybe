@@ -65,9 +65,6 @@ OneDrive/SharePoint through their desktop apps.
       the budget) → the recent section whole, and sends the bottom 30% image along. Check
       whether it is acceptable that deep headings drop first when the skeleton exceeds the
       budget in documents of dozens of pages.
-- [ ] Decide whether to use text grouping for DOCX too. Today it is PDF and PPTX only
-      (`GROUPING_FORMATS`). We judged DOCX does not need it because the file gives whole
-      paragraphs, but we have not checked headings split across text boxes.
 - [ ] Check the small-print rule (difference from the modal body size, presence of body text
       above and below) and the number of pieces per call on more document types. The rule was
       tuned on only two kinds, papers and Korean reports.
@@ -78,8 +75,8 @@ OneDrive/SharePoint through their desktop apps.
       from the side where more of it is visible, so the piece on the other side is not in the
       crop.
 - [ ] Decide whether to count leading spaces before a sentence in PDF too. Today `indent`
-      counts both ways (paragraph settings and leading spaces) only for DOCX, and PDF uses
-      only the block's left coordinate.
+      counts both ways (paragraph settings and leading spaces) only for DOCX: a PDF line's
+      text is stripped when it is read, so only its left coordinate reaches `indent`.
 - [ ] Check the frame-detection thresholds (area 15%, fill 50%, longest cell 200 characters)
       on other PDFs. They are values tuned on only two documents.
 - [ ] Check an Aura upload end to end (the `.dump` is checked by loading it into an empty Neo4j
@@ -105,16 +102,15 @@ OneDrive/SharePoint through their desktop apps.
       number is present, the full-text side gets more weight, but the common word matches
       passages in other documents. Decide whether to boost the document whose number matches
       or to drop the common word from the full-text query.
-- [ ] One document sometimes takes over the first-round results. Decide whether to limit the
-      number of passages per document.
+- [ ] Measure what asking for documents costs and buys against asking for passages: how many
+      passages a question gathers, how often the answer's 12,000 tokens leave found documents
+      unread, and whether answers change.
 - [ ] Tune RRF `k` (60), the weight (0.6) and each search model's relevance floor (0.39 general,
       0.46 Korean, 0.2 OpenAI) on a real question set. Today they are set from literature values
       and the invented samples only.
 - [ ] Some pages keep watermarks and repeated header elements without `drop`. Since we chose
       not to use a rule filter (method.md), we reduce them through the context the model sees
       and the prompt.
-- [ ] Changing the passage count asks the question again without confirmation. A citation
-      chip in the answer does not jump to the evidence passage.
 - [ ] Check OneDrive/SharePoint on a machine with OneDrive signed in and a SharePoint library
       synced: the folders it finds (`OneDrive-*`, `OneDrive-SharedLibraries-*`; on Windows the
       registry's mount points) and a build from them. Only invented folders have checked it.
@@ -142,8 +138,9 @@ OneDrive/SharePoint through their desktop apps.
 
 ## 3 · Quality evaluation set
 
-- [ ] Extend the synthetic fixtures per format and build a small representative set with the
-      expected source mapping, information units, relations and evidence.
+- [ ] Build a small representative set with the expected source mapping, information units,
+      relations and evidence. `tests/public` already pins each format's rules on invented
+      files; what is missing is a set whose whole expected graph is written down.
 - [ ] Add a golden evaluation that measures mapping and layout fidelity, split and relation
       quality, evidence recall, citation resolution and answer quality **separately**.
 - [ ] Write down the limits and the non-claims together. Do not use confidential material
@@ -151,18 +148,20 @@ OneDrive/SharePoint through their desktop apps.
 
 ## 4 · Live provider smoke test — approval required
 
-- [ ] Get explicit operational approval before any provider-backed run.
-- [ ] Check that the model endpoint points where intended (`model_endpoint.py`), and use only
-      newly made synthetic, non-confidential documents.
-- [ ] Run `build-graph → embed-graph → ask` and record the sanitized results — readiness,
-      structure counts, citation resolution, provider and model identifiers. Do not record
-      secrets or raw provider content.
-- [ ] Do not mix an embedding-only success into claims about VLM reading or question quality.
+- [ ] Run the public package's providers (OpenAI, Anthropic, Gemini) live once each, on
+      newly made synthetic, non-confidential documents, after explicit approval -- it is paid.
+      Planned as Task 14 of `docs/superpowers/plans/2026-10-16-model-providers.md` and not run:
+      confirm the Gemini model id and the Gemini embedder's limits and relevance floor there.
+- [ ] Record the sanitized results — readiness, structure counts, citation resolution,
+      provider and model identifiers — never secrets or raw provider content, and do not mix
+      an embedding-only success into claims about VLM reading or question quality.
 
 ## 5 · Extending browser automation
 
-- [ ] Extend the automation beyond the current graph, evidence, table, caption and
-      logical-component flows to upload, query, and readiness and error states.
+- [ ] The e2e checks (`frontend/e2e`) cover asking, citations, the folders, builds and their
+      failures, a stopped search, a wrong key, the drives and workspaces. Not yet: a folder
+      dropped or picked and read, and the readiness states -- the graph still starting (503,
+      Retry-After) and `preflight()` warnings shown on the settings page.
 
 ## 6 · Reconciling documents
 
@@ -185,8 +184,11 @@ no picture. If one is needed, draw a fresh one then.
       (`build_placed_scope`, pictures and charts placed by their DrawingML extent, text and
       tables by their cells). If a misjudged part turns up, the correction belongs in the
       figure pass or in binding, not in a format-specific exception.
-- [ ] Settle the git baseline (initial files and ignore policy) under the owner's approval.
-      Do not commit or push it as part of roadmap verification.
+- [ ] Move the viewer's pinned versions forward once upstream merges
+      yukiyokotani/office-open-xml-viewer#1983 (smoothed-line axis) and #1984 (combo on a
+      hidden secondary category axis): `UPSTREAM`'s `commit` and `npm_version`. Then drop
+      `chart_axes.py`, `picture_anchors.py` (fixed upstream in `d7f60b865`) and dist patch
+      `0003`, and check every other patch still applies and is still needed.
 
 ## Operating constraints
 

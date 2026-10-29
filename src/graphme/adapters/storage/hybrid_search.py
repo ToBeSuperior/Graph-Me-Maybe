@@ -45,13 +45,13 @@ def _names_an_identifier(question: str) -> bool:
     return bool(named_identifiers(question))
 
 
-def candidates(top_k: int) -> int:
-    """Each search's candidates for the fusion: four times top_k, at least 200. A passage only
-    one search ranks is still fused, so each list reaches well past top_k -- the ANN search's
-    recall at that depth bounds what the fusion can find. The answer is often first in one
-    search and far down the other: at 40 it was left with one search's part and lost to
-    passages middling in both."""
-    return max(200, 4 * top_k)
+SEARCH_DEPTH = 400
+"""Each search's candidates for the fusion, and the most passages a question's walk can go
+down (`graph_rag.collected`). A passage only one search ranks is still fused, so each list
+reaches well past what is shown -- the ANN search's recall at that depth bounds what the fusion
+can find. The answer is often first in one search and far down the other: at 40 it was left
+with one search's part and lost to passages middling in both. It is the same whatever is
+asked for, so asking for fewer documents takes the front of the same ranking."""
 
 
 class _OnceRetriever(HybridCypherRetriever):
@@ -71,7 +71,7 @@ class _OnceRetriever(HybridCypherRetriever):
         self.rrf_k = rrf_k
         """`Settings.rrf_k`."""
 
-    def fused(self, question: str, top_k: int) -> list[neo4j.Record]:
+    def fused(self, question: str) -> list[neo4j.Record]:
         """The passages both searches rank, fused: a passage ranked r by a search counts that
         search's weight / (rrf_k + r), and its score is the sum, scaled so a passage first in
         both scores 1 -- the relative relevance the page shows. A passage is fused only with
@@ -89,9 +89,8 @@ class _OnceRetriever(HybridCypherRetriever):
                 "query_text": _lucene_escaped(question),
                 "every_word": every_word(question), "floor": self.floor,
                 "query_vector": self.embedder.embed_query(question),
-                "candidates": candidates(top_k),
+                "candidates": SEARCH_DEPTH,
                 "dense_weight": dense, "text_weight": text, "rrf_k": self.rrf_k,
-                "top_k": top_k,
             },
             database_=self.neo4j_database,
             routing_=neo4j.RoutingControl.READ,
@@ -139,7 +138,7 @@ CALL () {
 WITH node, sum(part) * ($rrf_k + 1) AS score, true IN collect(about) AS about
 WHERE about
 ORDER BY score DESC, elementId(node)
-LIMIT $top_k
+LIMIT $candidates
 """
 """Weighted reciprocal rank fusion of Neo4j's two indexes over the passages, each searched to
 `candidates`. Rank says nothing about whether anything was found -- every search has a first --

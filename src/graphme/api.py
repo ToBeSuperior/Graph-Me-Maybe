@@ -6,6 +6,7 @@ Everything here is assembled from `runtime`, the same way the CLI and the demo b
 from __future__ import annotations
 
 import tempfile
+import warnings
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import TracebackType
@@ -95,13 +96,23 @@ class GraphMe:
         """Passages cut and embedded for every document not embedded yet; how many."""
         return self.rag().embed(on_progress=on_progress)
 
-    def search(self, question: str, *, top_k: int | None = None) -> list[GraphSource]:
-        """The passages a question finds, each with the documents linked to its own."""
-        return self.rag().find(question, top_k=top_k or self.settings.retrieval_top_k)
+    def search(self, question: str, *, documents: int | None = None,
+               top_k: int | None = None) -> list[GraphSource]:
+        """The passages a question finds, until `documents` documents are reached, each with
+        the documents linked to its own. `top_k` is the old name of `documents`."""
+        return self.rag().find(question, documents=self._documents(documents, top_k))
 
-    def ask(self, question: str, *, top_k: int | None = None) -> GraphAnswer:
-        """An answer from what the question finds, citing its files."""
-        return self.rag().ask(question, top_k=top_k or self.settings.retrieval_top_k)
+    def ask(self, question: str, *, documents: int | None = None,
+            top_k: int | None = None) -> GraphAnswer:
+        """An answer from what the question finds, citing its files. `top_k` is the old name
+        of `documents`."""
+        return self.rag().ask(question, documents=self._documents(documents, top_k))
+
+    def _documents(self, documents: int | None, top_k: int | None) -> int:
+        if top_k is not None:
+            warnings.warn("top_k is now documents: how many documents a question finds",
+                          DeprecationWarning, stacklevel=3)
+        return documents or top_k or self.settings.retrieval_documents
 
     def documents(self) -> dict[str, str]:
         """Every document in the space: id -> file name."""

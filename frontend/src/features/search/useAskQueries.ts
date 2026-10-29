@@ -16,7 +16,7 @@ export function useAskQueries(question: string, topK: number, stamp: string | nu
 
   const search = useQuery({
     queryKey: keys.search(question, topK, stamp),
-    queryFn: ({ signal }) => call(api.POST('/v1/search', { body: { question, top_k: topK }, signal })),
+    queryFn: ({ signal }) => call(api.POST('/v1/search', { body: { question, documents: topK }, signal })),
     initialData: () => (stamp ? kept<Found>('search', question, topK, stamp) : undefined),
     enabled: !stopped,
     retry: false,
@@ -24,7 +24,7 @@ export function useAskQueries(question: string, topK: number, stamp: string | nu
   // The answer is written once something is found: nothing found, there is nothing to write from.
   const answer = useQuery({
     queryKey: keys.ask(question, topK, stamp),
-    queryFn: ({ signal }) => call(api.POST('/v1/ask', { body: { question, top_k: topK }, signal })),
+    queryFn: ({ signal }) => call(api.POST('/v1/ask', { body: { question, documents: topK }, signal })),
     initialData: () => (stamp ? kept<Answer>('ask', question, topK, stamp) : undefined),
     enabled: answerOn && !stopped && !!search.data?.sources.length,
     retry: false,

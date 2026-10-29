@@ -165,7 +165,7 @@ export async function fakeApi(page: Page,
     }
     if (path === '/v1/search') {
       fake.asked.push(route.request().postDataJSON().question);
-      fake.topK.push(route.request().postDataJSON().top_k);
+      fake.topK.push(route.request().postDataJSON().documents);
       if (slow) await new Promise((r) => setTimeout(r, slow));
       return json(route, { sources });
     }

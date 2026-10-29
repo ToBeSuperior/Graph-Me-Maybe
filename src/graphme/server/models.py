@@ -225,7 +225,10 @@ class Deleted(_Model):
 
 class Question(_Model):
     question: str = ""
-    top_k: int | None = None
+    documents: int | None = None
+    """How many documents to find; the server's setting when not given."""
+    top_k: int | None = Field(default=None, deprecated=True)
+    """The old name of `documents`, read as it."""
 
 
 class LinkedPassage(_Model):

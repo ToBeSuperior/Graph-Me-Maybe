@@ -60,8 +60,8 @@ class RagService(Protocol):
 
     def embed(self, on_progress: Callable[[int, int], None]) -> int: ...
 
-    def ask(self, question: str, *, top_k: int | None) -> GraphAnswer:
-        """`top_k` None: as many passages as the settings say."""
+    def ask(self, question: str, *, documents: int | None) -> GraphAnswer:
+        """`documents` None: as many documents as the settings say."""
         ...
 
 
@@ -192,14 +192,15 @@ def create_app(
     @app.command(short_help="Answer a question from the graph space, with its sources.")
     def ask(
         question: str,
-        top_k: int | None = typer.Option(
-            None, "--top-k", help="passages found before the graph is walked (default: settings)"
+        documents: int | None = typer.Option(
+            None, "--documents", "--top-k",
+            help="documents found before the graph is walked (default: settings)",
         ),
     ) -> None:
         """Answer a question from the graph space (neo4j-graphrag over the vectors)."""
         if rag_service is None:
             raise typer.BadParameter("no graph space is configured")
-        answer = rag_service.ask(question, top_k=top_k)
+        answer = rag_service.ask(question, documents=documents)
         typer.echo(shown_name(answer.text))
         typer.echo("")
         for source in answer.sources:
@@ -313,9 +314,9 @@ class _RuntimeRagService:
         with GraphMe() as g:
             return g.embed(on_progress=on_progress)
 
-    def ask(self, question: str, *, top_k: int | None) -> GraphAnswer:
+    def ask(self, question: str, *, documents: int | None) -> GraphAnswer:
         with GraphMe() as g:
-            return g.ask(question, top_k=top_k)
+            return g.ask(question, documents=documents)
 
 
 app = create_app(

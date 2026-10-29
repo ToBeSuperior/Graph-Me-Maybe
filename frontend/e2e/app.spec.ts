@@ -54,6 +54,30 @@ test('a question gathers folders and the answer opens what it cites', async ({ p
   await expect(tree.getByRole('treeitem').first()).toBeFocused();
 });
 
+test('a citation takes the preview back to its passage, however far the reader moved', async ({ page }) => {
+  await fakeApi(page);
+  await page.goto(`/?q=${encodeURIComponent('시험 압력은?')}&k=5`);
+  const cite = page.getByRole('button', { name: 'SPEC-1_가상 규격서.docx' });
+  await cite.click();
+  const tabs = page.getByLabel('미리보기').getByRole('tab');
+  // The spec's passage is on its second page.
+  await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await tabs.nth(0).click();
+  await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true');
+  await cite.click();
+  await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+});
+
+test('a passage count changed on a results page searches and answers again with it', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto(`/?q=${encodeURIComponent('시험 압력은?')}&k=5`);
+  await expect(page.getByRole('tree')).toBeVisible();
+  await page.getByRole('combobox').selectOption('10');
+  await expect(page).toHaveURL(/k=10/);
+  await expect.poll(() => fake.topK).toEqual([5, 10]);
+  await expect.poll(() => fake.answered).toBe(2);
+});
+
 test('a reload shows what was found and answered without asking again', async ({ page }) => {
   const fake = await fakeApi(page);
   await page.goto(`/?q=${encodeURIComponent('시험 압력은?')}&k=5`);

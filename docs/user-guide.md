@@ -120,7 +120,9 @@ those, theirs (hop 3).
 - The top three folders start open; a closed folder shows how many it holds (+N). Filter by format
   (DOCX, PPTX…).
 - Keyboard: ↑↓ move, → open or go in, ← close or go up, Enter opens.
-- **Passages** is how many passages the search starts from. With few documents and a large value,
+- **Documents** is how many documents the search finds (hop 1), each with up to five of its
+  passages; changing it searches and answers again. The answer reads the best of what was found,
+  up to a fixed length, while the folders show all of it. With few documents and a large value,
   everything comes back as hop 1.
 - **Download** saves the documents found as one zip with a folder per hop. Pick files one by one, a
   hop at a time, or all; a file that cannot be found is listed in `missing-files.txt`.

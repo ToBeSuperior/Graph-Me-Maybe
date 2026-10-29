@@ -37,7 +37,10 @@ ENV_FIELDS = {
     "GRAPHME_EMBEDDING_PROVIDER": "embedding_provider",
     "GRAPHME_EMBEDDING_MODEL": "embedding_model",
     "GRAPHME_EMBEDDING_DIMENSIONS": "embedding_dimensions",
-    "GRAPHME_RETRIEVAL_TOP_K": "retrieval_top_k",
+    # The name before a question asked for documents: read as their number; the new name,
+    # after it, wins where both are set.
+    "GRAPHME_RETRIEVAL_TOP_K": "retrieval_documents",
+    "GRAPHME_RETRIEVAL_DOCUMENTS": "retrieval_documents",
     "GRAPHME_RELEVANCE_FLOOR": "relevance_floor",
     "GRAPHME_HYBRID_DENSE_WEIGHT": "hybrid_dense_weight",
     "GRAPHME_RRF_K": "rrf_k",
@@ -60,7 +63,7 @@ _INT_FIELDS = {
     "rrf_k",
     "hierarchy_readings",
     "embedding_dimensions",
-    "retrieval_top_k",
+    "retrieval_documents",
 }
 _TEST_EMBEDDERS = {"fake", "hash"}
 
@@ -137,7 +140,8 @@ class Settings(BaseModel):
     embedding_dimensions: int = Field(default=3072, gt=0)
     embedding_key: str | None = Field(default=None, repr=False)
     """Read only from the embedder's own variable."""
-    retrieval_top_k: int = Field(default=8, gt=0)
+    retrieval_documents: int = Field(default=5, gt=0)
+    """How many documents a question finds when it does not say (`graph_rag.collected`)."""
     relevance_floor: float = Field(default=0.3, ge=0, le=1)
     """How close (cosine) a passage must come to the question to be kept by its meaning -- the
     one place this is set. A passage below it is kept only if it holds the question's words

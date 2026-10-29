@@ -113,8 +113,8 @@ def test_the_graph_is_embedded_and_asked_from_the_command_line() -> None:
             on_progress(3, 3)
             return 3
 
-        def ask(self, question: str, *, top_k: int | None) -> GraphAnswer:
-            asked.append((question, top_k))
+        def ask(self, question: str, *, documents: int | None) -> GraphAnswer:
+            asked.append((question, documents))
             return GraphAnswer(
                 text="압력 강하가 기준값 이하이면 합격 [spec.docx] [note.emb1a2b3c4d.pdf]",
                 sources=[GraphSource(id="n1", score=0.91, document_id="d", file="spec.docx",
@@ -128,11 +128,13 @@ def test_the_graph_is_embedded_and_asked_from_the_command_line() -> None:
     )
 
     embedded = CliRunner().invoke(app, ["embed-graph"])
-    answered = CliRunner().invoke(app, ["ask", "판정 기준은?", "--top-k", "4"])
+    answered = CliRunner().invoke(app, ["ask", "판정 기준은?", "--documents", "4"])
+    old_name = CliRunner().invoke(app, ["ask", "판정 기준은?", "--top-k", "2"])
 
     assert embedded.exit_code == 0 and "embedded=3" in embedded.output
     assert answered.exit_code == 0
-    assert asked == [("판정 기준은?", 4)]
+    assert old_name.exit_code == 0
+    assert asked == [("판정 기준은?", 4), ("판정 기준은?", 2)]
     assert "압력 강하가 기준값 이하이면 합격" in answered.output
     assert "spec.docx" in answered.output and "n1" in answered.output
     # an attachment's digest tells two files apart for the program, not the reader

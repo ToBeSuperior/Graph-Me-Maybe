@@ -5,6 +5,32 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.47] - 2026-10-29
+
+### Changed
+
+- A question asks for documents, not passages: the number chosen beside the question box (and
+  `documents` in `/v1/search`, `/v1/ask`, `GraphMe.search`/`ask`, `graphme ask --documents`,
+  `GRAPHME_RETRIEVAL_DOCUMENTS`, default 5) is how many documents are found. The passages are
+  walked best first until that many documents are reached, at most five a document, so one
+  document can no longer crowd the others out, nor is a document's sixth best passage dropped
+  for a weak one elsewhere. The page shows every document found; the answer reads the best of
+  them, linked documents included, up to 12,000 tokens. `top_k` and `GRAPHME_RETRIEVAL_TOP_K`
+  are still read, as the number of documents.
+- The documents linked to a found document are looked up once for that document, not once for
+  each of its passages.
+- A linked document is brought along only with passages that reach the same relevance floor as a
+  passage found; one with none is left out, and so is what it links to. A link says two
+  documents belong together, not that the other answers the question.
+- The found documents read more easily in a narrow window: each name has the first line to itself
+  (its labels below it), every row carries the hop badge the legend above uses, and the lines that
+  show what is linked under what are stronger.
+
+### Fixed
+
+- A citation in the answer takes the preview back to the cited passage's page even when that
+  document is already open and the reader has moved to another page or passage.
+
 ## [0.1.46] - 2026-10-29
 
 ### Fixed

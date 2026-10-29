@@ -29,6 +29,8 @@ export function Results({ question, topK, stamp }: { question: string; topK: num
   /** Picked by the reader -- then the answer arriving does not move the preview. */
   const picked = useRef(false);
   const [lit, setLit] = useState<string | null>(null);
+  /** How many citations were followed: each opens the preview afresh, on the cited passage. */
+  const [cites, setCites] = useState(0);
   const [formats, setFormats] = useState(new Set<string>());
   const [expandAll, setExpandAll] = useState(0);
   const narrow = useMediaQuery('(max-width: 1023px)');
@@ -52,7 +54,7 @@ export function Results({ question, topK, stamp }: { question: string; topK: num
   }, [answer.data, byLabel, trail, narrow]);
 
   const pick = useCallback((row: Row | null) => { picked.current = true; setSelected(row); }, []);
-  const cite = useCallback((doc: TrailDoc) => pick(firstRow(trail, doc.id)), [pick, trail]);
+  const cite = useCallback((doc: TrailDoc) => { pick(firstRow(trail, doc.id)); setCites((n) => n + 1); }, [pick, trail]);
   const hover = useCallback((doc: TrailDoc | null) => setLit(doc?.id ?? null), []);
 
   const center = (
@@ -137,13 +139,13 @@ export function Results({ question, topK, stamp }: { question: string; topK: num
       <div className="min-h-0 overflow-y-auto">{center}</div>
       {!narrow ? (
         <aside className="hidden min-h-0 border-l border-line bg-panel lg:block" aria-label={t('preview')}>
-          {selected ? <Preview key={selected.entry.doc.id} row={selected} question={question} /> : (
+          {selected ? <Preview key={`${selected.entry.doc.id}:${cites}`} row={selected} question={question} /> : (
             <Empty className="h-full" icon={<FolderSearch className="size-5" />} title={t('previewEmpty')}>{t('previewEmptyBody')}</Empty>
           )}
         </aside>
       ) : (
         <Sheet open={!!selected} onOpenChange={(o) => { if (!o) pick(null); }} title={shownName(selected?.entry.doc.label ?? '')} closeLabel={t('close')}>
-          {selected && <Preview key={selected.entry.doc.id} row={selected} question={question} />}
+          {selected && <Preview key={`${selected.entry.doc.id}:${cites}`} row={selected} question={question} />}
         </Sheet>
       )}
     </div>
