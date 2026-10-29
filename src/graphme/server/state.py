@@ -1065,10 +1065,11 @@ class Demo:
                         waiting.extendleft(reversed(fresh))
                         build.carried += len(fresh)
                         build.total += len(fresh)
-                    admitted.append(doc)
                     if put:
                         self.putting.add(doc)
                     self.start(doc, stop)  # read side by side, under the shared slots
+                    # Counted as let in once its reading exists: the build looks it up.
+                    admitted.append(doc)
             except Exception:  # noqa: BLE001 -- the documents let in are still read and put
                 traceback.print_exc(file=sys.stderr)
             finally:

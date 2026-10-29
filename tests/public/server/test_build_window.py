@@ -106,3 +106,37 @@ def test_a_file_downloaded_again_after_it_was_given_back_is_given_back_again(
     assert until(lambda: bool(indexed))
     time.sleep(0.6)  # past the indexer's read and the checks after the build
     assert online[path]  # given back again, for good
+
+
+def test_a_document_let_in_is_never_looked_for_before_its_reading_exists(
+    demo: Demo, space: FakeSpace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The build waits on the documents let in while the feeder lets in more; one counted as let
+    # in before its reading was made was looked up and failed the whole build.
+    files = []
+    for n in range(3):
+        path = demo.root / "drive" / f"note{n}.pdf"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(f"%PDF-1.4 invented {n}".encode())
+        files.append(path)
+    monkeypatch.setattr(state, "online_only", lambda path: False)
+    monkeypatch.setattr(state, "embedded_in", lambda path: [])
+
+    def read(session: Any) -> None:
+        session.extracted = named_document(f"{int(session.source.stem[4:]) + 1:x}",
+                                           session.source.name)
+        session.state = "done"
+
+    demo._run = read  # type: ignore[method-assign]
+    demo.readers = ThreadPoolExecutor(max_workers=2)
+    starting = demo.start
+
+    def slow_start(doc: str, stop: Any = None) -> Any:
+        time.sleep(0.5)  # the build looks at what was let in meanwhile
+        return starting(doc, stop)
+
+    demo.start = slow_start  # type: ignore[method-assign]
+    build = demo.build_corpus([demo.open_path(str(f)) for f in files], "test")
+
+    assert until(lambda: build.state in ("done", "error"), 10), build
+    assert build.state == "done", build.error

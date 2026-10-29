@@ -366,4 +366,4 @@ When you change a payload, intercept the HTTP body the adapter actually sends wi
 
 ### Automated checks
 
-The test suite is not in the repository — `/tests/` is a local experiment space. `ruff check .` and `mypy src` run on the repository alone.
+The test suite is not in the repository — `/tests/` is a local experiment space. `ruff check .` and `mypy` run on the repository alone.

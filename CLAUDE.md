@@ -35,7 +35,7 @@ uv run graphme app                  # the installed app: samples, its home folde
 uv run graphme serve                # /v1 (jobs, search, export), /docs, the web app; 127.0.0.1:8765
 
 uv run ruff check .                    # line-length 100, target py311
-uv run mypy src                        # strict = true
+uv run mypy                            # strict = true
 
 uv run pytest tests/public -q          # what a clone has; `uv run pytest -q` adds the local suite
 uv run pytest tests/path/test_x.py::test_name -q     # one test

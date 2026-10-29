@@ -1,6 +1,6 @@
 # Graph-Me-Maybe — What Is Left to Do
 
-> Updated: 2026-10-28
+> Updated: 2026-10-29
 >
 > Finished work is not listed here. Confirmed behavior is in
 > [`../finalized_source.md`](../finalized_source.md), and the history is in
@@ -173,12 +173,10 @@ no picture. If one is needed, draw a fresh one then.
 
 ## 7 · Remaining technical debt
 
-- [ ] `tools/hierarchy_demo/` is excluded from mypy. Renaming a field breaks it silently (this
-      actually happened with the `bbox` → `crop` change). Decide whether to include it.
-- [ ] Decoding metafiles (EMF, WMF) relies on a viewer patch. 16-bit DIB support was added,
-      but compressed DIBs (`BI_JPEG`, `BI_PNG`) and `BI_BITFIELDS` are still not drawn — add
-      them in the same place if they show up in a real document. A whole picture can vanish
-      without an error, so the symptom is silent.
+- [ ] Decoding metafiles (EMF, WMF) relies on viewer patches (16-bit and `BI_BITFIELDS` DIBs).
+      A JPEG or PNG inside a DIB (`BI_JPEG`, `BI_PNG`) is still not drawn: GDI accepts them only
+      on a printer, and the player would need an asynchronous decode first. Add it if one shows
+      up in a real document -- a whole picture vanishes without an error.
 - [ ] The worker's copy of the metafile player is still unpatched. If rendering moves to the
       worker, the same branch must go in there too (noted in `viewer/README.md`).
 - [ ] (Refinement) A unit the figure pass wrongly calls part of a figure is never shown to the

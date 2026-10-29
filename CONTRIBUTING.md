@@ -72,7 +72,7 @@ The API contract lives in `src/graphme/server/models.py`. After changing it, run
 ## Tests
 
 ```bash
-uv run ruff check src tests/public && uv run mypy src                # lint and types (strict)
+uv run ruff check src tests/public && uv run mypy                    # lint and types (strict)
 uv run pytest tests/public                            # the test suite
 uv run pytest tests/public/test_read.py -q            # one file
 cd frontend && npm run typecheck && npm test && npm run e2e && npm run build

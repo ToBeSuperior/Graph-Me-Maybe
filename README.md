@@ -221,7 +221,7 @@ The first start fetches Neo4j and Java into the app folder (about 210 MB) and st
 **Checks** — what CI runs, and what a pull request has to pass:
 
 ```bash
-uv run ruff check src tests/public && uv run mypy src
+uv run ruff check src tests/public && uv run mypy
 uv run pytest tests/public                     # no key, no Neo4j, no real document needed
 cd frontend && npm run typecheck && npm test && npm run e2e && npm run build
 ```

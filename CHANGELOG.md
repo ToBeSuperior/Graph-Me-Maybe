@@ -5,6 +5,19 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.46] - 2026-10-29
+
+### Fixed
+
+- A picture inside an EMF or WMF whose bitmap names its colour layout by masks (`BI_BITFIELDS`:
+  RGB565 from a 16-bit screen, or 32 bits in another byte order) is drawn instead of being left
+  out while the metafile's lines and text still draw.
+- A worksheet picture placed by a start cell and a size (`oneCellAnchor`) with no position of
+  its own, as openpyxl and some other tools write it, is drawn instead of left out.
+- A build from a folder no longer fails at random with "the graph could not be built": a
+  document was counted as let in a moment before its reading existed, and looking it up then
+  failed the whole build.
+
 ## [0.1.45] - 2026-10-29
 
 ### Fixed

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph-me-maybe"
-version = "0.1.45"
+version = "0.1.46"
 description = "Graph-Me-Maybe: local-first multimodal graph RAG over documents"
 readme = "README.md"
 license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
@@ -62,6 +62,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 python_version = "3.11"
 strict = true
 plugins = ["pydantic.mypy"]
+files = ["src", "tools"]  # the tools import the package; a renamed field breaks them too
 
 [[tool.mypy.overrides]]
 module = ["openpyxl.*", "olefile"]

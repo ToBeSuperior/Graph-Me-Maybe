@@ -18,7 +18,7 @@ jobs:
           python-version: "3.11"
       - run: uv sync --locked --extra dev
       - run: uv run ruff check src tests/public
-      - run: uv run mypy src
+      - run: uv run mypy
       - run: uv run pytest tests/public
 
   windows-tests:

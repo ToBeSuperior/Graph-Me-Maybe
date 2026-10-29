@@ -57,9 +57,17 @@ published WebAssembly and cannot be patched there. Instead `../chart_axes.py` fo
 secondary category axis onto the one beside it in a copy of the file before it is drawn, which
 is what Office draws; drop it once a published version carries the fix (upstream #1984).
 
+The XLSX build at the pinned commit reads pictures from `twoCellAnchor` only; a `oneCellAnchor`
+picture with no `<a:xfrm>` (openpyxl writes them so) was dropped. `../picture_anchors.py` writes
+that position from the anchor's size in a copy before drawing; upstream fixed it in `d7f60b865`,
+so drop it once `UPSTREAM` pins a later commit.
+
 `0004-emf-16-bit-dib-pictures.patch` -- `core/src/image/dib.ts`: the same 16-bit metafile
 bitmap the dist patch below fixes. Both builds carry their own copy of the decoder, so the
 source patch is what reaches XLSX and the dist patch is what reaches DOCX and PPTX.
+
+`0005-emf-bitfields-dib-pictures.patch` -- `core/src/image/dib.ts`: the same `BI_BITFIELDS`
+bitmaps as dist patch `0004` below, for XLSX.
 
 ## What the dist patches change
 
@@ -71,11 +79,12 @@ build is copied into the bundle.
 | `0001-docx-metric-only-segments-do-not-merge.patch` | A paragraph that only hosts an anchored drawing gets an empty, height-only segment with no script. Sizing a table cell merges adjacent text segments by fingerprint, and fingerprinting that segment threw `Cannot fingerprint undefined`, failing the whole document; merged, it would also have carried its height-only flag onto real text. Height-only segments are no longer merged. |
 | `0002-emf-16-bit-dib-pictures.patch` | A picture pasted as a metafile keeps its photographs as device-independent bitmaps inside the EMF. The DIB decoder reads 32, 24, 8, 4 and 1 bits per pixel and returns nothing for 16 — the depth a screen capture pasted from a 16-bit display carries — so the metafile drew its frames, arrows and circles and left every photograph out, with no error anywhere. 16-bit `BI_RGB` is RGB555; it is decoded like the others. |
 | `0003-smoothed-line-axis-covers-the-drawn-curve.patch` | The same smoothed-line axis as the XLSX source patch `0003`, in the published `renderer-*.js` that draws DOCX and PPTX charts: a smoothed line leaving a run of zeros dipped below an axis that stopped at zero. The line chart and a line drawn over columns now include the curve's extent (`$smoothExtent`). |
+| `0004-emf-bitfields-dib-pictures.patch` | A metafile bitmap may say where each colour sits with three masks (`BI_BITFIELDS`) instead of the fixed layout: RGB565 from a 16-bit screen, or 32 bits in another byte order. The decoder took only `BI_RGB`, so such a picture was dropped as silently as the 16-bit one. Both depths are read through their masks now, as are the masks a packed WMF bitmap puts between its header and its pixels. A JPEG or PNG inside a DIB (`BI_JPEG`, `BI_PNG`) is still not drawn: GDI takes those only on a printer, so a metafile drawn on a screen does not hold them, and decoding one needs the browser's asynchronous image decoder inside a player that draws synchronously. |
 
 The published build carries the metafile player twice: once in the chunk the viewers import
 on the main thread, which is what draws a document here, and once inside
 `dist/assets/render-worker-*.js` for a rendering mode this renderer does not use. The patch
-changes the first. If a viewer ever draws through the worker instead, the same 16-bit branch
+changes the first. If a viewer ever draws through the worker instead, the same bitmap branches
 has to reach that copy too — the symptom is a metafile that draws its lines and not its
 photographs.
 

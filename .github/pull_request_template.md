@@ -4,7 +4,7 @@
 
 ## How it was checked
 
-- [ ] `uv run ruff check src tests/public && uv run mypy src`
+- [ ] `uv run ruff check src tests/public && uv run mypy`
 - [ ] `uv run pytest tests/public`
 - [ ] For web app changes: `cd frontend && npm run typecheck && npm test && npm run e2e`
 - [ ] A change in behaviour comes with a test that failed before it

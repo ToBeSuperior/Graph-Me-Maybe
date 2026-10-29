@@ -21,6 +21,7 @@ from typing import Any
 from graphme import processes
 from graphme.adapters.rendering.chart_axes import hidden_axes_merged
 from graphme.adapters.rendering.embedded_images import lightened
+from graphme.adapters.rendering.picture_anchors import positioned_pictures
 from graphme.adapters.rendering.xlsx_measurement import CellRange, measure_workbook
 from graphme.application.page_regions import PixelBox, SheetPixelGrid
 from graphme.domain.enums import DocumentFormat
@@ -342,6 +343,10 @@ class BrowserOfficeRenderer:
             # A combo on a deleted secondary category axis, which the viewer paints as
             # unsupported, folded onto the axis beside it.
             staged = hidden_axes_merged(staged, workspace)
+            # A one-cell picture with no position of its own, which the viewer leaves out,
+            # placed where its anchor says.
+            if document_format is DocumentFormat.XLSX:
+                staged = positioned_pictures(staged, workspace)
             if document_format is DocumentFormat.DOCX:
                 staged = _without_vml_copies(staged, workspace)
             try:
