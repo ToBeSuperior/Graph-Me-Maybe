@@ -370,7 +370,9 @@ number a question names below passages that only sound alike -- and walks
 rankings are fused by weighted reciprocal rank fusion in our own query (`hybrid_search.py`, `_FUSED`, k =
 `GRAPHME_RRF_K`, vector weight `GRAPHME_HYBRID_DENSE_WEIGHT`, flipped toward the words for a
 question naming a document number), each index searched to `SEARCH_DEPTH` whatever is asked for; the library's own
-max-normalised ranker is not used. A question asks for documents, not passages: the fused passages are walked best
+max-normalised ranker is not used. A document the question names -- phrases the split copies (`_Split.documents`) and any document
+number, judged by `documents_named` -- goes first when the search found it (`named_first`).
+A question asks for documents, not passages: the fused passages are walked best
 first until that many documents are reached, at most `PASSAGES_PER_DOCUMENT` a document (`collected`), so fewer
 documents are the front of the same walk; links are walked once a document (`_linked`), a linked document kept only for its passages past the
 relevance floor (`relevant_links`), and the answer reads the front of it within `ANSWER_TOKENS` (`within_budget`) while the page shows all of it. The fulltext index uses the `cjk` analyzer -- the standard

@@ -187,6 +187,25 @@ class Mention:
     name: str
 
 
+def documents_named(phrases: Sequence[str], identities: Sequence[DocumentIdentity]) -> set[str]:
+    """The documents a question's phrases name: by the rules a page's mention of another
+    document is judged by (`DocumentLookup`), or -- a reader names a document as briefly as
+    they know it -- by the one document whose file name or title holds the phrase whole."""
+    lookup = DocumentLookup(identities)
+    named: set[str] = set()
+    for phrase in phrases:
+        if len(folded(phrase)) < MIN_NAME_CHARS or generic_name(phrase):
+            continue
+        named |= {document_id for document_id, _ in lookup.named(
+            Mention(node_id="", document_id="", name=phrase))}
+        wanted = letters(phrase)
+        holding = {each.document_id for each in identities
+                   if wanted in letters(each.file_name) or wanted in letters(each.title or "")}
+        if len(holding) == 1:  # held by several, it tells none of them apart
+            named |= holding
+    return named
+
+
 def relinked(
     mentions: Sequence[Mention], identities: Sequence[DocumentIdentity], arrived: set[str]
 ) -> tuple[list[str], tuple[GraphEdge, ...]]:

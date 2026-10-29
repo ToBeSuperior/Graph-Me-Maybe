@@ -15,11 +15,13 @@ OneDrive/SharePoint through their desktop apps.
 
 ## 0 · Next plan
 
-- [ ] **Make the open-source release easier to use with per-feature APIs.** Expose reading
-      (extraction, rendering, VLM hierarchy), graph loading, search, question answering,
-      document linking and export as separate APIs. Today `GraphMe.add` and the server's build
-      (`server/state.py`) tie this flow into one block, so another project cannot easily take
-      just part of it.
+- [ ] (On hold until someone needs it) **Per-feature APIs.** What there is now is kept as it is:
+      `graphme.read` (one file read whole, no graph), `GraphMe` (`add`, `embed`, `search`, `ask`,
+      `documents`, `delete`, `reset`, `export`), the `/v1` HTTP routes and the CLI. Not open on
+      their own: extraction without a model call, putting an `ExtractedDocument` already read
+      into the space, cutting passages, linking documents again. Open one when a real use asks
+      for it -- say, taking the readings or passages into another store -- rather than all of
+      them ahead of time.
 - [ ] **A library to `pip install`.** `graphme.read` and `GraphMe` (add, embed, search, ask,
       documents, delete, export) exist, but only inside the app's package. In order:
       1. `py.typed`; the window and the server as extras (`graph-me-maybe[app]`, `[server]`) so the
@@ -39,6 +41,13 @@ OneDrive/SharePoint through their desktop apps.
       app's API; MCP allowed per workspace (off by default), a workspace not open read beside the
       open one; the app split into a background agent with a tray / menu bar icon (open the app,
       MCP on/off, start at login -- off by default --, quit completely) and a window of its own.
+- [ ] **A blog for the public site** (left for later; site plan in
+      `docs/superpowers/specs/2026-10-29-public-site-design.md`). Candidates: why plain RAG
+      breaks on spreadsheets and slides; how it works, from a rendered page to the graph; the
+      benchmark -- the right cell, not just the right document; a vision model reading the outline
+      instead of parsing rules; weighted-RRF hybrid search and its numbers; Neo4j inside a desktop
+      app without Docker; the data flow, what stays and what goes to the model. A fixed cadence
+      (about four a month) once it starts.
 - [ ] **A native installer and app.** Today one-line scripts install uv and the app as a Python
       package (Neo4j, Java, the viewer and a browser fetched for it), and the Mac `.app` is a
       two-line shell script calling that command: the process is `python`, unsigned, so macOS
@@ -97,14 +106,14 @@ OneDrive/SharePoint through their desktop apps.
       was measured on English questions over English documents. One option is for the
       question split (`SPLIT_SYSTEM`) to also write each query in the language of the
       documents it searches.
-- [ ] In a question that uses a document number together with a common word such as
-      "document summary", the document with that number is pushed down from the top. When a
-      number is present, the full-text side gets more weight, but the common word matches
-      passages in other documents. Decide whether to boost the document whose number matches
-      or to drop the common word from the full-text query.
-- [ ] Measure what asking for documents costs and buys against asking for passages: how many
-      passages a question gathers, how often the answer's 12,000 tokens leave found documents
-      unread, and whether answers change.
+- [ ] Measure what asking for documents costs and buys against asking for passages, on a real
+      corpus and a question set with the expected documents. Build the graph in a home of its
+      own (`GRAPHME_HOME`, the Neo4j install copied) so no other graph is touched, then ask each
+      question both ways (5 passages; 5 documents) and compare: passages gathered, documents
+      found, answer tokens, documents the 12,000-token budget leaves unread (efficiency);
+      whether the expected document is found and read, and answers graded O/△/X (effect);
+      search, link walk and answer time (speed). The build and the answers are model calls:
+      decide first whether to grade answers or stop at the search measures.
 - [ ] Tune RRF `k` (60), the weight (0.6) and each search model's relevance floor (0.39 general,
       0.46 Korean, 0.2 OpenAI) on a real question set. Today they are set from literature values
       and the invented samples only.

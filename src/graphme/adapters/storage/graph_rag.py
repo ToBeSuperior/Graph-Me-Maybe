@@ -19,6 +19,7 @@ that, in one call; nothing here reasons from one hop to the next.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 import unicodedata
@@ -46,6 +47,7 @@ from graphme.adapters.storage.hybrid_search import _OnceRetriever
 from graphme.adapters.storage.neo4j_space import CHUNK_TEXT_INDEX, Neo4jGraphSpace, checked_name
 from graphme.adapters.storage.similar_documents import SimilarDocuments
 from graphme.adapters.strict_schema import strict_response_schema
+from graphme.application.corpus_links import document_numbers, documents_named
 from graphme.application.graph_chunks import CHUNK_RULE, chunks
 from graphme.application.passage_scores import IMPORTANCE_RULE, centroid, importance
 from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop
@@ -105,6 +107,22 @@ def collected(ranked: Sequence[Any], documents: int) -> list[Any]:
         if len(given) == documents and given[doc] == 1:
             break  # the passage that reached the last document is the walk's end
     return taken
+
+
+def named_first(ranked: Sequence[Any], named: set[str]) -> list[Any]:
+    """`ranked` with the passages of the documents the question names first, each part in the
+    order it was ranked: a question that names a document asks about that one before the
+    others that mention it or share its words. Only what the search found is moved."""
+    return ([passage for passage in ranked if passage["document_id"] in named]
+            + [passage for passage in ranked if passage["document_id"] not in named])
+
+
+def named_phrases(question: str, said: Sequence[str]) -> tuple[str, ...]:
+    """What in a question names a document: the phrases the model said do, and every
+    document number written in it (`document_numbers`), which needs no model to see -- the
+    particle after one ("SOP-2026-0412의") left off."""
+    numbers = (re.sub(r"[가-힣]+$", "", number) for number in sorted(document_numbers(question)))
+    return tuple(dict.fromkeys(phrase for phrase in (*said, *numbers) if phrase.strip()))
 
 
 def relevant_links(linked: Sequence[dict[str, Any]], floor: float) -> list[dict[str, Any]]:
@@ -219,7 +237,7 @@ class GraphRag:
         self._assets = assets
         """Where the crops a passage's pictures name are read from; none, and an answer is
         given the passages' words alone."""
-        self._split: dict[str, tuple[str, ...]] = {}
+        self._split: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
         self._lock = threading.Lock()
         self._flights: dict[object, Future[Any]] = {}
         """What is being worked out right now, by what it is for (`_shared`)."""
@@ -427,11 +445,14 @@ class GraphRag:
         """The fused search for each thing the question asks (`_queries`), the passages taken
         from each search in turn, best first, each once -- walked until `documents` documents
         are reached (`collected`) -- then the documents linked to each one found, walked once
-        a document. An answer and its folder page ask side by side: the search runs once for
-        both, and asking for fewer documents takes the front of the same passages."""
+        a document. A document the question names, where the search found it, comes first
+        (`named_first`). An answer and its folder page ask side by side: the search runs once
+        for both, and asking for fewer documents takes the front of the same passages."""
+        queries, said = self._asked(question)
+
         def search() -> list[neo4j.Record]:
             retriever = self._retriever()
-            searches = [retriever.fused(query) for query in self._queries(question)]
+            searches = [retriever.fused(query) for query in queries]
             found: dict[str, neo4j.Record] = {}
             for rank in range(max(map(len, searches), default=0)):
                 for one in searches:
@@ -440,7 +461,17 @@ class GraphRag:
             return list(found.values())
 
         ranked = cast(list[neo4j.Record], self._shared(("found", question), search))
-        return self._linked(collected(ranked, documents), question)
+        named = self._named(named_phrases(question, said), ranked)
+        return self._linked(collected(named_first(ranked, named), documents), question)
+
+    def _named(self, phrases: Sequence[str], ranked: Sequence[neo4j.Record]) -> set[str]:
+        """The documents `phrases` name, of those the search found."""
+        if not phrases:
+            return set()
+        found = {record["document_id"] for record in ranked}
+        # ponytail: the space's identities read for each question naming something; keep
+        # them with the graph's fingerprint if a space of thousands makes this slow.
+        return documents_named(phrases, self._space.identities()) & found
 
     def _linked(self, found: list[neo4j.Record], question: str) -> list[neo4j.Record]:
         """`found` with the documents linked to each document in it, hop by hop, given to the
@@ -468,14 +499,19 @@ class GraphRag:
         ]
 
     def _queries(self, question: str) -> tuple[str, ...]:
-        """What the question asks, one search query each (`SPLIT_SYSTEM`) -- or the question
-        itself, where the model asks it as one thing or gives no usable answer. The split is
-        made once for a question, however many ask at the same time."""
+        """What the question asks, one search query each (`_asked`)."""
+        return self._asked(question)[0]
+
+    def _asked(self, question: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """What the question asks, one search query each, and the phrases in it naming a
+        document (`SPLIT_SYSTEM`) -- or the question itself and none, where the model asks it
+        as one thing or gives no usable answer. Made once for a question, however many ask at
+        the same time."""
         with self._lock:
             if question in self._split:
                 return self._split[question]
-        return cast(tuple[str, ...], self._shared(("split", question),
-                                                  lambda: self._split_question(question)))
+        return cast(tuple[tuple[str, ...], tuple[str, ...]], self._shared(
+            ("split", question), lambda: self._split_question(question)))
 
     def _complete(self, **ask: Any) -> str:
         """`complete`, asked again on ASK_RETRY_DELAYS while the endpoint says "not now"."""
@@ -488,21 +524,22 @@ class GraphRag:
             self._wait(delay)
         return complete(self._client, self._endpoint, **ask)
 
-    def _split_question(self, question: str) -> tuple[str, ...]:
+    def _split_question(self, question: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
         try:
             reply = self._complete(system=SPLIT_SYSTEM, content=question,
                                    schema=strict_response_schema(_Split), name="question_split")
-            written = _Split.model_validate_json(reply).queries
+            written = _Split.model_validate_json(reply)
         except Exception as error:  # noqa: BLE001 -- unsplit is how every question was asked
             _log.warning("question not split -- %s", str(error)[:200])
-            return (question,)  # not kept: the next ask tries the model again
-        parts = tuple(dict.fromkeys(part for q in written if (part := q.strip())))
+            return (question,), ()  # not kept: the next ask tries the model again
+        parts = tuple(dict.fromkeys(part for q in written.queries if (part := q.strip())))
         queries = parts if len(parts) > 1 else (question,)
+        said = tuple(dict.fromkeys(part for d in written.documents if (part := d.strip())))
         with self._lock:
             if len(self._split) >= 256:
                 self._split.clear()
-            self._split[question] = queries
-        return queries
+            self._split[question] = (queries, said)
+        return queries, said
 
     def _shared(self, key: object, work: Callable[[], Any]) -> Any:
         """`work()`, run by the first of those asking for `key` at once; the others wait for

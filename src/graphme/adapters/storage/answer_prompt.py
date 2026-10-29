@@ -31,7 +31,10 @@ SPLIT_SYSTEM = (
     "alone and must say what it is about. A question that asks for one thing comes back as "
     "that one query, as written: never several wordings, synonyms or guesses at causes of "
     "the same thing -- each query must ask for something the others do not. At most three "
-    "queries. Return only JSON matching the schema."
+    "queries. In `documents`, copy as written each phrase of the question that names one "
+    "particular document -- by its number, its file name, its title or what it is called -- "
+    "and nothing that only says what kind of document is wanted; an empty list when it names "
+    "none. Return only JSON matching the schema."
 )
 """How a question asking several things -- a problem and how competitors handled it -- is
 cut into one search each: one search for both finds what the nearer part is about."""
@@ -40,6 +43,8 @@ MAX_QUERIES = 3
 
 class _Split(BaseModel):
     queries: list[str] = Field(min_length=1, max_length=MAX_QUERIES)
+    documents: list[str] = Field(default_factory=list, max_length=MAX_QUERIES)
+    """Phrases of the question naming one particular document, as written."""
 
 
 TEMPLATE = """Context:

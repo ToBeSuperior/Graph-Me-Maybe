@@ -5,6 +5,15 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.48] - 2026-10-29
+
+### Fixed
+
+- A question that names a document -- by its number, its file name or its title, however
+  briefly -- has that document first when the search found it. Before, a question such as
+  "QA-2025-0101 document summary" put other documents first that mentioned the number beside
+  the question's common words.
+
 ## [0.1.47] - 2026-10-29
 
 ### Changed
