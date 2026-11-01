@@ -5,6 +5,17 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.55] - 2026-11-02
+
+### Fixed
+
+- On Windows the window no longer stops answering as it opens (0.1.54): the window handed to
+  the page's title bar was walked into by pywebview, without end, off the window's thread.
+- On Windows the window has no frame left beside the page, as in Claude's window: Windows 10
+  drew a white line on the left, right and bottom of the active window, and every maximize and
+  restore made the window taller by a title bar. It resizes from thin grips over its sides,
+  bottom and bottom corners.
+
 ## [0.1.54] - 2026-11-02
 
 ### Fixed

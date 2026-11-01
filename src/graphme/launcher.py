@@ -95,8 +95,12 @@ def show_window(url: str, storage: Path) -> bool:
             except Exception:  # noqa: BLE001 -- Windows' own title bar, then
                 logging.getLogger(__name__).exception("the window keeps its own title bar")
                 chrome = None
+        # With its own title bar the window has no frame (`window_chrome`); pywebview's script
+        # that drags a frameless window from anywhere on the page is not wanted -- the header's
+        # drag regions move it.
         window = webview.create_window("Graph-Me-Maybe", url, width=1280, height=860,
-                                       min_size=(900, 600), text_select=True, js_api=chrome)
+                                       min_size=(900, 600), text_select=True, js_api=chrome,
+                                       frameless=chrome is not None, easy_drag=False)
         if chrome is not None and window is not None:
             chrome.attach(window)
         # Quitting the app (Cmd+Q, the Dock) ends the process from inside the window's loop:

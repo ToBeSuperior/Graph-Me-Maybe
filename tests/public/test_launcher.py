@@ -388,6 +388,30 @@ def test_on_windows_the_header_is_the_title_bar(
 
     assert isinstance(made.get("js_api"), window_chrome.ChromeApi)
     assert installed == [made["js_api"]]
+    # no frame at all (a frame is a white line on Windows 10), and the page is not dragged
+    # by pywebview's own script: only the header moves the window
+    assert made.get("frameless") is True and made.get("easy_drag") is False
+
+
+def test_the_title_bar_api_shows_the_page_methods_only() -> None:
+    """pywebview walks every public attribute of `js_api` into the page; the window held there
+    would be walked too (`window.native.AccessibilityObject.Bounds.Empty...` without end), off
+    the window's own thread, and the window stops answering."""
+    import types
+
+    from graphme import window_chrome
+
+    api = window_chrome.ChromeApi()
+    api.attach(types.SimpleNamespace(events=types.SimpleNamespace(
+        maximized=_Handlers(), restored=_Handlers())))
+
+    shown = [name for name in dir(api) if not name.startswith("_")]
+    assert shown and all(callable(getattr(api, name)) for name in shown), shown
+
+
+class _Handlers:
+    def __iadd__(self, handler: object) -> _Handlers:
+        return self
 
 
 def test_elsewhere_the_window_keeps_its_own_title_bar(
@@ -402,15 +426,33 @@ def test_elsewhere_the_window_keeps_its_own_title_bar(
 
     assert launcher.show_window("http://127.0.0.1:1", tmp_path)
     assert made.get("js_api") is None
+    assert not made.get("frameless")
 
 
-def test_the_title_bar_starts_below_the_frame_a_maximized_window_hangs_off_screen() -> None:
-    from graphme.window_chrome import client_top, wanted
+def test_the_page_fills_the_window_and_a_maximized_one_stays_on_screen() -> None:
+    """No frame is left beside the page: Windows 10 draws a white line on any frame it is
+    given. A maximized window hangs its frame off every side of the screen, so the page is
+    taken in by that much or its edges are cut off."""
+    from graphme.window_chrome import client_area, wanted
 
-    assert client_top(100, maximized=False, frame=8) == 100
-    assert client_top(-8, maximized=True, frame=8) == 0
+    assert client_area((100, 50, 900, 650), maximized=False, frame=8) == (100, 50, 900, 650)
+    assert client_area((-8, -8, 1928, 1048), maximized=True, frame=8) == (0, 0, 1920, 1040)
     assert wanted({}, platform="win32") and not wanted({}, platform="darwin")
     assert not wanted({"GRAPHME_NATIVE_TITLE_BAR": "1"}, platform="win32")
+
+
+def test_the_window_resizes_from_its_sides_and_bottom_not_its_top() -> None:
+    """With no frame, grips over the page's edges resize the window; the top is the header,
+    which moves it."""
+    from graphme.window_chrome import HT, edge_grips
+
+    grips = edge_grips(800, 600, grip=6)
+    assert {hit for hit, *_ in grips} == {HT["left"], HT["right"], HT["bottom"],
+                                         HT["bottomleft"], HT["bottomright"]}
+    for _hit, x, y, w, h in grips:
+        assert w > 0 and h > 0 and x >= 0 and y >= 0 and x + w <= 800 and y + h <= 600
+        assert y + h > 600 - 6 or x < 6 or x + w > 800 - 6  # along an edge, never inside
+    assert all(y > 0 or hit in (HT["left"], HT["right"]) for hit, _x, y, _w, _h in grips)
 
 
 def test_a_title_bar_that_cannot_be_taken_over_still_opens_the_window(
@@ -431,3 +473,4 @@ def test_a_title_bar_that_cannot_be_taken_over_still_opens_the_window(
 
     assert launcher.show_window("http://127.0.0.1:1", tmp_path)
     assert made.get("js_api") is None
+    assert not made.get("frameless")
