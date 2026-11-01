@@ -120,6 +120,8 @@ def _stamp(path: str | Path) -> tuple[int, int] | None:
 
 
 PREVIEWS_KEPT = 24
+EMBED_WAIT_SECONDS = 30.0
+"""How long a workspace switch waits for the embedding the open workspace started."""
 PREVIEW_HOLD_SECONDS = 300.0
 """How long a cloud drive's file downloaded to draw a page is kept after it was last looked at:
 the next page of the same document is drawn from it, not downloaded again."""
@@ -410,6 +412,14 @@ class Demo:
         spaces.item(workspace)
         if workspace == spaces.active:
             return
+        # Opening a workspace embeds what it holds with the chosen search model, a second or
+        # two: waited out, not refused as though a build ran. An embedding is never stopped
+        # half way, so a long one still refuses once EMBED_WAIT_SECONDS have gone.
+        # ponytail: polled, an event on the job if a wait ever needs to be exact
+        waited = time.monotonic() + EMBED_WAIT_SECONDS
+        while (self.build.kind == "embed" and self.build.state in BUILDING
+               and time.monotonic() < waited):
+            time.sleep(0.1)
         with self.building:
             busy = [s for s in self.sessions.values() if s.state not in (*STARTABLE, *FINISHED)]
             if self.build.state in BUILDING or self.export.state in EXPORTING or busy:

@@ -98,7 +98,7 @@ function Fetch-Neo4j([string]$Python) {
     if ($LASTEXITCODE -ne 0) { Say 'warning: the graph DB did not download; the app fetches it when it first opens'; $global:LASTEXITCODE = 0 }
 }
 
-function Make-Shortcut([string]$Graphme) {
+function Make-Shortcut([string]$Graphme, [string]$Python) {
     if ($env:GRAPHME_NO_SHORTCUT) { return }
     $link = (New-Object -ComObject WScript.Shell).CreateShortcut($Shortcut)
     # The window app, which has no console. A shortcut cannot set GRAPHME_HOME: another home
@@ -108,6 +108,10 @@ function Make-Shortcut([string]$Graphme) {
     $link.Arguments = ''
     if ($AppHome -ne $DefaultHome) { $link.Arguments = "`"$AppHome`"" }
     $link.WorkingDirectory = $AppHome
+    # The app's icon, from the package just installed: uv's executable carries a generic one.
+    $icon = & $Python -c "import graphme, pathlib; print(pathlib.Path(graphme.__file__).parent / 'icons' / 'AppIcon.ico')" 2>$null
+    if ($LASTEXITCODE -eq 0 -and $icon -and (Test-Path -LiteralPath $icon.Trim())) { $link.IconLocation = "$($icon.Trim()),0" }
+    $global:LASTEXITCODE = 0
     $link.Save()
     Say "shortcut: Start menu > Graph-Me-Maybe"
 }
@@ -215,7 +219,7 @@ function Install {
     }
     Ensure-Runtime $python
     Fetch-Neo4j $python
-    Make-Shortcut $graphme
+    Make-Shortcut $graphme $python
     Register-Uninstall $tag
     $open = if ($env:GRAPHME_HOME) { "`$env:GRAPHME_HOME='$($AppHome.Replace("'", "''"))'; graphme app" } else { 'graphme app' }
     Say "installed. Open it from the Start menu, or: $open   (a new terminal finds the command)"

@@ -5,6 +5,18 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.56] - 2026-11-02
+
+### Fixed
+
+- Switching workspaces right after opening one waits out the embedding the open workspace
+  started (a second or two) instead of being refused as though a build ran.
+
+### Added
+
+- On Windows the Start menu shortcut and the window on the taskbar wear the app's icon, the same
+  mark as graphme.io; both showed the generic icon of the executable uv writes.
+
 ## [0.1.55] - 2026-11-02
 
 ### Fixed

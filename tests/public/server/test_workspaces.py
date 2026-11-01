@@ -128,6 +128,20 @@ def test_no_switch_while_a_build_runs(workspace_demo: Demo) -> None:
     assert workspace_demo.workspaces.active == FIRST  # type: ignore[union-attr]
 
 
+def test_a_switch_waits_out_the_embedding_a_workspace_opened_with(workspace_demo: Demo) -> None:
+    """Opening a workspace embeds what it holds with the chosen search model, a second or two;
+    a switch asked for meanwhile was refused as though a build ran."""
+    import threading
+
+    made = workspace_demo.workspaces.create("Invented project")  # type: ignore[union-attr]
+    embedding = workspace_demo.build = CorpusBuild(id="e", kind="embed", state="embedding")
+    threading.Timer(0.3, lambda: setattr(embedding, "state", "done")).start()
+
+    workspace_demo.switch_workspace(made["id"])
+
+    assert workspace_demo.workspaces.active == made["id"]  # type: ignore[union-attr]
+
+
 def test_new_keys_keep_the_workspace_open(workspace_demo: Demo, home: Path) -> None:
     made = workspace_demo.workspaces.create("Invented project")  # type: ignore[union-attr]
     workspace_demo.switch_workspace(made["id"])

@@ -141,6 +141,19 @@ def test_the_windows_shortcut_carries_a_custom_home() -> None:
     assert "$link.Arguments = ''" in shortcut
 
 
+def test_the_windows_shortcut_wears_the_app_icon() -> None:
+    """The Start menu shortcut is drawn with the app's icon from the package just installed;
+    it showed the generic one of the executable uv writes."""
+    from PIL import Image
+
+    text = (ROOT / "install.ps1").read_text()
+    shortcut = text[text.index("function Make-Shortcut"):text.index("function Register-Uninstall")]
+    assert "$link.IconLocation" in shortcut and "AppIcon.ico" in shortcut
+    assert "Make-Shortcut $graphme $python" in text
+    with Image.open(ROOT / "src/graphme/icons/AppIcon.ico") as icon:
+        assert (256, 256) in icon.info["sizes"] and (16, 16) in icon.info["sizes"]
+
+
 @posix
 def test_a_purge_refuses_a_folder_that_holds_home(tmp_path: Path) -> None:
     home = tmp_path / "users" / "me"

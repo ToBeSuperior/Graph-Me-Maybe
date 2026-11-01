@@ -112,6 +112,7 @@ def install(api: ChromeApi) -> None:  # pragma: no cover -- Windows and WebView2
     original = edgechromium.EdgeChrome.on_webview_ready
 
     def ready(self: Any, sender: Any, args: Any) -> Any:
+        _wear_icon(self.form)
         try:
             if args.IsSuccess:
                 sender.CoreWebView2.Settings.IsNonClientRegionSupportEnabled = True
@@ -123,6 +124,19 @@ def install(api: ChromeApi) -> None:  # pragma: no cover -- Windows and WebView2
         return original(self, sender, args)  # type: ignore[no-untyped-call,unused-ignore]
 
     edgechromium.EdgeChrome.on_webview_ready = ready  # type: ignore[method-assign,unused-ignore]
+
+
+def _wear_icon(form: Any) -> None:  # pragma: no cover -- Windows only
+    """The app's icon on the window, and so on the taskbar: uv's executable carries a generic
+    one."""
+    try:
+        from pathlib import Path
+
+        from System.Drawing import Icon  # type: ignore[import-not-found,unused-ignore]
+
+        form.Icon = Icon(str(Path(__file__).parent / "icons" / "AppIcon.ico"))
+    except Exception:  # noqa: BLE001 -- the generic icon, then
+        _log.exception("the window keeps the executable's icon")
 
 
 def _give_frame_back(form: Any) -> None:  # pragma: no cover -- Windows only
