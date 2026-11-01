@@ -4,17 +4,27 @@
 
 **Turn a folder of PDF, Word, PowerPoint and Excel files into one knowledge graph, and ask it questions.**
 
+[![Website](https://img.shields.io/badge/website-graphme.io-4F46E5)](https://graphme.io)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue)](LICENSE.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![Neo4j 5.26](https://img.shields.io/badge/Neo4j-5.26-018bff)](https://neo4j.com/)
 ![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
+[Website](https://graphme.io) ·
+[Live demo](https://graphme.io/demo/en/) ·
+[Benchmarks](https://graphme.io/benchmarks/) ·
 [Install](#-install-the-app) ·
 [Usage](#-usage) ·
 [How it works](#-how-it-works) ·
 [Configuration](#-configuration) ·
 [Develop](#-develop-from-source) ·
 [Contribute](CONTRIBUTING.md)
+
+<br>
+
+<a href="https://graphme.io/demo/en/"><img src="docs/assets/demo.gif" alt="Asking a question in Graph-Me-Maybe: the answer cites a spreadsheet row and a slide, and the source cell is highlighted on the rendered page" width="860"></a>
+
+<sub>An invented company's 32 documents. [Watch it as video](docs/assets/demo.mp4) · [Try the live demo](https://graphme.io/demo/en/)</sub>
 
 </div>
 
