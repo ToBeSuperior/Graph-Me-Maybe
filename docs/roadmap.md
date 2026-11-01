@@ -77,20 +77,13 @@ OneDrive/SharePoint through their desktop apps.
 - [ ] Check the small-print rule (difference from the modal body size, presence of body text
       above and below) and the number of pieces per call on more document types. The rule was
       tuned on only two kinds, papers and Korean reports.
-- [ ] Decide whether to absorb text inside the frame of a split table even when figure
-      grouping did not group the table. Today it is absorbed only when the page says it is one
-      table.
-- [ ] Decide whether to crop a table that spans pages on both pages. Today it is cut once
-      from the side where more of it is visible, so the piece on the other side is not in the
-      crop.
-- [ ] Decide whether to count leading spaces before a sentence in PDF too. Today `indent`
-      counts both ways (paragraph settings and leading spaces) only for DOCX: a PDF line's
-      text is stripped when it is read, so only its left coordinate reaches `indent`.
 - [ ] Check the frame-detection thresholds (area 15%, fill 50%, longest cell 200 characters)
       on other PDFs. They are values tuned on only two documents.
 - [ ] Check an Aura upload end to end (the `.dump` is checked by loading it into an empty Neo4j
-      5.26). Also decide whether to give top-level units an `OUTLINE_PARENT` from the page root,
-      so that the hierarchy relations alone form a complete tree.
+      5.26, and the `neo4j-admin database upload` options were checked against 5.26's own
+      help). What is left needs an Aura instance and its password: the user's to run, from the
+      app's export. Top-level units need no `OUTLINE_PARENT`: the published `PARENT_OF`
+      (`final_edges`) already gives every node one parent (`test_published_tree.py`).
 
 ## 1.5 · Search and the web app
 
@@ -101,11 +94,6 @@ OneDrive/SharePoint through their desktop apps.
 - [ ] (Later) Draw a preview in the app's own window with the same viewer: no server render at
       all, and sharp at any zoom. The boxes come from the server's Chromium, and macOS's window is
       WebKit, so text measured differently would move them; check that first.
-- [ ] (Refinement) A question in one language finds little in documents written in another:
-      an English question over Korean documents left them below the relevance floor, which
-      was measured on English questions over English documents. One option is for the
-      question split (`SPLIT_SYSTEM`) to also write each query in the language of the
-      documents it searches.
 - [ ] Measure what asking for documents costs and buys against asking for passages, on a real
       corpus and a question set with the expected documents. Build the graph in a home of its
       own (`GRAPHME_HOME`, the Neo4j install copied) so no other graph is touched, then ask each
@@ -138,13 +126,6 @@ OneDrive/SharePoint through their desktop apps.
 - [ ] Decide whether to split a table into cell, row and column semantic units, and if so,
       set the rules. Today one table is one node. This item is on hold until the
       representative table meaning and the ownership rules are settled.
-- [ ] (Refinement) A worksheet table drawn without borders is not recognised as a table: each
-      cell becomes a text unit of its own, and the outline pass hangs every value under the
-      first cell or header, flat, so its rows and columns are lost. A table needs its border
-      today (`extractors/xlsx_visual_tables.py`). Decide how a borderless table on a sheet is
-      told from loose cells -- by principle, for any workbook, not by the shape of the ones
-      at hand.
-
 ## 3 · Quality evaluation set
 
 - [ ] Build a small representative set with the expected source mapping, information units,

@@ -187,3 +187,99 @@ def test_a_top_may_go_under_an_earlier_top_of_its_page_but_never_a_later_one() -
     chosen = joining.vote(request, [[_placed("outlet", "valve"), _placed("valve", "outlet")]])
     assert chosen["outlet"] == ("under", "valve")
     assert chosen["valve"] == ("under", "filter")  # a later top is no place: unanswered
+
+
+def _head(u: str, parent: str | None) -> HierarchyDecision:
+    return HierarchyDecision(subject_id=u, status="parent" if parent else "root",
+                             parent_id=parent, confidence=0.5, rationale="headings")
+
+
+def test_a_heading_the_headings_placed_is_not_asked_again_at_a_page_break() -> None:
+    """The headings are read once off the whole document; a page break sees two pages. A
+    chapter the headings put under the title stays there, whatever a page break says --
+    asked again, the next chapter went under the one before it, and every later one with it."""
+    joining = _joining((_head("title", None), _head("intake", "title"),
+                        _head("outlet", "title"), _head("costs", "title")))
+    request = joining.request(2)
+    assert request is not None
+    assert [t.unit_id for t in request.tops] == ["valve"]
+    assert joining.request(3) is None  # its one top is a heading: nothing left to ask
+
+    parents = {d.subject_id: d.parent_id if d.status == "parent" else d.status
+               for d in joining.settle({2: {"valve": ("beside", "filter"),
+                                            "outlet": ("under", "intake")},
+                                        3: {"costs": ("under", "hose")}})}
+    assert parents["outlet"] == "title" and parents["costs"] == "title"
+    assert parents["valve"] == "intake"  # what is not a heading is still joined
+    assert parents["hose"] == "outlet"  # the page's own reading is kept
+
+
+def test_a_heading_placed_under_a_dropped_unit_is_joined_as_before() -> None:
+    joining = _joining((_head("costs", "number"),))
+    request = joining.request(3)
+    assert request is not None and [t.unit_id for t in request.tops] == ["costs"]
+
+
+def test_headings_that_took_a_later_heading_for_the_title_do_not_hang_the_rest_under_it() -> None:
+    """The headings are asked of text alone, so a title printed as a picture is not among
+    them, and the answer takes the first heading it sees for the title. The title is where
+    the document begins: a heading the headings put at the top on a later page is a chapter,
+    and what they hung under it stands beside it under the title."""
+    joining = _joining((_head("outlet", None), _head("costs", "outlet"),
+                        _head("hose", "costs")))
+    assert joining.headed("outlet") == "title"
+    assert joining.headed("costs") == "title"
+    assert joining.headed("hose") == "costs"  # only one level is lifted
+
+
+def test_headings_whose_top_is_on_the_first_page_keep_what_they_hung_under_it() -> None:
+    joining = _joining((_head("intake", None), _head("costs", "intake")))
+    assert joining.headed("costs") == "intake"
+
+
+def test_a_tie_is_broken_by_how_deep_a_place_stands_not_by_where_it_comes() -> None:
+    """Page 3 is offered the filter line (under the intake chapter, two levels in) before the
+    outlet chapter (one level in), because the filter comes first in the document. With one
+    reading for each, the shallower answer is the outlet: a place later in the document is
+    not a place deeper in the outline."""
+    joining = _joining()
+    request = joining.request(3)
+    assert request is not None
+    offered = [p.unit_id for p in request.places]
+    assert offered.index("filter") < offered.index("outlet")
+    chosen = joining.vote(request, [[_placed("costs", "filter", "beside")],
+                                    [_placed("costs", "outlet", "beside")]])
+    assert chosen["costs"] == ("beside", "outlet")
+
+
+def test_readings_differing_only_in_what_the_page_does_not_keep_are_not_chosen() -> None:
+    """A flowing page keeps what it drops and the parents on the page; root, unresolved and
+    a parent on another page all leave a unit a top for the join. Readings differing only
+    there are the same page, and asking which one to keep is a call whose answer changes
+    nothing."""
+    import itertools
+
+    class Twice(_Vision):
+        def __init__(self) -> None:
+            super().__init__()
+            self.chosen = 0
+            self._turn = itertools.count()
+
+        def resolve_hierarchy_scope(self, **kw: Any) -> HierarchyScopeResult:
+            said = super().resolve_hierarchy_scope(**kw)
+            if kw["request"].page_index != 3:
+                return said
+            status = "root" if next(self._turn) % 2 else "unresolved"
+            return HierarchyScopeResult(decisions=(HierarchyDecision(
+                subject_id="costs", status=status, confidence=0.9, rationale="r"),))
+
+        def choose_hierarchy_scope(self, **kw: Any) -> Any:
+            self.chosen += 1
+            raise AssertionError("asked to choose between readings that keep the same page")
+
+    vision = Twice()
+    derived = RenderedHierarchyScopeProvider(renderer=_Pages(), vision=vision,
+                                             readings=2).derive(extracted=_report(),
+                                                                source_path="r.pdf")
+    assert vision.chosen == 0
+    assert _parents(derived)["costs"] == "title"

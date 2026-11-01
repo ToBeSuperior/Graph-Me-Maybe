@@ -579,13 +579,20 @@ def test_a_document_put_in_is_no_longer_shown_as_waiting_to_be_put(
     assert len(waiting) == 2 and waiting[-1] == set()
 
 
-def test_a_document_read_beside_many_others_asks_its_pages_a_few_at_a_time(demo: Demo) -> None:
-    """Every document read side by side shares the same calls in flight: one read alone asks
-    as many pages at once as there are, but sixteen at once each kept two dozen threads
-    waiting for a slot -- hundreds idle. A document's share is what is left for it."""
-    assert demo._workers(running=1) == state.VLM_CALLS_AT_ONCE
-    assert demo._workers(running=state.READERS) == state.FEWEST_WORKERS
-    assert state.FEWEST_WORKERS * state.READERS < 3 * state.VLM_CALLS_AT_ONCE
+def test_a_document_may_take_every_call_in_flight_however_many_are_read_beside_it(
+    demo: Demo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The calls in flight are capped once, by the slots every document shares. A share fixed
+    when a document started, from how many were being read then, left a long one still reading
+    after the rest had finished asking four pages at a time while twenty slots stood empty."""
+    asked: list[int] = []
+    monkeypatch.setattr(
+        state, "create_graph_builder", lambda *_, workers, **__: asked.append(workers)
+    )
+    monkeypatch.setattr(state, "create_vision", lambda *_, **__: None)
+    demo._builder(SimpleNamespace(pages=(), store=None, progress=None))  # type: ignore[arg-type]
+
+    assert asked == [state.VLM_CALLS_AT_ONCE]
 
 
 def test_a_build_says_how_far_its_reading_is_and_ends_whole(

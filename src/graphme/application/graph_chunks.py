@@ -30,7 +30,7 @@ HEADING_TOKENS = 40
 """A section too big for one passage gives its own words to the headings above each piece --
 unless it says more than a heading does, and then they are read as part of the first."""
 PATH_LABEL_CHARS = 80
-CHUNK_RULE = f"outline/{CHUNK_TOKENS}/{HEADING_TOKENS}/lines/covers-all/words"
+CHUNK_RULE = f"outline/{CHUNK_TOKENS}/{HEADING_TOKENS}/lines/covers-all/words/captioned"
 """Names how passages are cut. Stored on each passage, so a document cut by another rule is
 cut again; change it whenever `chunks` would cut the same outline differently."""
 

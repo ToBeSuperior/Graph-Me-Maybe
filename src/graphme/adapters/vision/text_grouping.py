@@ -37,10 +37,12 @@ class RenderedUnitGrouper:
         *,
         renderer: RendersPages,
         vision: VisionProvider,
+        workers: int = 1,
         progress: Progress | None = None,
     ) -> None:
         self._renderer = renderer
         self._vision = vision
+        self._workers = workers
         self._progress = progress
 
     def group(
@@ -71,6 +73,7 @@ class RenderedUnitGrouper:
             join=join,
             page_of=flow_pages(exploded, rendered, document_format),
             progress=self._progress,
+            workers=self._workers,
         )
 
     @staticmethod

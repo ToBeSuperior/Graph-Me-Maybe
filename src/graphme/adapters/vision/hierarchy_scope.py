@@ -299,7 +299,8 @@ class RenderedHierarchyScopeProvider:
             try:
                 answered = self._read(self._request(extracted, scope, shown, carried),
                                       shown.png, crops,
-                                      _page_tail(previous[1].png) if previous else None)
+                                      _page_tail(previous[1].png) if previous else None,
+                                      flowing=True)
             except RuntimeError as error:
                 # One page the model cannot answer is one page's outline, not the document's.
                 _log.warning("%s: no usable answer, left as it was -- %s", scope.scope, error)
@@ -396,8 +397,11 @@ class RenderedHierarchyScopeProvider:
         image: bytes,
         crops: Mapping[str, bytes] | None,
         preceding: bytes | None = None,
+        *,
+        flowing: bool = False,
     ) -> HierarchyScopeResult:
-        """One page's outline, read as many times as asked and settled against the page."""
+        """One page's outline, read as many times as asked and settled against the page. A
+        flowing page's readings are compared by what its page keeps (`_kept`)."""
         def once() -> HierarchyScopeResult:
             return self._vision.resolve_hierarchy_scope(
                 request=request, image=image, unit_images=crops, preceding=preceding
@@ -411,7 +415,8 @@ class RenderedHierarchyScopeProvider:
             ])
         # Agreement settles itself. Only where the readings differ is there a question,
         # and only then is it worth another call.
-        if len({_stated(reading) for reading in readings}) == 1:
+        compared = _kept if flowing else _stated
+        if len({compared(reading, request) for reading in readings}) == 1:
             _log.info("%s: %d readings agreed", request.scope, len(readings))
             return readings[0]
         choice = self._vision.choose_hierarchy_scope(
@@ -518,7 +523,11 @@ class RenderedHierarchyScopeProvider:
         )
 
 
-def _stated(result: HierarchyScopeResult) -> frozenset[tuple[str, str, str | None]]:
+_Said = frozenset[tuple[str, str, str | None]]
+
+
+def _stated(result: HierarchyScopeResult,
+            _request: HierarchyScopeRequest | None = None) -> _Said:
     """What a reading decided about every unit.
 
     Confidence and rationale are how a reading explains itself, not what it decided, so
@@ -527,6 +536,20 @@ def _stated(result: HierarchyScopeResult) -> frozenset[tuple[str, str, str | Non
     return frozenset(
         (decision.subject_id, decision.status, decision.parent_id)
         for decision in result.decisions
+    )
+
+
+def _kept(result: HierarchyScopeResult,
+          request: HierarchyScopeRequest | None = None) -> _Said:
+    """What a flowing page keeps of a reading (`PageTree`): what it drops, and each parent on
+    the page. Root, unresolved and a parent on another page all leave a unit a top for the
+    join, so readings differing only there are the same page."""
+    on_page = {unit.id for unit in request.units} if request is not None else set()
+    return frozenset(
+        (decision.subject_id, "drop", None) if decision.status == "drop"
+        else (decision.subject_id, "under", decision.parent_id)
+        for decision in result.decisions
+        if decision.status == "drop" or decision.parent_id in on_page
     )
 
 

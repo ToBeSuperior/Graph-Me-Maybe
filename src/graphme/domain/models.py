@@ -490,11 +490,17 @@ class VisualCaption(DomainModel):
     saying "a decorative icon" are not what the passage it stood in is about."""
 
 
-class ScannedBlock(DomainModel):
-    """One piece of a scanned page's text as the model read it, and where: `box` is
-    (x0, y0, x1, y1) as shares of the page's width and height."""
+SCANNED_TEXT_CHARS = 8000
 
-    text: str = Field(min_length=1, max_length=8000)
+
+class ScannedBlock(DomainModel):
+    """One piece of a scanned page as the model read it, and where: `box` is (x0, y0, x1,
+    y1) as shares of the page's width and height. A table is its rows, a line each with
+    its cells between " | "; a picture or a chart is where it is, with the title printed
+    with it if any."""
+
+    kind: Literal["text", "table", "picture", "chart"] = "text"
+    text: str = Field(default="", max_length=SCANNED_TEXT_CHARS)
     box: tuple[float, float, float, float]
 
 

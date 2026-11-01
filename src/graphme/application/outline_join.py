@@ -14,6 +14,11 @@ opened it, so the headings' guess at the frame is checked against both.
 
 A top answers a place and `under` or `beside`. Beside takes the neighbour's parent, which is
 known only once every page is joined (`settle`).
+
+A top the headings placed is not asked (`Joining.headed`): the headings are read once off the
+whole document, a page break sees two pages, and asked again the next chapter went under the
+one before it, and every chapter after it with it. It is still a place the page's other tops
+may go under or beside.
 """
 from __future__ import annotations
 
@@ -120,6 +125,18 @@ class Joining:
                     self._held.setdefault(parent, []).append(u)
         self._up = {d.subject_id: d.parent_id for d in heads
                     if d.status == "parent" and d.parent_id}
+        self._head_roots = {d.subject_id for d in heads if d.status == "root"}
+        if self._head_roots and not any(self._order.get(u, (None,))[0] == self._first
+                                        for u in self._head_roots):
+            # The headings are text alone: a title printed as a picture is not among them,
+            # and the answer took a later heading for it. The title is where the document
+            # begins, so a top on a later page is a chapter, and what was hung under it
+            # stands beside it.
+            taken = frozenset(self._head_roots)
+            for u in [u for u, parent in self._up.items() if parent in taken]:
+                del self._up[u]
+                self._head_roots.add(u)
+        self._kept = {u for tree in trees for u in tree.kept}
         self._heads = sorted((d.subject_id for d in heads),
                              key=lambda u: self._order.get(u, (0, 0)))
         self.title = self._title()
@@ -144,6 +161,16 @@ class Joining:
 
         tops = first.tops
         return max(tops, key=lambda u: (under(u), -tops.index(u)))
+
+    def headed(self, u: str) -> str | None:
+        """Where the headings put `u`, when they did and that is somewhere kept: under the
+        heading they name, or -- standing at the top -- under the document's title. The
+        title itself is not placed; it holds the rest."""
+        if u == self.title or u in self.dropped:
+            return None
+        if (parent := self._up.get(u)) is not None:
+            return parent if parent in self._kept or parent == self.top else None
+        return self.top if u in self._head_roots else None
 
     def textual(self, u: str) -> bool:
         """A table or a picture holds only its parts: never a section anything opens in."""
@@ -192,8 +219,9 @@ class Joining:
     def places(self, index: int, *, back: bool = True) -> list[str]:
         """What page `index`'s tops may go under or beside, the document's top first."""
         tree = self._trees.get(index)
-        tops = set(tree.tops) if tree is not None else set()
-        near = [*self.frame(index), *self.ending(index - 1)]
+        tops = set(self._asked(tree)) if tree is not None else set()
+        near = [*self.frame(index), *self.ending(index - 1),
+                *(u for u in (tree.tops if tree is not None else ()) if u not in tops)]
         if back and index - 1 > self._first:
             near += self.places(index - 1, back=False)
         ordered = sorted(dict.fromkeys(near),
@@ -205,7 +233,7 @@ class Joining:
     def request(self, index: int) -> PageJoinRequest | None:
         """What page `index` is asked, or None when it has nothing to join."""
         tree = self._trees.get(index)
-        if tree is None or not tree.tops or index == self._first:
+        if tree is None or index == self._first or not self._asked(tree):
             return None
         under: dict[str, list[str]] = {}
         for u in tree.kept:
@@ -221,8 +249,12 @@ class Joining:
             page_index=index,
             places=tuple(place(u, self._held.get(u, ())) for u in self.places(index)),
             tops=tuple(place(u, under.get(u, ()), self._units[u].indent if u in self._units
-                             else None) for u in tree.tops),
+                             else None) for u in self._asked(tree)),
         )
+
+    def _asked(self, tree: PageTree) -> tuple[str, ...]:
+        """A page's tops the headings did not place."""
+        return tuple(u for u in tree.tops if self.headed(u) is None)
 
     def vote(self, request: PageJoinRequest,
              readings: Sequence[Sequence[JoinPlacement]]) -> dict[str, Answer]:
@@ -232,8 +264,9 @@ class Joining:
         innermost section open where the page begins."""
         places = [p.unit_id for p in request.places]
         tops = [t.unit_id for t in request.tops]
-        depth = {u: i for i, u in enumerate(places)}
-        depth.update({u: len(places) + i for i, u in enumerate(tops)})
+        inner = len(self.frame(request.page_index))
+        depth = {u: self._depth(u) for u in places}
+        depth.update({u: inner for u in tops})  # a top stands at least where the page begins
         valid = [self._valid(reading, places, tops) for reading in readings]
         chosen: dict[str, Answer] = {}
         for u in tops:
@@ -244,6 +277,19 @@ class Joining:
             else:
                 chosen[u] = ("under", self.frame(request.page_index)[-1])
         return chosen
+
+    def _depth(self, u: str) -> int:
+        """How many levels below the document's top `u` stands, as far as is known before
+        the joins: its page's reading, then the headings; a unit neither places is one
+        level in."""
+        steps = 0
+        at: str | None = u
+        seen: set[str] = set()
+        while at is not None and at not in (self.top, self.root) and at not in seen:
+            seen.add(at)
+            steps += 1
+            at = self._local_up.get(at) or self.headed(at) or self._up.get(at)
+        return steps
 
     def disagree(self, request: PageJoinRequest,
                  readings: Sequence[Sequence[JoinPlacement]]) -> bool:
@@ -275,9 +321,13 @@ class Joining:
             for u in tree.tops:
                 parent[u] = (self.root if (u == self.title or index != self._first)
                              else self.top)
+                if (headed := self.headed(u)) is not None:
+                    parent[u] = headed
         besides: dict[str, str] = {}
         for placed in joined.values():
             for u, (how, at) in placed.items():
+                if self.headed(u) is not None:
+                    continue  # the headings placed it; a page break does not move it
                 if how == "under":
                     parent[u] = at
                 else:

@@ -23,7 +23,7 @@ import re
 import threading
 import time
 import unicodedata
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -37,11 +37,14 @@ from graphme.adapters.chat import Endpoint, complete, image_part, is_transient
 from graphme.adapters.embedding import BatchEmbedder
 from graphme.adapters.export.neo4j import CHUNK_LABEL, NODE_LABEL
 from graphme.adapters.storage.answer_prompt import (
+    MAX_QUERIES,
     SPLIT_SYSTEM,
     SYSTEM,
     _nothing_found,
     _prompt,
     _Split,
+    asked_with_samples,
+    language_samples,
 )
 from graphme.adapters.storage.hybrid_search import _OnceRetriever
 from graphme.adapters.storage.neo4j_space import CHUNK_TEXT_INDEX, Neo4jGraphSpace, checked_name
@@ -66,6 +69,8 @@ BATCH = 32
 RATE_PASSAGES = 2000
 """About how many passages are rated together: their vectors are held at once."""
 LINKED_PASSAGES = {2: 2, 3: 1}
+# How much of a document's opening each of its passages carries: a byline, a source, a date.
+OPENING_CHARS = 240
 """Passages of a linked document brought along, by hop -- the ones nearest the question."""
 LINK_CANDIDATES = 6
 """Of the documents linked to one, how many are read passage by passage -- those nearest the
@@ -75,6 +80,8 @@ nearer than its whole."""
 LINKED_DOCUMENTS = 4
 """Linked documents a found passage brings along at each hop, the ones nearest the question:
 a much-cited paper is linked to dozens, and all of them is a context nobody answers from."""
+SAMPLED_DOCUMENTS = 200
+"""Documents a passage each is taken from to see which languages the space is written in."""
 ANSWER_PICTURES = 16
 """Most crops one answer is sent: about two a passage it reads. A passage of a slide
 full of icons would otherwise send each of them."""
@@ -107,6 +114,29 @@ def collected(ranked: Sequence[Any], documents: int) -> list[Any]:
         if len(given) == documents and given[doc] == 1:
             break  # the passage that reached the last document is the walk's end
     return taken
+
+
+def filled(ranked: Sequence[Any], taken: Sequence[Any]) -> list[Any]:
+    """What an answer reads: the walk's passages (`collected`), then on down `ranked` in the
+    documents the walk reached, best first, for `within_budget` to cut. A document's share keeps
+    one from crowding the others out of the walk; once every document asked for has its place,
+    the budget left is the found documents' next passages -- a long report holding the answer
+    in more sections than its share used to be read from its first five and called silent on
+    the rest. A document the walk did not reach is never added here."""
+    seen = {passage["id"] for passage in taken}
+    reached = {passage["document_id"] for passage in taken}
+    return [*taken, *(passage for passage in ranked
+                      if passage["document_id"] in reached and passage["id"] not in seen)]
+
+
+def named_only(ranked: Sequence[Any], named: set[str]) -> list[Any]:
+    """What a question naming documents is answered from: those documents' passages alone, best
+    first, with no share per document -- `within_budget` takes as many as fit. The others the
+    search found answer what the named ones do not; they stand on the page, not in the answer.
+    A question naming none is `ranked` as it is."""
+    if not named:
+        return list(ranked)
+    return [passage for passage in ranked if passage["document_id"] in named]
 
 
 def named_first(ranked: Sequence[Any], named: set[str]) -> list[Any]:
@@ -238,6 +268,9 @@ class GraphRag:
         """Where the crops a passage's pictures name are read from; none, and an answer is
         given the passages' words alone."""
         self._split: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
+        self._samples: list[str] | None = None
+        """A line of each language the space is written in (`language_samples`), worked out
+        on the first question after the passages last changed."""
         self._lock = threading.Lock()
         self._flights: dict[object, Future[Any]] = {}
         """What is being worked out right now, by what it is for (`_shared`)."""
@@ -278,6 +311,11 @@ class GraphRag:
             self._space.put_chunks(
                 document_id, chunks(name, self._space.units(document_id)), rule=CHUNK_RULE
             )
+        # The space has changed: its languages are looked at again, and every split made
+        # beside the old ones is made again.
+        with self._lock:
+            self._samples = None
+            self._split.clear()
         self._ensure_index()
         records, _, _ = self._driver.execute_query(
             f"""
@@ -392,7 +430,8 @@ class GraphRag:
 
     def ask(self, question: str, *, documents: int) -> GraphAnswer:
         _checked(documents)
-        items = within_budget([_item(record) for record in _once(self._found(question, documents))])
+        items = within_budget([_item(record) for record in
+                               _once(self._found(question, documents, read_on=True))])
         if not items:
             # Nothing near the question: no passage to answer from, and no model call for it.
             return GraphAnswer(text=_nothing_found(question), sources=[])
@@ -443,7 +482,8 @@ class GraphRag:
         found = self._found(question, documents)
         return [_source(_item(record)) for record in _once(found, each_folder=True)]
 
-    def _found(self, question: str, documents: int) -> list[neo4j.Record]:
+    def _found(self, question: str, documents: int, *, read_on: bool = False
+               ) -> list[neo4j.Record]:
         """The fused search for each thing the question asks (`_queries`), the passages taken
         from each search in turn, best first, each once -- walked until `documents` documents
         are reached (`collected`) -- then the documents linked to each one found, walked once
@@ -464,7 +504,13 @@ class GraphRag:
 
         ranked = cast(list[neo4j.Record], self._shared(("found", question), search))
         named = self._named(named_phrases(question, said), ranked)
-        return self._linked(collected(named_first(ranked, named), documents), question)
+        order = named_first(ranked, named)
+        taken = collected(order, documents)
+        if not read_on:  # the page shows the walk
+            return self._linked(taken, question)
+        # an answer reads only in the documents the question names (`named_only`), else on
+        # into the documents found (`filled`)
+        return self._linked(named_only(ranked, named) if named else filled(order, taken), question)
 
     def _named(self, phrases: Sequence[str], ranked: Sequence[neo4j.Record]) -> set[str]:
         """The documents `phrases` name, of those the search found."""
@@ -528,20 +574,52 @@ class GraphRag:
 
     def _split_question(self, question: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
         try:
-            reply = self._complete(system=SPLIT_SYSTEM, content=question,
-                                   schema=strict_response_schema(_Split), name="question_split")
+            reply = self._complete(
+                system=SPLIT_SYSTEM,
+                content=asked_with_samples(question, self._language_samples()),
+                schema=strict_response_schema(_Split), name="question_split")
             written = _Split.model_validate_json(reply)
         except Exception as error:  # noqa: BLE001 -- unsplit is how every question was asked
             _log.warning("question not split -- %s", str(error)[:200])
             return (question,), ()  # not kept: the next ask tries the model again
-        parts = tuple(dict.fromkeys(part for q in written.queries if (part := q.strip())))
-        queries = parts if len(parts) > 1 else (question,)
-        said = tuple(dict.fromkeys(part for d in written.documents if (part := d.strip())))
+        parts = _kept(written.queries, MAX_QUERIES)
+        # The same queries in the documents' other languages: what full-text search matches.
+        queries = tuple(dict.fromkeys((*(parts if len(parts) > 1 else (question,)),
+                                       *_kept(written.translated, MAX_QUERIES * 2))))
+        said = _kept(written.documents, MAX_QUERIES)
         with self._lock:
             if len(self._split) >= 256:
                 self._split.clear()
             self._split[question] = (queries, said)
         return queries, said
+
+    def _language_samples(self) -> list[str]:
+        """A line of each language the space's documents are written in, from one passage of
+        each of up to SAMPLED_DOCUMENTS documents -- none when the space cannot say: the
+        question is split all the same."""
+        with self._lock:
+            if self._samples is not None:
+                return self._samples
+        try:
+            records, _, _ = self._driver.execute_query(
+                f"""
+            MATCH (d:Document) WITH d LIMIT $documents
+            CALL {{
+                WITH d
+                MATCH (c:{CHUNK_LABEL} {{document_id: d.id}})
+                RETURN c.text AS text LIMIT 1
+            }}
+            RETURN text
+            """,
+                documents=SAMPLED_DOCUMENTS, routing_=neo4j.RoutingControl.READ,
+            )
+        except Exception as error:  # noqa: BLE001 -- the split goes on without them
+            _log.warning("languages of the space not read -- %s", str(error)[:200])
+            return []  # not kept: the next question looks again
+        samples = language_samples([r["text"] for r in records if r["text"]])
+        with self._lock:
+            self._samples = samples
+        return samples
 
     def _shared(self, key: object, work: Callable[[], Any]) -> Any:
         """`work()`, run by the first of those asking for `key` at once; the others wait for
@@ -610,13 +688,16 @@ class GraphRag:
 
     def _retrieval_query(self) -> str:
         """A passage found, as the search hands it on: what it says and whose it is."""
-        return """
+        return f"""
         WITH node AS chunk, score
-        MATCH (start:Document {id: chunk.document_id})
+        MATCH (start:Document {{id: chunk.document_id}})
+        OPTIONAL MATCH (first:{CHUNK_LABEL} {{id: start.id + ':0'}})
         RETURN chunk.id AS id, score,
                start.id AS document_id, start.label AS file,
                chunk.text AS text, chunk.members AS members,
-               start.modified_at AS modified
+               start.modified_at AS modified, first.text AS opening,
+               COLLECT {{ MATCH (chunk)-[:COVERS]->(u) WHERE u.meta_page IS NOT NULL
+                          RETURN DISTINCT u.meta_page ORDER BY u.meta_page }} AS pages
         """
 
     def _links_query(self) -> str:
@@ -694,6 +775,11 @@ _WAY = ("CASE WHEN 'cites' IN ways THEN 'cites' WHEN 'cited_by' IN ways THEN 'ci
 citation over a likeness."""
 
 
+def _kept(written: Sequence[str], most: int) -> tuple[str, ...]:
+    """What the model wrote, trimmed, once each, at most `most` of it."""
+    return tuple(dict.fromkeys(part for item in written if (part := item.strip())))[:most]
+
+
 def _checked(documents: int) -> None:
     if not 1 <= documents <= MAX_DOCUMENTS:
         raise ValueError(f"documents must be between 1 and {MAX_DOCUMENTS}, not {documents}")
@@ -702,13 +788,20 @@ def _checked(documents: int) -> None:
 _PICTURES = f"""
 MATCH (m:{NODE_LABEL}) WHERE m.id IN $ids
 OPTIONAL MATCH (s:{NODE_LABEL} {{id: m.meta_scan_of}})
-WITH m, coalesce(s, m) AS n
-WHERE (n:Table OR n:PivotTable OR n:Chart OR n:Image) AND n[$key] IS NOT NULL
+OPTIONAL MATCH (f:{NODE_LABEL} {{id: m.meta_part_of_figure}})
+WITH m, CASE WHEN f IS NOT NULL AND f[$key] IS NOT NULL THEN f
+             WHEN (m:Table OR m:PivotTable OR m:Chart OR m:Image) AND m[$key] IS NOT NULL
+                  AND m.meta_background IS NULL
+             THEN m ELSE s END AS n
+WHERE n IS NOT NULL AND (n:Table OR n:PivotTable OR n:Chart OR n:Image) AND n[$key] IS NOT NULL
 MATCH (d:Document {{id: n.document_id}})
 RETURN m.id AS id, n.id AS picture, n.label AS label, n[$key] AS crop, d.file_name AS file
 """
-"""Which of a passage's members are pictures with a stored crop (`VISUAL_TYPES`), and for
-words read off a scan, the scan they were read from."""
+"""Which of a passage's members are pictures with a stored crop (`VISUAL_TYPES`) -- a table
+or a chart read off a scan by its own crop -- and for words read off a scan, the scan they were
+read from. A scan is sent as what words were read off, never as a member of its own. A part of
+a figure is sent as the figure: its crop holds every part, and each part's own crop again took
+a place of ANSWER_PICTURES for something already shown."""
 
 
 def _item(record: neo4j.Record) -> RetrieverResultItem:
@@ -721,7 +814,7 @@ def _item(record: neo4j.Record) -> RetrieverResultItem:
     files = {record["document_id"]: _composed(record["file"])}
     linked = [{**doc, "file": _composed(doc["file"])} for doc in record["linked"]]
     files.update({doc["document_id"]: doc["file"] for doc in linked})
-    lines = [record["text"]]
+    lines = [_document_line(record), record["text"]]
     for doc in linked:
         how = _HOW[doc["direction"]]
         lines.append(
@@ -742,6 +835,27 @@ def _item(record: neo4j.Record) -> RetrieverResultItem:
             "modified": record["modified"],
         },
     )
+
+
+def _document_line(record: Mapping[str, Any]) -> str:
+    """What the passage's document is, ahead of the passage: its file and title, how it opens --
+    where a byline, a source or a date stands -- the pages the passage is on, and when the file
+    was changed. A passage past the first carried only the file and its headings, and a question
+    naming the document's source, date or a page was answered "not in the context"."""
+    head, _, opens = (record.get("opening") or "").partition("\n")
+    # The first passage's own heading path (after the file) is how the document begins -- often
+    # its title, not always -- so it is shown as the opening, not named a title.
+    begins = " ".join(" ".join([head.split(" > ", 1)[1] if " > " in head else "", opens]).split())
+    parts = [f"Document: {record['file']}"]
+    if begins and not str(record["id"]).endswith(":0"):
+        parts.append(f"Opens: {begins[:OPENING_CHARS]}")
+    pages = [int(p) for p in record.get("pages") or []]
+    if pages:
+        first, last = pages[0], pages[-1]
+        parts.append(f"page {first}" if first == last else f"pages {first}-{last}")
+    if record.get("modified"):
+        parts.append(f"Modified: {str(record['modified'])[:10]}")
+    return "[" + " | ".join(parts) + "]"
 
 
 def _composed(text: str) -> str:

@@ -104,10 +104,11 @@ VLM_CALLS_AT_ONCE = 24
 on its own. Lower it when the endpoint's rate limit turns calls away; a call turned away is
 retried, so too high costs time rather than pages."""
 READERS = 16
-"""Documents read side by side; their model calls share VLM_CALLS_AT_ONCE besides."""
-FEWEST_WORKERS = 4
-"""Pages a document asks at once however many are read beside it: its share of the calls in
-flight, but never so few that one slow page holds the rest of its pages back."""
+"""Documents read side by side; their model calls share VLM_CALLS_AT_ONCE besides. Each
+document asks as many pages at once as the slots hold, and the slots decide who goes: a share
+fixed when a document started left a long one, still reading after the rest had finished,
+asking four pages at a time while the other slots stood empty. What that costs is threads
+waiting for a slot, which do nothing while they wait."""
 
 def _stamp(path: str | Path) -> tuple[int, int] | None:
     """A file's size and modification time, or None when it is not there."""
@@ -343,9 +344,6 @@ class Demo:
         self.reading_at_once = READERS
         """Documents read at once by `readers`: a build lets in twice as many, no more."""
         """Documents read at once: a folder of thousands queues here, not in a thread each."""
-        self._running = 0
-        """Documents being read now, which share the calls in flight (`_workers`)."""
-        self._counting = threading.Lock()
         self.hashes: dict[str, tuple[tuple[int, int] | None, str]] = {}
         """Each document's file hash, beside the size and time it was worked out at."""
         self.previews: OrderedDict[tuple[str, int, tuple[int, int] | None], bytes] = OrderedDict()
@@ -1348,25 +1346,12 @@ class Demo:
         return session
 
     def _run(self, session: Session) -> None:
-        with self._counting:
-            self._running += 1
         session.started_at, session.ended_at = time.monotonic(), None
         try:
             self._steps(session, self._prepare, self._read, self._enrich, self._drawn)
         finally:
             session.ended_at = time.monotonic()
-            with self._counting:
-                self._running -= 1
         self._lighten(session)
-
-    def _workers(self, *, running: int | None = None) -> int:
-        """How many pages a document asks at once: the calls in flight shared among the
-        documents being read now. A thread waiting for a slot does nothing; sixteen documents
-        each asking two dozen pages kept hundreds of them waiting. A document started while
-        few others run keeps its larger share when more start after it."""
-        # ponytail: shared at start, not rebalanced; a shared page pool if that ever matters
-        now = self._running if running is None else running
-        return max(FEWEST_WORKERS, VLM_CALLS_AT_ONCE // max(1, now))
 
     @staticmethod
     def _lighten(session: Session) -> None:
@@ -1408,7 +1393,7 @@ class Demo:
             renderer=_Replay(session.pages),
             vision=create_vision(self.settings, self.client, limiter=self.vlm_slots),
             assets=session.store,
-            workers=self._workers(),
+            workers=VLM_CALLS_AT_ONCE,
             progress=session.progress,
         )
 

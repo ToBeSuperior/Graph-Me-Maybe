@@ -3,6 +3,13 @@
 A question runs two searches side by side and fuses their rankings. Both run on Neo4j indexes, and
 the fusion runs inside Neo4j too.
 
+Before searching, the model splits a question that asks several things into one query each
+(`SPLIT_SYSTEM`), and is shown a line of each language the space's documents are written in
+(one passage from each of up to 200 documents, grouped by the script it is mostly written in).
+Each query is written again in every one of those languages the question is not in, so an
+English question finds Korean documents by their words too, not only by their vectors -- and
+clears the relevance floor, which a Korean query over Korean passages does.
+
 | Step | What happens |
 |---|---|
 | 1. Vector search (ANN) | The question is embedded and the vector index (HNSW) finds passages close in meaning. |

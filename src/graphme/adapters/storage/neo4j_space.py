@@ -650,9 +650,11 @@ WITH n, CASE WHEN p:Document THEN null ELSE p.id END AS parent,
      COLLECT {{ MATCH (c:VlmEnrichedCaption)-[:CAPTION_OF]->(n) RETURN c.id }} AS attached,
      EXISTS {{ MATCH (n)-[:PARENT_OF]->() }} AS holds
 RETURN n.id AS id, parent, attached,
-       coalesce(n.text,
-                CASE WHEN size(captions) > 0
-                     THEN trim(reduce(s = '', t IN captions | s + ' ' + t)) END,
-                CASE WHEN holds THEN n.label END, '') AS text,
+       CASE WHEN n.text IS NOT NULL AND size(captions) > 0
+            THEN n.text + '\n' + trim(reduce(s = '', t IN captions | s + ' ' + t))
+            ELSE coalesce(n.text,
+                          CASE WHEN size(captions) > 0
+                               THEN trim(reduce(s = '', t IN captions | s + ' ' + t)) END,
+                          CASE WHEN holds THEN n.label END, '') END AS text,
        {READING_ORDER} AS order
 """

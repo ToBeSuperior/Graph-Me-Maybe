@@ -10,11 +10,12 @@ from typing import Any, Literal, TypeVar
 
 import httpx
 from PIL import Image
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from graphme.adapters.chat import (
     MALFORMED,
     Endpoint,
+    Refused,
     complete,
     image_part,
     is_transient,
@@ -31,7 +32,6 @@ from graphme.adapters.vision.prompts import (
     GROUPING_SYSTEM_PROMPT,
     HIERARCHY_CHOICE_PROMPT,
     HIERARCHY_CHOICE_SCHEMA_NAME,
-    HIERARCHY_CONTEXT_VERSION,
     HIERARCHY_SCHEMA_NAME,
     HIERARCHY_SYSTEM_PROMPT,
     REFERENCE_SCHEMA_NAME,
@@ -42,6 +42,7 @@ from graphme.adapters.vision.prompts import (
 from graphme.domain.ids import canonical_json, sha256_bytes
 from graphme.domain.models import (
     CAPTION_CHARS,
+    SCANNED_TEXT_CHARS,
     DocumentReference,
     DocumentReferenceRequest,
     DocumentReferenceResult,
@@ -69,7 +70,6 @@ from graphme.providers import Wire
 
 _log = logging.getLogger(__name__)
 
-HIERARCHY_PROMPT_VERSION = "derived-scope-hierarchy-v2"
 HIERARCHY_ATTEMPTS = 3
 """An answer that misses a subject is a slip in the answer, not a refusal, and losing a
 whole scope to one is too costly; ask again before giving up."""
@@ -126,7 +126,8 @@ class _ShortIdGroupingResult(BaseModel):
 
     groups: list[_ShortIdGroup] = Field(default_factory=list, max_length=200)
 
-    def to_grouping_result(self, full: Mapping[str, str]) -> UnitGroupingResult:
+    def to_grouping_result(self, full: Mapping[str, str],
+                           settled: Mapping[str, str] | None = None) -> UnitGroupingResult:
         labels = []
         taken: set[str] = set()
         for index, group in enumerate(self.groups):
@@ -153,6 +154,12 @@ class _ShortIdGroupingResult(BaseModel):
                 # single printed lines.
                 _log.warning("grouping group %d overlaps one already taken; dropped", index)
                 continue
+            if len({settled[u] for u in resolved if settled and u in settled}) > 1:
+                # Carrying on two units the window before settled apart says it was wrong
+                # about both; the model is shown only that a piece is settled, not with
+                # what. The group goes alone, as an overlapping one does.
+                _log.warning("grouping group %d joins two settled units; dropped", index)
+                continue
             taken.update(resolved)
             for order, unit_id in enumerate(resolved, start=1):
                 labels.append(
@@ -176,33 +183,41 @@ class _ShortIdDecision(BaseModel):
 
 
 def _unit_payload(
-    units: Sequence[HierarchyUnit],
-    short: Mapping[str, str],
-    *,
-    parents: Mapping[str, str] | None = None,
-    open_ids: Sequence[str] = (),
-    omitted: Mapping[str, int] | None = None,
+    units: Sequence[HierarchyUnit], short: Mapping[str, str]
 ) -> list[dict[str, Any]]:
     """The units as both hierarchy questions send them: id, label, kind, and -- where the
-    rendering measured it -- which indent step the unit stands on.
-
-    A unit carried from an earlier page also says who holds it, whether the page begins
-    inside it, and how many of its own subtrees were dropped to fit.
-    """
-    held_by = parents or {}
-    dropped = omitted or {}
-    still_open = set(open_ids)
+    rendering measured it -- which indent step the unit stands on."""
     return [
         {
             "id": short[unit.id],
             "label": unit.label,
             "node_type": unit.node_type.value,
             **({} if unit.indent is None else {"indent": unit.indent}),
-            **({"parent": short[held] } if (held := held_by.get(unit.id)) else {}),
-            **({"open": True} if unit.id in still_open else {}),
-            **({"omitted_subtrees": count} if (count := dropped.get(unit.id)) else {}),
         }
         for unit in units
+    ]
+
+
+def _outline_payload(request: HierarchyScopeRequest) -> list[str]:
+    """The outline earlier pages built, to be recognised and not chosen: a parent named on
+    another page is not kept (`PageTree`). Each entry is a line of text, set in two spaces a
+    level, marked where the page begins inside it and with how many of its own subtrees
+    were left out to fit. Sent as entries shaped like the units, the answer copied their
+    labels in as ids."""
+    held_by = request.outline_parents
+    still_open = set(request.outline_open)
+
+    def depth(unit_id: str) -> int:
+        steps = 0
+        while unit_id in held_by and steps < len(held_by):
+            unit_id, steps = held_by[unit_id], steps + 1
+        return steps
+
+    return [
+        "  " * depth(unit.id) + " ".join(unit.label.split())
+        + (" (open)" if unit.id in still_open else "")
+        + (f" (+{count} not shown)" if (count := request.outline_omitted.get(unit.id)) else "")
+        for unit in request.outline
     ]
 
 
@@ -304,6 +319,13 @@ class _ShortIdCaption(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     decorative: bool = False
 
+    @field_validator("caption", mode="before")
+    @classmethod
+    def _fitted(cls, written: object) -> object:
+        """Cut to the field: a caption transcribing everything a visual prints can run past
+        a cap the model is never shown, and refused, it lost the page's every caption."""
+        return written[:CAPTION_CHARS] if isinstance(written, str) else written
+
 
 class _ShortIdCaptionResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -331,6 +353,7 @@ class _ShortIdCaptionResult(BaseModel):
 
 class _ScanBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    kind: Literal["text", "table", "picture", "chart"]
     text: str
     x0: float
     y0: float
@@ -345,8 +368,10 @@ class _ScanAnswer(BaseModel):
 
     def to_scanned_page(self) -> ScannedPage:
         return ScannedPage(has_text=self.has_text, blocks=tuple(
-            ScannedBlock(text=block.text, box=(block.x0, block.y0, block.x1, block.y1))
-            for block in self.blocks if block.text.strip()))
+            # A page-wide table can run past what one block holds: kept to that, not lost.
+            ScannedBlock(kind=block.kind, text=block.text[:SCANNED_TEXT_CHARS],
+                         box=(block.x0, block.y0, block.x1, block.y1))
+            for block in self.blocks if block.text.strip() or block.kind in ("picture", "chart")))
 
 
 class _ShortIdFigure(BaseModel):
@@ -460,9 +485,7 @@ class ChatCompletionsVLMAdapter:
         self._verify_hierarchy_image(request, image)
         short = short_ids([unit.id for unit in request.units])
         prompt = {
-            "prompt_version": HIERARCHY_PROMPT_VERSION,
             "task": "Name every group of units this page draws as one figure.",
-            "policy": {"a_drawings_labels_are_parts_of_that_drawing": True},
             "units": _unit_payload(request.units, short),
         }
         user_content = self._with_crops(request.units, image, unit_images, short, prompt)
@@ -495,42 +518,18 @@ class ChatCompletionsVLMAdapter:
         answer has to use.
         """
         self._verify_hierarchy_image(request, image)
-        short = short_ids([unit.id for unit in (*request.units, *request.outline)])
+        short = short_ids([unit.id for unit in request.units])
         prompt = {
-            "prompt_version": HIERARCHY_PROMPT_VERSION,
-            "context_version": HIERARCHY_CONTEXT_VERSION,
             "task": (
                 "Derive the parent of every unit in this complete visual scope from "
                 "the rendered page."
             ),
-            "policy": {
-                "root_is_valid_flat_result": True,
-                "a_page_break_is_not_a_new_document": True,
-                "unresolved_is_explicit_abstention": True,
-                "drop_removes_a_unit_that_carries_no_content": True,
-                "a_marker_alone_is_not_hierarchy_authority": True,
-                "a_changed_marker_with_a_changed_indent_reads_as_nesting": True,
-            },
             # Only the units. Document and request identifiers and image hashes are how
             # the answer is bound back and checked here; to the model they are opaque
             # strings it cannot reason about. A unit's position in this list is not a
             # field either -- the list is already in reading order.
             "units": _unit_payload(request.units, short),
-            # The outline earlier pages built. These are not decided here; naming one as a
-            # parent is how a document that does not stop at the page break stays one tree.
-            **(
-                {
-                    "outline_so_far": _unit_payload(
-                        request.outline,
-                        short,
-                        parents=request.outline_parents,
-                        open_ids=request.outline_open,
-                        omitted=request.outline_omitted,
-                    )
-                }
-                if request.outline
-                else {}
-            ),
+            **({"outline_so_far": _outline_payload(request)} if request.outline else {}),
         }
         user_content = self._with_crops(request.units, image, unit_images, short, prompt)
         if preceding:
@@ -566,7 +565,6 @@ class ChatCompletionsVLMAdapter:
             raise ValueError("caption image must not be empty")
         short = short_ids([unit.id for unit in request.units])
         prompt = {
-            "prompt_version": HIERARCHY_PROMPT_VERSION,
             "task": (
                 "Write what every unit listed says, from its crop and the page it is on."
             ),
@@ -623,7 +621,6 @@ class ChatCompletionsVLMAdapter:
             raise ValueError("grouping images must not be empty")
         short = short_ids([unit.id for unit in request.units])
         prompt = {
-            "prompt_version": HIERARCHY_PROMPT_VERSION,
             "task": "Name every unit printed in more than one piece, by its pieces in order.",
             "pieces": [
                 {
@@ -644,7 +641,7 @@ class ChatCompletionsVLMAdapter:
 
         def read(generated: Mapping[str, Any]) -> UnitGroupingResult:
             answered = _ShortIdGroupingResult.model_validate(generated)
-            return answered.to_grouping_result(full).validate_for(request)
+            return answered.to_grouping_result(full, request.settled).validate_for(request)
 
         return self._asked_until_answered(
             schema_name=GROUPING_SCHEMA_NAME,
@@ -672,7 +669,6 @@ class ChatCompletionsVLMAdapter:
             raise ValueError("reference image must not be empty")
         short = short_ids([unit.id for unit in request.units])
         prompt = {
-            "prompt_version": HIERARCHY_PROMPT_VERSION,
             "task": (
                 "List every other document this page explicitly cites, under the unit citing it."
             ),
@@ -743,15 +739,9 @@ class ChatCompletionsVLMAdapter:
         self._verify_hierarchy_image(request, image)
         short = short_ids([unit.id for unit in (*request.units, *request.outline)])
         prompt = {
-            "prompt_version": HIERARCHY_PROMPT_VERSION,
-            "context_version": HIERARCHY_CONTEXT_VERSION,
             "task": (
                 "Two readings of this page disagree. Decide which one the page supports."
             ),
-            "policy": {
-                "judge_the_reading_not_the_wording": True,
-                "a_whole_reading_is_chosen_not_merged": True,
-            },
             "units": _unit_payload(request.units, short),
             "readings": [
                 {
@@ -843,6 +833,8 @@ class ChatCompletionsVLMAdapter:
                 self._wait(TRANSIENT_RETRY_DELAYS[turned_away])
                 turned_away += 1
                 continue
+            except Refused as error:  # turned down for what it shows: the same again
+                raise RuntimeError(f"{failure}: {error}") from error
             except RuntimeError as error:  # an answer that is not JSON at all: malformed too
                 attempt += 1
                 if last:

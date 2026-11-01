@@ -168,7 +168,8 @@ def graph_parts(
         ),
         # Between the figures and the outline: what a figure swallowed is not a paragraph,
         # and an outline drawn over half a paragraph places half a paragraph.
-        "unit_grouper": RenderedUnitGrouper(renderer=renderer, vision=vision, progress=progress),
+        "unit_grouper": RenderedUnitGrouper(
+            renderer=renderer, vision=vision, workers=workers, progress=progress),
         # Captions and named documents are read off the same rendering the outline is. A
         # named document stands as an empty node; which indexed document it is is said across
         # the corpus (`application/corpus_links.py`), whatever order they arrive in.

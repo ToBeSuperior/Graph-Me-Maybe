@@ -206,6 +206,12 @@ and the previous page's bottom strip. A page's reading is kept **inside the page
 question. Then every page break is joined at once (`join_page`, text only): the page's top
 units -- nothing above them on the page -- each answer a place and `under` or `beside`.
 Beside takes the neighbour's parent, resolved when every page is joined (`Joining.settle`).
+A top the headings already placed is not asked (`Joining.headed`): it goes under the heading
+they name, or under the title, and stays a place the page's other tops can name. Asked at
+every page break, the next chapter kept going under the one before it, and every later one
+with it. The headings are text alone, so a title printed as a picture is not among them;
+when none of their tops is on the first page, those tops are chapters and what they hung under
+them stands beside them.
 Each break is read `JOIN_READINGS` times, a third time where they differ, and the answer most
 readings gave wins; with no majority the one opening fewer levels, because a wrong deep
 answer carries every later sibling down with it.

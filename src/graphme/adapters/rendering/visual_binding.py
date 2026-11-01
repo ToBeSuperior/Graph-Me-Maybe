@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import functools
 import io
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from PIL import Image
@@ -31,7 +31,12 @@ from graphme.application.unit_placement import (
     UnitPlacer,
     home_pages,
 )
-from graphme.application.visual_crops import bind_page_visuals, crop_box
+from graphme.application.visual_crops import (
+    bind_page_visuals,
+    crop_box,
+    join_continued,
+    stitch_across_pages,
+)
 from graphme.domain.enums import DocumentFormat, NodeType
 from graphme.domain.models import ExtractedDocument, GraphNode, HierarchyFigureGroup
 from graphme.ports.storage import AssetStore
@@ -148,7 +153,47 @@ class RenderedVisualBinder:
                 crop=crop,
                 ink=ink.get(page.index, ()),
             )
+        if fmt is DocumentFormat.PDF:
+            extracted = join_continued(extracted, join=join_vertically,
+                                       asset_store=self._asset_store)
+        if fmt is DocumentFormat.DOCX:
+            extracted = stitch_across_pages(
+                extracted,
+                placers={page.index: FlowPlacer.of(page) for page in pages},
+                cut=_cutter(pages),
+                join=join_vertically,
+                asset_store=self._asset_store,
+            )
         return extracted
+
+
+def _cutter(pages: Sequence[RenderedPage]) -> Callable[[int, tuple[int, int, int, int]], bytes]:
+    png_of = {page.index: page.png for page in pages}
+
+    def cut(index: int, box: tuple[int, int, int, int]) -> bytes:
+        with Image.open(io.BytesIO(png_of[index])) as opened:
+            buffer = io.BytesIO()
+            opened.convert("RGB").crop(box).save(buffer, format="PNG")
+            return buffer.getvalue()
+
+    return cut
+
+
+def join_vertically(parts: Sequence[bytes]) -> bytes:
+    """Pictures one under another, left-aligned on white, as wide as the widest."""
+    images = []
+    for part in parts:
+        with Image.open(io.BytesIO(part)) as opened:
+            images.append(opened.convert("RGB"))
+    joined = Image.new("RGB", (max(i.width for i in images), sum(i.height for i in images)),
+                       "white")
+    top = 0
+    for image in images:
+        joined.paste(image, (0, top))
+        top += image.height
+    buffer = io.BytesIO()
+    joined.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def home_pages_of(

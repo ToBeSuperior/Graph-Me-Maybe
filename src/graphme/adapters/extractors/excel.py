@@ -24,6 +24,7 @@ from graphme.adapters.extractors.xlsx_visual_tables import (
     GridRectangle,
     VisualTableCandidate,
     detect_data_blocks,
+    detect_headed_tables,
     detect_visual_tables,
     is_formula,
     written_cells,
@@ -453,7 +454,17 @@ class ExcelExtractor:
                 self._visual_table_metadata(candidate),
             )
 
+        # A table with no border: a long recorded log first, which can have no headings at
+        # all, then headings over rows of values among what is left -- the cells a log took
+        # are not walked again.
         for ref in detect_data_blocks(cells, sheet_table_ranges, min_rows=DATA_BLOCK_ROWS):
+            add_table(
+                node_id("data_table", {"sheet": sheet.title, "range": ref}),
+                f"Data table {ref}",
+                ref,
+                {"table_kind": "data"},
+            )
+        for ref in detect_headed_tables(cells, sheet_table_ranges):
             add_table(
                 node_id("data_table", {"sheet": sheet.title, "range": ref}),
                 f"Data table {ref}",

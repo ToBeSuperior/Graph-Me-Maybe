@@ -5,6 +5,94 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.50] - 2026-11-01
+
+### Added
+
+- A question naming documents is answered from those documents alone, as much of them as the
+  answer's budget takes. The other documents its search found stay on the page.
+- An answer reads on into the documents its search found: past each document's share, the
+  budget left goes to their next passages, best first. A long report holding the answer in more
+  sections than its share was read from its first five passages and called silent on the rest.
+- A found passage reaches the answer with what its document is: the file, how the document
+  opens (where a byline, a source or a date stands), the pages the passage is on, and when the
+  file was changed. A passage past the first carried only the file and its headings, so a
+  question naming an article's source or a page was answered "not in the context".
+- A question is searched in the documents' languages too. The question split is shown a line
+  of each language the space is written in, and writes each query again in the ones the
+  question is not in, names and codes kept. An English question over Korean documents found
+  them only through the vectors, and often below the relevance floor.
+
+### Changed
+
+- Indexing is faster: a long document no longer keeps the share of model calls it was given
+  when it started. Each document may take every call in flight, and the calls in flight
+  (24) are shared by all the documents being read, so a long report read last no longer
+  goes four calls at a time while the rest stand idle. A document's paragraph grouping
+  sends all its asks at once instead of one after another. On DocBench (30 documents, 1,864
+  pages) indexing went from 232 to 106 minutes, on MMLongBench-Doc from 36 to 28, at the same
+  cost and accuracy.
+
+### Fixed
+
+- An answer is shown a figure once: a part of a grouped figure goes as the figure's crop, which
+  holds it, instead of its own crop again beside the figure's. Each part had taken a place of the
+  pictures an answer is shown, and a brochure's few figures filled them.
+- A paragraph read off a scan goes to grouping whole: it was split back into its lines and
+  the same paragraph decided again. Grouping still joins it across a column or a page.
+- A caption longer than its field is cut to fit, and a grouping answer that carries on two
+  units the window before settled apart loses that group alone. Either one refused the
+  whole call before: a page's captions, or a window of paragraphs, were asked again and
+  lost.
+- A table's caption, and that of a scanned chart or picture with a printed title, is
+  searched with it. A passage took a visual's own text first and its caption only when it
+  had none, so what a table's values come to, or a scanned chart's values, never reached
+  search. Passages are cut again on the next embed.
+- A flowing document's chapters stay where its headings put them. Each page break asked
+  again where a page's first heading went, and a chapter often went under the one before it,
+  carrying every later chapter down a level. Only what is not a heading is joined at a page
+  break now, which also asks fewer of them. A document whose title is a picture no longer has its
+  appendices hung under its first chapter.
+- A page's outline is read inside the page only, as the build keeps it. The page was asked
+  to hang its units under sections of earlier pages, which the build then threw away for the
+  page joins to decide, and two readings of one page split on exactly that. The earlier
+  outline goes as indented lines to recognise headings by, the rules say what reads under
+  what, and the rule flags repeated in the request are gone.
+- A scanned PDF page stored on its side and turned for display is read where it is shown:
+  what was read lay elsewhere on the page, and a turned page was judged against the wrong
+  area.
+- A table or a chart read off a scan is shown to the answer by its own crop, not the whole
+  scanned page scaled down; the scan goes only for the words read off it.
+- A page the provider will not read (a content filter) is asked once, not three times.
+- A question split longer than asked for is cut to fit rather than thrown away, and the split
+  goes on when the languages of the space cannot be read.
+- Finding borderless worksheet tables, and binding a page's crops, no longer grow with the
+  square of a sheet's rows or cells; a scanned page is judged and drawn faster, at the size
+  the model reads.
+- A DOCX table the layout breaks over a page is cropped from every page it is drawn on, its
+  pieces joined top to bottom, so its caption and the answers that use it see every row.
+  Before, it was cropped only on the page showing most of it.
+- A PDF table the page end breaks off is one table: when the first piece is the last thing
+  on its page and the second the first on the next -- only a running header or a page number
+  between them -- and both are drawn on the same columns, the second is held by the first
+  and the two are cropped as one picture.
+- A PDF table with a band of words across it and no rule around the band -- "Plant 2" over
+  the rows that follow -- is one table, the band one of its rows. Before, it was two tables
+  with the band a line of text between them, read as a heading over the second half. The
+  halves have to be drawn on the same columns with only that line, a row high, between them.
+- A table, a picture or a chart on a scanned PDF page is read as one: the page-reading
+  model says what each piece of the scan is, and a table becomes a table with its rows, a
+  picture or a chart a picture or a chart -- each cropped from the scan and captioned like
+  the file's own. Before, a scanned table was a line of text per row and a scanned chart
+  was nothing.
+- A worksheet table with no border is a table: a row of headings over two rows or more
+  that fill those columns, with a column holding one kind of value (numbers, dates). Before,
+  a borderless table under a hundred rows became loose cells, every value hung flat under
+  the first heading. Rows of words under headings, or headings over one row, stay as cells.
+- A PDF line set in with spaces is read as set in. The spaces were trimmed and, being glyphs
+  themselves, left the line starting where its heading does, so a nested item came out level
+  with it.
+
 ## [0.1.49] - 2026-10-29
 
 ### Added

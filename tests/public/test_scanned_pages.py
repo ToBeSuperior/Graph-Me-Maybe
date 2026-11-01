@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pymupdf
+import pytest
 from PIL import Image
 
 from graphme.adapters.extractors.pdf import PDFExtractor
@@ -349,3 +350,118 @@ def test_a_picture_filling_a_slide_with_nothing_over_it_is_the_slide_not_its_bac
     kept = next(n for n in bound.nodes if n.id == "scan")
     assert "background" not in kept.metadata
     assert CROP_ASSET_KEY in kept.metadata
+
+
+def test_a_table_and_a_chart_on_a_scan_are_a_table_and_a_chart(tmp_path: Path) -> None:
+    # What a scan shows besides its words is read as what it is, so it is cropped and
+    # described like a table or a chart the file holds.
+    reading = ScannedPage(has_text=True, blocks=(
+        ScannedBlock(text="Replacement intervals", box=(0.08, 0.05, 0.6, 0.08)),
+        ScannedBlock(kind="table", text="Part | Hours\nSeal | 8,000\nBearing | 16,000",
+                     box=(0.08, 0.1, 0.9, 0.3)),
+        ScannedBlock(kind="chart", text="Vibration by month", box=(0.08, 0.35, 0.9, 0.7)),
+        ScannedBlock(kind="picture", text="", box=(0.08, 0.72, 0.5, 0.95)),
+    ))
+    extracted = _read(_pdf(tmp_path / "s.pdf", "scan"), _Reader(reading))
+
+    read = [n for n in extracted.nodes if n.metadata.get("scan_of")]
+    assert [n.type for n in read] == [NodeType.TEXT_CHUNK, NodeType.TABLE, NodeType.CHART,
+                                      NodeType.IMAGE]
+    table = read[1]
+    rows = next(e.data for e in extracted.evidence
+                if e.node_id == table.id and e.kind is EvidenceKind.GENERATED_EXTRACTION)
+    assert rows == {"rows": [["Part", "Hours"], ["Seal", "8,000"], ["Bearing", "16,000"]]}
+    assert table.metadata["column_count"] == 2
+    # The scan itself stays the backdrop; these are things on it.
+    assert all("background" not in n.metadata for n in read)
+
+
+def test_a_page_the_provider_will_not_read_is_asked_once() -> None:
+    # A content filter answers 200 with no answer in it: asking again buys the same refusal.
+    import httpx
+
+    from graphme.adapters.vision.chat_completions import ChatCompletionsVLMAdapter
+
+    asked: list[int] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        asked.append(1)
+        return httpx.Response(200, json={"choices": [{"finish_reason": "content_filter",
+                                                     "message": {"content": '{"has_te'}}]})
+
+    adapter = ChatCompletionsVLMAdapter(
+        base_url="https://vision.test/v1", model="m",
+        client=httpx.Client(transport=httpx.MockTransport(handle)), wait=lambda _: None)
+
+    with pytest.raises(RuntimeError):
+        adapter.read_scanned_page(_picture(40, 40))
+    assert len(asked) == 1
+
+
+def test_a_block_longer_than_one_holds_is_kept_cut_not_lost() -> None:
+    from graphme.adapters.vision.chat_completions import _ScanAnswer
+    from graphme.domain.models import SCANNED_TEXT_CHARS
+
+    rows = "\n".join(f"P-{n} | {n * 10} | pass" for n in range(1000))
+    page = _ScanAnswer.model_validate({"has_text": True, "blocks": [
+        {"kind": "table", "text": rows, "x0": 0, "y0": 0, "x1": 1, "y1": 1}]}).to_scanned_page()
+
+    assert page.blocks[0].text == rows[:SCANNED_TEXT_CHARS]
+
+
+def test_a_scan_on_a_turned_page_is_read_where_it_is_shown(tmp_path: Path) -> None:
+    # A scanner often stores a page on its side and turns it for display. The model reads
+    # the page as shown, and units are placed as shown: the file's own words there too.
+    document = pymupdf.open()
+    page = document.new_page(width=A4.width, height=A4.height)
+    page.insert_image(pymupdf.Rect(0, 0, A4.width, A4.height * 0.9), stream=_picture(),
+                      keep_proportion=False)
+    page.insert_text((60, A4.height * 0.96), "Filed 04/13/20", fontsize=9)
+    page.set_rotation(90)
+    document.save(tmp_path / "turned.pdf")
+    reading = ScannedPage(has_text=True, blocks=(
+        ScannedBlock(text="Inspection record", box=(0.3, 0.1, 0.7, 0.15)),))
+
+    extracted = _read(tmp_path / "turned.pdf", reader := _Reader(reading))
+
+    assert len(reader.pages) == 1
+    texts = {n.text: n.locator.bbox for n in _texts(extracted)}
+    shown = pymupdf.open(tmp_path / "turned.pdf")[0].rect
+    x0, y0, x1, y1 = texts["Inspection record"] or (0, 0, 0, 0)
+    assert abs(x0 - 0.3 * shown.width) < 1 and abs(y0 - 0.1 * shown.height) < 1
+    # The stamped line is the file's, placed as shown -- where the rendered page has it.
+    pix = pymupdf.open(tmp_path / "turned.pdf")[0].get_pixmap(dpi=72)
+    fx0, fy0, fx1, fy1 = texts["Filed 04/13/20"] or (0, 0, 0, 0)
+    inked = [pix.pixel(int(x), int(y))[0] < 128 for x in range(int(fx0), int(fx1))
+             for y in range(int(fy0), int(fy1))]
+    assert any(inked)
+
+
+def test_a_paragraph_read_off_a_scan_goes_to_grouping_whole(tmp_path: Path) -> None:
+    """The page-reading model already wrote a scanned paragraph as one block. Split back into
+    its lines, grouping was asked to decide the same paragraph again; it still gets the block,
+    to join across a column or a page."""
+    import pymupdf
+
+    from graphme.adapters.extractors.pdf import printed_pieces
+    from graphme.application.unit_grouping import explode_text
+
+    pdf = tmp_path / "scan.pdf"
+    document = pymupdf.open()
+    document.new_page()
+    document.save(pdf)
+    where = SourceLocator(file_name="scan.pdf", label="p1", page=1)
+    read = GraphNode(id="read", document_id="d", type=NodeType.TEXT_CHUNK,
+                     label="The pump was checked", text="The pump was checked\nand greased.",
+                     locator=where, metadata={"scan_of": "scan-picture"}, retrievable=False)
+
+    pieces, _ = printed_pieces(pdf, [read])
+
+    assert pieces["read"] == ("The pump was checked\nand greased.",)
+    extracted = ExtractedDocument(
+        document=DocumentRecord(id="d", file_name="scan.pdf", content_hash="c" * 64,
+                                format=DocumentFormat.PDF, size_bytes=1, source_path=pdf),
+        nodes=(GraphNode(id="doc", document_id="d", type=NodeType.DOCUMENT,
+                         label="scan.pdf", locator=where, retrievable=False), read),
+        edges=(), evidence=())
+    assert [n.id for n in explode_text(extracted, pieces=pieces).nodes] == ["doc", "read"]

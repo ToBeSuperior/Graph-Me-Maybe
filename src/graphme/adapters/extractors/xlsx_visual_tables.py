@@ -293,6 +293,91 @@ def written_cells(sheet: Worksheet) -> list[Cell]:
     return [cell for _, cell in sorted(written.items())]
 
 
+HEADED_ROWS = 2
+"""Rows under the headings a table needs: one row under them is a record -- a form's one
+entry -- not rows of something."""
+_VALUE_KINDS = {"number", "date", "boolean", "formula"}
+
+
+def detect_headed_tables(
+    cells: Iterable[Cell], taken: Sequence[GridRectangle]
+) -> tuple[str, ...]:
+    """Ranges drawn with no border that read as tables: a row of headings -- words, in two
+    columns or more side by side -- over `HEADED_ROWS` rows or more that fill at least half
+    of those columns each, one row after another, with at least one column whose every
+    value is one kind of value rather than words (`_VALUE_KINDS`).
+
+    What tells a table from loose cells is in any workbook: headings name columns, and a
+    column of numbers or dates is what a table is kept for. Rows of words under headings
+    are a list or a form and stay as their cells. `taken` is what is already a table.
+    """
+    filled: dict[tuple[int, int], Cell] = {
+        (cell.row, cell.column): cell for cell in cells
+        if not isinstance(cell, MergedCell) and cell.value is not None
+        and str(cell.value).strip()
+        and not any(box.contains(cell.column, cell.row) for box in taken)
+    }
+    words: dict[int, list[int]] = defaultdict(list)
+    for (row, col), cell in sorted(filled.items()):
+        if _kind_of(cell) == "text":
+            words[row].append(col)
+    found: list[GridRectangle] = []
+    # Rows a span of columns runs down to, and from which rows each of its columns holds one
+    # kind of value to there: the same whichever heading row the walk starts from, so worked
+    # out once per span -- walking again from every row of a long list was quadratic.
+    reach: dict[tuple[int, int], tuple[int, int]] = {}
+    valued: dict[tuple[int, int, int], set[tuple[int, int]]] = {}
+    for row in sorted(words):
+        if any(block.min_row <= row <= block.max_row for block in found):
+            continue
+        for first, last in _heading_runs(words[row]):
+            width = last - first + 1
+            start, bottom = reach.get((first, last), (row, row - 1))
+            if not start <= row <= bottom:
+                bottom = row
+                while sum((bottom + 1, col) in filled
+                          for col in range(first, last + 1)) * 2 >= width:
+                    bottom += 1
+                reach[(first, last)] = (row, bottom)
+                valued[(first, last, bottom)] = _valued_from(filled, first, last, row, bottom)
+            block = GridRectangle(first, row, last, bottom)
+            if bottom - row < HEADED_ROWS or any(block.overlaps(o) for o in (*taken, *found)):
+                continue
+            if any((row + 1, col) in valued[(first, last, bottom)]
+                   for col in range(first, last + 1)):
+                found.append(block)
+    return tuple(block.ref for block in found)
+
+
+def _heading_runs(columns: Sequence[int]) -> list[tuple[int, int]]:
+    """Runs of two or more side by side among a row's `columns` (in order) that hold words."""
+    runs: list[tuple[int, int]] = []
+    for col in columns:
+        if runs and runs[-1][1] == col - 1:
+            runs[-1] = (runs[-1][0], col)
+        else:
+            runs.append((col, col))
+    return [run for run in runs if run[1] > run[0]]
+
+
+def _valued_from(
+    filled: dict[tuple[int, int], Cell], first: int, last: int, top: int, bottom: int
+) -> set[tuple[int, int]]:
+    """(row, column) where that column's values from the row down to `bottom` are
+    `HEADED_ROWS` or more, all one kind of value (`_VALUE_KINDS`) -- one pass up each column."""
+    held: set[tuple[int, int]] = set()
+    for col in range(first, last + 1):
+        kinds: set[str] = set()
+        count = 0
+        for row in range(bottom, top, -1):
+            if (row, col) in filled:
+                kinds.add(_kind_of(filled[(row, col)]))
+                count += 1
+            if count >= HEADED_ROWS and len(kinds) == 1 and kinds <= _VALUE_KINDS:
+                held.add((row, col))
+    return held
+
+
 def detect_data_blocks(
     cells: Iterable[Cell], taken: Sequence[GridRectangle], *, min_rows: int
 ) -> tuple[str, ...]:

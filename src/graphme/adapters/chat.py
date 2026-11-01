@@ -54,6 +54,11 @@ not turned down for it, so the page goes unanswered and the rest are read. A ref
 a missing model (401, 403, 404) would turn every page down, and stops the reading."""
 
 
+class Refused(RuntimeError):
+    """The provider answered and would not say: a content filter, a refusal. Asked again,
+    the same request is turned down again."""
+
+
 def refused(error: httpx.HTTPError) -> bool:
     return (isinstance(error, httpx.HTTPStatusError)
             and error.response.status_code in REFUSED_STATUS)
@@ -148,9 +153,12 @@ def complete(
     response = client.post(f"{base}/chat/completions", headers=headers, json=body)
     response.raise_for_status()
     try:
-        text = response.json()["choices"][0]["message"]["content"]
+        choice = response.json()["choices"][0]
+        text = choice["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError) as error:
         raise RuntimeError(MALFORMED) from error
+    if choice.get("finish_reason") == "content_filter":
+        raise Refused(f"{MALFORMED} (finish_reason=content_filter)")
     if not isinstance(text, str):
         raise RuntimeError(MALFORMED)
     return text
@@ -233,6 +241,8 @@ def _messages_text(response: httpx.Response) -> str:
                        if block.get("type") == "text")
     except (ValueError, KeyError, TypeError, AttributeError) as error:
         raise RuntimeError(MALFORMED) from error
+    if stop == "refusal":
+        raise Refused(f"{MALFORMED} (stop_reason={stop})")
     if stop in _CUT_SHORT:
         raise RuntimeError(f"{MALFORMED} (stop_reason={stop})")
     if not text:

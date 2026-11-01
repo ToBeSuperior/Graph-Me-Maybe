@@ -6,12 +6,20 @@ import re
 import statistics
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
 import pymupdf
 
+from graphme.adapters.extractors.pdf_scans import (
+    SCANNED_TYPES,
+    centred_in,
+    is_scan,
+    readable,
+    scan_dpi,
+)
+from graphme.adapters.extractors.pdf_tables import band_between, continued_tables
 from graphme.application.visual_crops import CROP_ASSET_KEY
 from graphme.domain.enums import (
     DocumentFormat,
@@ -50,27 +58,11 @@ class _NativeUnit:
     evidence_data: JsonValue = None
     asset_hash: str | None = None
     mime_type: str | None = None
+    read_from: JsonValue = None
+    """For what the model read off a scan: the scan's own evidence, which the file holds."""
 
 
 _log = logging.getLogger(__name__)
-
-SCAN_COVERAGE = 0.5
-"""How much of a page its pictures have to cover for the page to be a scan: more picture
-than not. A scan is laid on the page inside whatever margins the scanner or the filer left
--- an inch of them leaves it under two thirds of a letter page -- and a scanner can store
-one page as many strips, so the pictures count together. A page of photographs covers as
-much; whether a candidate is a page of writing is the model's to say, as it is for a page
-whose only content is one picture, whatever its size."""
-STAMP_LINES = 3
-"""How many lines of the file's own words may lie over the pictures of a scan: a filing
-header, a page number, a received stamp. More than that is text printed over a picture."""
-SCAN_GRID = 40
-"""Samples per side of the page at which the pictures' cover is measured -- strips meet edge
-to edge, and a sample is exact enough for a share this coarse."""
-SCAN_DPI = 150
-UNREADABLE = "[?]"
-"""What the model writes for a word it cannot make out. A page read as nothing else was not
-read at all."""
 
 WORD_GAP = 0.15
 """A gap between two glyphs wider than this share of the font size is a space. Some PDFs write
@@ -299,7 +291,7 @@ class PDFExtractor:
         ]
         warnings: list[WarningRecord] = []
         pages: list[list[_NativeUnit]] = []
-        scans: dict[int, tuple[bytes, pymupdf.Page]] = {}
+        scans: list[int] = []
         page_count = 0
         native_text_pages = 0
 
@@ -328,10 +320,10 @@ class PDFExtractor:
                 )
                 pages.append(page_units)
                 native_text_pages += int(has_text)
-                if self._read_scan is not None and _is_scan(page):
-                    scans[page_index] = (page.get_pixmap(dpi=SCAN_DPI).tobytes("png"), page)
+                if self._read_scan is not None and is_scan(page):
+                    scans.append(page_index)
 
-            for page_index, (png, page), reading in self._read_scans(scans):
+            for page_index, png, page, reading in self._read_scans(document, scans):
                 read = None if reading is None else self._with_reading(
                     pages[page_index - 1], reading, png=png, page=page,
                     content_hash=content_hash)
@@ -353,6 +345,7 @@ class PDFExtractor:
                     )
                 )
         units = [unit for page_units in pages for unit in page_units]
+        continued = continued_tables(pages)
 
         scan_only = native_text_pages == 0
         if scan_only and not any(w.code == "pdf_scanned_page" for w in warnings):
@@ -376,6 +369,7 @@ class PDFExtractor:
             document_id=document_id,
             document_node=document_node,
             units=units,
+            continued=continued,
         )
         evidence.extend(unit_evidence)
         record = DocumentRecord(
@@ -439,6 +433,11 @@ class PDFExtractor:
                         ),
                         "row_count": len(rows),
                         "column_count": max((len(row) for row in rows), default=0),
+                        # The grid it is drawn on: a piece continued on the next page is
+                        # drawn on the same one (`continued_tables`).
+                        "column_edges": cast(JsonValue, sorted(
+                            {round(float(cell[edge]), 1) for cell in table.cells if cell
+                             for edge in (0, 2)})),
                     },
                     evidence_kind=EvidenceKind.SOURCE_VALUES,
                     evidence_data=cast(JsonValue, {"rows": rows}),
@@ -482,6 +481,9 @@ class PDFExtractor:
                     bbox=bbox,
                     metadata={
                         "font_size": max_size,
+                        # The text is trimmed, and a space is a glyph: a line set in with
+                        # spaces starts where its heading does. Only the count says it.
+                        "leading_spaces": _leading_spaces(block),
                         "native_kind": "text_block",
                         "normalized_bbox": self._normalized_bbox(
                             bbox, page_width, page_height
@@ -495,33 +497,66 @@ class PDFExtractor:
         units.extend(
             self._extract_images(page=page, page_index=page_index)
         )
-        units.sort(key=self._page_order)
+        units = self._banded(sorted(units, key=self._page_order), page_width, page_height)
         return units, any(unit.text for unit in units if unit.type is not NodeType.IMAGE)
+
+    def _banded(
+        self, units: list[_NativeUnit], page_width: float, page_height: float
+    ) -> list[_NativeUnit]:
+        """The page's units with each table a band split rejoined (`band_between`): the
+        band becomes one of its rows."""
+        while True:
+            tables = [unit for unit in units if unit.type is NodeType.TABLE]
+            found = next(((upper, band, lower)
+                          for upper, lower in zip(tables, tables[1:], strict=False)
+                          if (band := band_between(upper, lower, units)) is not None), None)
+            if found is None:
+                return units
+            upper, band, lower = found
+            rows = [*cast(dict[str, Any], upper.evidence_data)["rows"], [band.text or ""],
+                    *cast(dict[str, Any], lower.evidence_data)["rows"]]
+            bbox = (min(upper.bbox[0], lower.bbox[0]), upper.bbox[1],
+                    max(upper.bbox[2], lower.bbox[2]), lower.bbox[3])
+            joined = replace(
+                upper,
+                text="\n".join(filter(None, (upper.text, band.text, lower.text))),
+                bbox=bbox,
+                metadata={**upper.metadata, "row_count": len(rows),
+                          "normalized_bbox": self._normalized_bbox(bbox, page_width, page_height)},
+                evidence_data=cast(JsonValue, {"rows": rows}))
+            units = sorted([joined if unit is upper else unit for unit in units
+                            if unit is not band and unit is not lower], key=self._page_order)
 
     @classmethod
     def _page_order(cls, item: _NativeUnit) -> tuple[float, float, int, int]:
         return (item.bbox[1], item.bbox[0], cls._type_order(item.type), item.occurrence)
 
     def _read_scans(
-        self, scans: dict[int, tuple[bytes, pymupdf.Page]]
-    ) -> list[tuple[int, tuple[bytes, pymupdf.Page], ScannedPage | None]]:
-        """Each scanned page read by the model, side by side. A page the model could not
-        answer for stays the picture it was, as a page without captions does."""
+        self, document: pymupdf.Document, scans: Sequence[int]
+    ) -> Iterator[tuple[int, bytes, pymupdf.Page, ScannedPage | None]]:
+        """Each scanned page read by the model, `workers` side by side. Pages are drawn a
+        batch at a time, so a long scan never holds every page's picture at once. A page the
+        model could not answer for stays the picture it was, as a page without captions does."""
         read = self._read_scan
         if read is None or not scans:
-            return []
+            return
+        workers = max(1, self._workers)
 
-        def one(page_index: int) -> ScannedPage | None:
+        def one(png: bytes, page_index: int) -> ScannedPage | None:
             try:
-                return read(scans[page_index][0])
+                return read(png)
             except (RuntimeError, ValueError) as error:
                 _log.warning("page %d: scan not read -- %s", page_index, error)
                 return None
 
-        with ThreadPoolExecutor(max_workers=max(1, self._workers)) as pool:
-            readings = list(pool.map(one, scans))
-        return [(index, scans[index], reading)
-                for index, reading in zip(scans, readings, strict=True)]
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for at in range(0, len(scans), workers * 2):
+                batch = scans[at : at + workers * 2]
+                pages = [document[index - 1] for index in batch]
+                pngs = [page.get_pixmap(dpi=scan_dpi(page)).tobytes("png")  # type: ignore[no-untyped-call]
+                        for page in pages]
+                readings = pool.map(one, pngs, batch)
+                yield from zip(batch, pngs, pages, readings, strict=True)
 
     def _with_reading(
         self,
@@ -543,47 +578,58 @@ class PDFExtractor:
         first = pictures[0]
         scan_of = _node_id(content_hash, "pdf_image", first.page, first.occurrence)
         read: list[_NativeUnit] = []
-        # The model saw the page as it is shown; units are placed in the unturned page.
+        # The model saw the page as it is shown, which is where units are placed too.
         width, height = float(page.rect.width), float(page.rect.height)
         for occurrence, block in enumerate(reading.blocks):
             x0, y0, x1, y1 = (min(1.0, max(0.0, v)) for v in block.box)
-            shown = pymupdf.Rect(  # type: ignore[no-untyped-call]
-                x0 * width, y0 * height, max(x0, x1) * width, max(y0, y1) * height)
-            bbox = self._bbox(shown * page.rotation_matrix)
-            if not _centred_in(bbox, pictures) or _centred_in(bbox, written):
+            bbox = (x0 * width, y0 * height, max(x0, x1) * width, max(y0, y1) * height)
+            if not centred_in(bbox, pictures) or centred_in(bbox, written):
                 # The file's own words -- beside the scan, or stamped over it -- are already
                 # units; the model saw them on the page too.
                 continue
+            # A table, a picture or a chart on the scan is that, so it is cropped and
+            # described as the file's own are; text is the page's words.
+            node_type = SCANNED_TYPES[block.kind]
+            rows = ([[cell.strip() for cell in line.split("|")]
+                     for line in block.text.splitlines() if line.strip()]
+                    if node_type is NodeType.TABLE else None)
+            text = block.text.strip() or None
             read.append(
                 _NativeUnit(
                     page=first.page,
                     occurrence=occurrence,
-                    type=NodeType.TEXT_CHUNK,
-                    label=self._short_label(block.text, f"Scanned text {occurrence + 1}"),
-                    text=block.text,
+                    type=node_type,
+                    label=self._short_label(
+                        text or "", f"Scanned {block.kind} {occurrence + 1}"),
+                    text=text,
                     bbox=bbox,
                     metadata={
-                        "native_kind": "scanned_text",
+                        "native_kind": f"scanned_{block.kind}",
                         "native_occurrence": occurrence,
                         "normalized_bbox": self._normalized_bbox(bbox, width, height),
                         "scan_of": scan_of,
+                        **({"row_count": len(rows),
+                            "column_count": max(len(row) for row in rows)} if rows else {}),
                     },
                     evidence_kind=EvidenceKind.GENERATED_EXTRACTION,
+                    # The model's reading: a table's rows, a picture's place on the page.
+                    evidence_data=cast(JsonValue, {"rows": rows} if rows
+                                       else {"box": list(block.box)} if text is None
+                                       else None),
                     # What it was read from: the picture the file holds.
-                    evidence_data=first.evidence_data,
+                    read_from=first.evidence_data,
                     asset_hash=first.asset_hash,
                     mime_type=first.mime_type,
                 )
             )
-        if not _readable(read):
+        if not readable(read):
             return None
         crop = None if self._asset_store is None else self._asset_store.put(png, suffix=".png")
         kept = [
-            unit if unit.type is not NodeType.IMAGE else _NativeUnit(
-                **{**_fields(unit), "metadata": {
-                    **unit.metadata, "background": True,
-                    **({CROP_ASSET_KEY: crop} if crop is not None and unit is first else {}),
-                }})
+            unit if unit.type is not NodeType.IMAGE else replace(unit, metadata={
+                **unit.metadata, "background": True,
+                **({CROP_ASSET_KEY: crop} if crop is not None and unit is first else {}),
+            })
             for unit in units
         ]
         return sorted([*kept, *read], key=self._page_order)
@@ -698,13 +744,15 @@ class PDFExtractor:
         document_id: str,
         document_node: GraphNode,
         units: list[_NativeUnit],
+        continued: dict[tuple[int, int], tuple[int, int]] | None = None,
     ) -> tuple[list[GraphNode], list[GraphEdge], list[EvidenceRecord]]:
         nodes = [document_node]
         edges: list[GraphEdge] = []
         evidence: list[EvidenceRecord] = []
 
         for reading_order, unit in enumerate(units, start=1):
-            kind = "pdf_scanned_text" if unit.metadata["native_kind"] == "scanned_text" else {
+            native_kind = str(unit.metadata["native_kind"])
+            kind = f"pdf_{native_kind}" if native_kind.startswith("scanned_") else {
                 NodeType.TEXT_CHUNK: "pdf_text_block",
                 NodeType.TABLE: "pdf_table",
                 NodeType.IMAGE: "pdf_image",
@@ -723,12 +771,16 @@ class PDFExtractor:
                     metadata=metadata,
                 )
             )
-            edges.append(
-                native_edge(
-                    content_hash, document_id, document_id, node_id, EdgeType.CONTAINS,
-                    locator=locator,
-                )
-            )
+            held = (continued or {}).get((unit.page, unit.occurrence))
+            if held is None:
+                edges.append(native_edge(content_hash, document_id, document_id, node_id,
+                                         EdgeType.CONTAINS, locator=locator))
+            else:
+                # The rest of a table the page end broke off: part of its first piece.
+                edges.append(native_edge(
+                    content_hash, document_id, _node_id(content_hash, "pdf_table", *held),
+                    node_id, EdgeType.CONTAINS, locator=locator,
+                ).model_copy(update={"metadata": {"basis": "continued_table"}}))
             evidence.append(
                 EvidenceRecord(
                     id=stable_id(
@@ -756,7 +808,7 @@ class PDFExtractor:
                         node_id=node_id,
                         kind=EvidenceKind.SOURCE_MEDIA,
                         locator=locator,
-                        data=unit.evidence_data,
+                        data=unit.read_from,
                         asset_hash=unit.asset_hash,
                         mime_type=unit.mime_type,
                     )
@@ -950,6 +1002,7 @@ class PDFExtractor:
             NodeType.TEXT_CHUNK: 1,
             NodeType.TABLE: 2,
             NodeType.IMAGE: 3,
+            NodeType.CHART: 3,
         }[node_type]
 
 
@@ -1144,12 +1197,18 @@ def printed_pieces(
     the lines can be read again without the extractor having to carry them on the node.
     Both halves come from one reading of each page.
     """
+    nodes = list(nodes)
     wanted = {
         (node.locator.page, node.metadata.get("native_occurrence")): node.id
         for node in nodes
         if node.metadata.get("native_kind") == "text_block"
     }
-    pieces: dict[str, tuple[str, ...]] = {}
+    # A block read off a scan was written as one paragraph by the model that read it: it
+    # goes whole, to be joined across a column or a page, not split back into lines for the
+    # paragraph to be decided again.
+    pieces: dict[str, tuple[str, ...]] = {
+        node.id: (node.text,) for node in nodes if node.metadata.get("scan_of") and node.text
+    }
     written: set[str] = set()
     with pymupdf.open(source) as document:  # type: ignore[no-untyped-call]
         for page_index, page in enumerate(document, start=1):
@@ -1175,38 +1234,13 @@ def _fields(unit: _NativeUnit) -> dict[str, Any]:
     return {name: getattr(unit, name) for name in _NativeUnit.__slots__}
 
 
-def _is_scan(page: pymupdf.Page) -> bool:
-    """A page that is a picture of a page, judged from the file alone (`SCAN_COVERAGE`,
-    `STAMP_LINES`)."""
-    # Pictures are reported in the page as shown, words in the unturned page (`page_text`).
-    area = page.rect * page.rotation_matrix
-    shown = [pymupdf.Rect(info["bbox"]) for info in page.get_image_info()]  # type: ignore[no-untyped-call]
-    pictures = [rect for box in shown if not (rect := box * page.rotation_matrix & area).is_empty]
-    if not pictures:
-        return False
-    words = [(pymupdf.Rect(word[:4]), word[5:7])  # type: ignore[no-untyped-call]
-             for word in page.get_text("words") if word[4].strip()]  # type: ignore[no-untyped-call]
-    if len(pictures) == 1 and not words:
-        return True
-    stamped = {line for box, line in words if any(p.intersects(box) for p in pictures)}
-    if len(stamped) > STAMP_LINES:
-        return False
-    step_x, step_y = area.width / SCAN_GRID, area.height / SCAN_GRID
-    covered = sum(
-        any(pymupdf.Point(  # type: ignore[no-untyped-call]
-                area.x0 + (i + 0.5) * step_x, area.y0 + (j + 0.5) * step_y) in picture
-            for picture in pictures)
-        for i in range(SCAN_GRID) for j in range(SCAN_GRID)
-    )
-    return covered >= SCAN_COVERAGE * SCAN_GRID * SCAN_GRID
+def _leading_spaces(block: dict[str, Any]) -> int:
+    """How many spaces the block's first printed line begins with, counted as a DOCX
+    paragraph's are."""
+    for line in block.get("lines", ()):
+        raw = "".join(str(span.get("text", "")) for span in line.get("spans", ()))
+        if raw.strip():
+            return len(raw) - len(raw.lstrip())
+    return 0
 
 
-def _centred_in(bbox: tuple[float, float, float, float], units: Sequence[_NativeUnit]) -> bool:
-    x, y = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
-    return any(u.bbox[0] <= x <= u.bbox[2] and u.bbox[1] <= y <= u.bbox[3] for u in units)
-
-
-def _readable(read: Sequence[_NativeUnit]) -> bool:
-    """Something read, and not only marks for what could not be (`UNREADABLE`)."""
-    return any(character.isalnum()
-               for unit in read for character in (unit.text or "").replace(UNREADABLE, ""))

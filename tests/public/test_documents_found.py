@@ -8,6 +8,8 @@ from neo4j_graphrag.types import RetrieverResultItem
 from graphme.adapters.storage.graph_rag import (
     PASSAGES_PER_DOCUMENT,
     collected,
+    filled,
+    named_only,
     within_budget,
 )
 
@@ -59,3 +61,34 @@ def test_the_best_passage_is_read_however_long() -> None:
     items = [_item(5000), _item(10)]
 
     assert within_budget(items, budget=1000) == items[:1]
+
+
+def test_the_answer_reads_on_into_the_documents_found() -> None:
+    """Past the walk, the answer goes on down the ranking in the documents it found -- a long
+    document holding the answer in more sections than its share gives them -- never into one
+    the walk did not reach."""
+    ranked = _ranked(*["a"] * (PASSAGES_PER_DOCUMENT + 2), "b", "a", "c", "b")
+    taken = collected(ranked, 2)
+
+    read = filled(ranked, taken)
+
+    assert read[: len(taken)] == taken
+    assert [p["document_id"] for p in read[len(taken):]] == ["a", "a", "a", "b"]
+    assert "c" not in {p["document_id"] for p in read}
+    assert len({p["id"] for p in read}) == len(read)
+
+
+def test_a_question_naming_documents_reads_only_in_them() -> None:
+    """A question naming documents is answered from those documents' passages alone, best
+    first and as many as the budget takes, not from the others the search also found."""
+    ranked = _ranked("c", *["a"] * (PASSAGES_PER_DOCUMENT + 2), "b", "c", "a")
+
+    read = named_only(ranked, {"a", "b"})
+
+    assert [p["document_id"] for p in read] == ["a"] * (PASSAGES_PER_DOCUMENT + 2) + ["b", "a"]
+
+
+def test_a_question_naming_nothing_is_not_narrowed() -> None:
+    ranked = _ranked("a", "b", "c")
+
+    assert named_only(ranked, set()) == ranked

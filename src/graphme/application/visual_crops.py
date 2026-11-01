@@ -272,11 +272,11 @@ def bind_page_visuals(
         # A backdrop is what something else is printed on; a picture filling the page with
         # nothing over it -- a scan pasted onto a slide -- is what the page says. A scan read
         # for its words is the page they are printed on, whatever its margins.
-        printed_on = any(other is not node and box.covered_fraction(over) > 0
-                         for other, over in shown)
         if node.type is NodeType.IMAGE and (
-            ((covered >= BACKGROUND_COVERAGE or band) and printed_on)
-            or node.metadata.get("background")
+            node.metadata.get("background")
+            or ((covered >= BACKGROUND_COVERAGE or band)
+                and any(other is not node and box.covered_fraction(over) > 0
+                        for other, over in shown))
         ):
             background.add(node.id)
             continue
@@ -412,3 +412,72 @@ def grown_by_ink(
     return grown
 
 
+def stitch_across_pages(
+    extracted: ExtractedDocument,
+    *,
+    placers: Mapping[int, UnitPlacer],
+    cut: Callable[[int, tuple[int, int, int, int]], bytes],
+    join: Callable[[Sequence[bytes]], bytes],
+    asset_store: AssetStore,
+) -> ExtractedDocument:
+    """A table the layout breaks over pages, cropped from every page it is drawn on.
+
+    It is bound once, on the page showing most of it (`home_pages`), and that crop stays as
+    it was cut -- the region it heads, ink and all. The pieces on the other pages are cut
+    where the layout put them and `join`ed with it top to bottom in page order, so the
+    caption and the answer see every row. Where it is shown on the page stays its own page.
+    """
+    nodes: list[GraphNode] = []
+    for node in extracted.nodes:
+        # Only a table is drawn on more than one page; its crop is read only when it is.
+        pieces = [] if node.type not in CONTAINER_TYPES else [
+            (index, box) for index, placer in sorted(placers.items())
+            if (box := placer.box(node)) is not None and _has_area(box)]
+        own = read_node_crop(node, asset_store=asset_store) if len(pieces) > 1 else None
+        if own is None:
+            nodes.append(node)
+            continue
+        home = node.metadata.get("crop_page_index")
+        parts = [own if index == home else cut(index, box.rounded()) for index, box in pieces]
+        joined = asset_store.put(join(parts), suffix=".png")
+        nodes.append(node.model_copy(
+            update={"metadata": {**node.metadata, CROP_ASSET_KEY: joined}}))
+    return extracted.model_copy(update={"nodes": tuple(nodes)})
+
+
+def join_continued(
+    extracted: ExtractedDocument,
+    *,
+    join: Callable[[Sequence[bytes]], bytes],
+    asset_store: AssetStore,
+) -> ExtractedDocument:
+    """A table the page end broke off, cropped whole: each piece's own crop `join`ed under
+    its first piece's, in reading order, as that table's one picture.
+
+    The pieces are held by the first (`continued_table`), so the caption and the answer
+    read the table there; a piece keeps where it is drawn, for the preview, but no picture
+    of its own to be sent beside the whole."""
+    pieces: dict[str, list[str]] = {}
+    for edge in extracted.edges:
+        if edge.type is EdgeType.CONTAINS and edge.metadata.get("basis") == "continued_table":
+            pieces.setdefault(edge.source_id, []).append(edge.target_id)
+    if not pieces:
+        return extracted
+    by_id = {node.id: node for node in extracted.nodes}
+    joined: dict[str, str] = {}
+    for first, rest in pieces.items():
+        crops = [crop for node_id in (first, *rest)
+                 if (crop := read_node_crop(by_id[node_id], asset_store=asset_store))]
+        if len(crops) > 1:
+            joined[first] = asset_store.put(join(crops), suffix=".png")
+    held = {node_id for rest in pieces.values() for node_id in rest}
+    nodes = tuple(
+        node.model_copy(update={"metadata": {**node.metadata, CROP_ASSET_KEY: joined[node.id]}})
+        if node.id in joined
+        else node.model_copy(update={"metadata": {
+            key: value for key, value in node.metadata.items() if key != CROP_ASSET_KEY}})
+        if node.id in held
+        else node
+        for node in extracted.nodes
+    )
+    return extracted.model_copy(update={"nodes": nodes})
