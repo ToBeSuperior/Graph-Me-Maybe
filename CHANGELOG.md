@@ -5,6 +5,13 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.52] - 2026-11-02
+
+### Added
+
+- The macOS shortcut (`~/Applications/Graph-Me-Maybe.app`) wears the app's icon, the same mark
+  as graphme.io; it showed macOS's blank one.
+
 ## [0.1.51] - 2026-11-02
 
 ### Fixed

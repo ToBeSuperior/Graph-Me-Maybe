@@ -198,6 +198,22 @@ def test_the_mac_shortcut_opens_the_window_app_in_its_home(tmp_path: Path) -> No
     assert (data / "app.log").read_text().strip() == f"HOME_IS={data}"
 
 
+def test_the_mac_shortcut_wears_the_app_icon(tmp_path: Path) -> None:
+    """The shortcut is drawn with the app's own icon, taken from the package just installed --
+    a bundle naming no icon showed macOS's blank one."""
+    script = (f'GRAPHME_INSTALL_LIB=1 . "{ROOT / "install.sh"}"; uname() {{ echo Darwin; }};'
+              f' HOME_DIR="{tmp_path / "data"}";'
+              f' make_shortcut "{tmp_path / "bin"}" "{sys.executable}"')
+    env = {k: v for k, v in os.environ.items() if k != "GRAPHME_NO_SHORTCUT"}
+    done = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=30,
+                          env=env | {"HOME": str(tmp_path)})
+    assert done.returncode == 0, done.stderr
+    app = tmp_path / "Applications/Graph-Me-Maybe.app/Contents"
+    assert "<key>CFBundleIconFile</key><string>AppIcon</string>" in (app / "Info.plist").read_text()
+    shipped = ROOT / "src/graphme/icons/AppIcon.icns"
+    assert (app / "Resources/AppIcon.icns").read_bytes() == shipped.read_bytes()
+
+
 APP_FILES = (".env", ".graphme/graph.sqlite3", "web/index.html", "viewer/dist/x.js", "app.log",
              "install.ps1", "webview/Local Storage/x", "neo4j/bin/neo4j", "jre/bin/java",
              "neo4j-data/db/graph")

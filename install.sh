@@ -99,11 +99,11 @@ fetch_neo4j() {  # fetch_neo4j PYTHON
     || say "warning: the graph DB did not download; the app fetches it when it first opens"
 }
 
-make_shortcut() {  # make_shortcut BIN_DIR
+make_shortcut() {  # make_shortcut BIN_DIR [PYTHON]
   [ -n "${GRAPHME_NO_SHORTCUT:-}" ] && return
   [ "$(uname -s)" = Darwin ] || return 0
   app="$HOME/Applications/Graph-Me-Maybe.app"
-  mkdir -p "$app/Contents/MacOS"
+  mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
   cat >"$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -111,6 +111,7 @@ make_shortcut() {  # make_shortcut BIN_DIR
 <key>CFBundleName</key><string>Graph-Me-Maybe</string>
 <key>CFBundleIdentifier</key><string>io.github.tobesuperior.graph-me-maybe</string>
 <key>CFBundleExecutable</key><string>Graph-Me-Maybe</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 </dict></plist>
 EOF
@@ -118,6 +119,12 @@ EOF
     "$HOME_DIR" "$1" "$HOME_DIR" \
     >"$app/Contents/MacOS/Graph-Me-Maybe"
   chmod +x "$app/Contents/MacOS/Graph-Me-Maybe"
+  # The app's icon, from the package just installed; Finder is told the bundle changed.
+  if [ -n "${2:-}" ] && icon=$("$2" -c 'import graphme, pathlib; print(pathlib.Path(graphme.__file__).parent / "icons" / "AppIcon.icns")' 2>/dev/null) \
+     && [ -f "$icon" ]; then
+    cp "$icon" "$app/Contents/Resources/AppIcon.icns"
+    touch "$app"
+  fi
   say "shortcut: $app"
 }
 
@@ -182,7 +189,7 @@ install() {
     "$python" -m playwright install chromium --only-shell || say "warning: Playwright's Chromium did not download; install Google Chrome, or run: $python -m playwright install chromium --only-shell"
   fi
   fetch_neo4j "$python"
-  make_shortcut "$bin"
+  make_shortcut "$bin" "$python"
   say "installed. Open it with: $(open_hint)   (a new terminal finds the command)"
   if [ -z "${GRAPHME_NO_LAUNCH:-}" ]; then
     nohup "$bin/graphme-app" >>"$HOME_DIR/app.log" 2>&1 &
