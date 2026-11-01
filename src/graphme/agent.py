@@ -242,7 +242,7 @@ class _Icon:
                 self.icon.update_menu()
 
     def run(self) -> None:
-        import pystray  # type: ignore[import-untyped,unused-ignore]
+        import pystray  # type: ignore[import-not-found,import-untyped,unused-ignore]
         from PIL import Image
 
         def item(entry: MenuEntry) -> Any:
