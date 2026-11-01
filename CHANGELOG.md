@@ -5,6 +5,17 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.53] - 2026-11-02
+
+### Changed
+
+- On Windows the app's header is the window's title bar, as in Claude's or VS Code's window:
+  Windows painted its own title bar light over the dark app whenever Windows was set to light.
+  Dragging the header moves the window (with snapping, and a double click maximizes), and the
+  header draws minimize, maximize and close. The window still resizes from its sides and bottom.
+  It needs a WebView2 runtime that supports non-client regions; on an older one the window keeps
+  its title bar. `GRAPHME_NATIVE_TITLE_BAR=1` keeps it always.
+
 ## [0.1.52] - 2026-11-02
 
 ### Added

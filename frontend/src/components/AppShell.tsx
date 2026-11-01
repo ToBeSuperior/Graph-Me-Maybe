@@ -9,6 +9,7 @@ import { useLang, useT, type Lang } from '../lib/i18n';
 import { useBuild, useBuildFollower, useCorpusMap, useSettings } from '../lib/queries';
 import { useTheme, type Theme } from '../lib/theme';
 import { useUpload } from '../features/upload/upload';
+import { WindowControls, useWindowChrome } from './WindowControls';
 import { WorkspaceMenu } from './WorkspaceMenu';
 import { Button, Menu, MenuContent, MenuLabel, MenuRadio, MenuRadioGroup, MenuSeparator, MenuTrigger, Spinner, Tip } from './ui';
 
@@ -94,6 +95,7 @@ const tab = ({ isActive }: { isActive: boolean }) =>
 
 export function AppShell() {
   const t = useT();
+  const chrome = useWindowChrome();
   // How a build ended is said once, wherever the reader is.
   useBuildFollower((build) => {
     const failed = build.failed.length ? `${t('notProcessed', build.failed.length)} · ${build.failed.join(' · ')}` : undefined;
@@ -109,20 +111,21 @@ export function AppShell() {
   });
   return (
     <div className="flex h-full flex-col">
-      <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-2 border-b border-line bg-bg/85 px-3 backdrop-blur sm:px-4">
-        <NavLink to="/" className="mr-2 flex items-center gap-2 font-semibold tracking-tight">
+      <header className={cn('sticky top-0 z-30 flex h-12 shrink-0 items-center gap-2 border-b border-line bg-bg/85 px-3 backdrop-blur sm:px-4', chrome && 'app-drag select-none')}>
+        <NavLink to="/" className="app-no-drag mr-2 flex items-center gap-2 font-semibold tracking-tight">
           <span className="grid size-6 place-items-center rounded-md bg-accent text-on-accent"><Network className="size-3.5" /></span>
           <span className="hidden sm:inline">Graph-Me-Maybe</span>
         </NavLink>
-        <WorkspaceMenu />
-        <nav className="flex items-center gap-1" aria-label={t('navigation')}>
+        <div className="app-no-drag"><WorkspaceMenu /></div>
+        <nav className="app-no-drag flex items-center gap-1" aria-label={t('navigation')}>
           <NavLink to="/" end className={tab}><FolderTree className="size-4" />{t('navAsk')}</NavLink>
           <NavLink to="/manage" className={tab}><Database className="size-4" />{t('navManage')}</NavLink>
         </nav>
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="app-no-drag ml-auto flex items-center gap-1.5">
           <StatusPill />
           <Settings />
         </div>
+        {chrome && <WindowControls />}
       </header>
       <NotReady />
       <main className="min-h-0 flex-1">

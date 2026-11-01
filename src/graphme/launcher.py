@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from graphme import model_endpoint, processes
+from graphme import model_endpoint, processes, window_chrome
 from graphme.config import app_home as home
 
 FIRST_PORT = 8765
@@ -86,8 +86,15 @@ def show_window(url: str, storage: Path) -> bool:
         return False
     try:
         webview.settings["ALLOW_DOWNLOADS"] = True  # an export's .dump and bundle
+        # On Windows the header is the title bar (`window_chrome`): Windows paints its own light
+        # over the dark app whenever Windows is light.
+        chrome = window_chrome.ChromeApi() if window_chrome.wanted() else None
+        if chrome is not None:
+            window_chrome.install(chrome)
         window = webview.create_window("Graph-Me-Maybe", url, width=1280, height=860,
-                                       min_size=(900, 600), text_select=True)
+                                       min_size=(900, 600), text_select=True, js_api=chrome)
+        if chrome is not None and window is not None:
+            chrome.attach(window)
         # Quitting the app (Cmd+Q, the Dock) ends the process from inside the window's loop:
         # what follows `start` never runs, and the Neo4j it started -- a process group of its
         # own -- would outlive it.

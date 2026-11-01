@@ -137,3 +137,8 @@
 /* An answer's own words: paragraphs and lists the model wrote, at reading size. */
 .prose-answer p { margin: 0 0 0.6em; }
 .prose-answer p:last-child { margin-bottom: 0; }
+
+/* The app's header is the window's title bar on Windows (graphme/window_chrome.py): its empty
+   parts move the window, what is on it stays clickable. */
+.app-drag { app-region: drag; -webkit-app-region: drag; }
+.app-no-drag { app-region: no-drag; -webkit-app-region: no-drag; }

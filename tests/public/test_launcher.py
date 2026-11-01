@@ -352,3 +352,62 @@ def test_a_window_closed_by_quitting_the_app_stops_the_neo4j_it_started(
     assert launcher.show_window("http://127.0.0.1:1", tmp_path)
     closed[0]()  # type: ignore[operator]
     assert stopped == [True]
+
+
+def _fake_webview(made: dict[str, object]) -> object:
+    import types
+
+    class Events:
+        def __getattr__(self, name: str) -> Events:
+            return self
+
+        def __iadd__(self, handler: object) -> Events:
+            return self
+
+    def create_window(*args: object, **kwargs: object) -> object:
+        made.update(kwargs)
+        return types.SimpleNamespace(events=Events())
+
+    return types.SimpleNamespace(settings={}, create_window=create_window, start=lambda **k: None)
+
+
+def test_on_windows_the_header_is_the_title_bar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows paints its title bar light over a dark app whenever Windows is light; the window
+    hands the title bar to the page's header, and gives the page its buttons."""
+    from graphme import window_chrome
+
+    made: dict[str, object] = {}
+    installed: list[object] = []
+    monkeypatch.setitem(launcher.sys.modules, "webview", _fake_webview(made))
+    monkeypatch.setattr(window_chrome, "wanted", lambda *a, **k: True)
+    monkeypatch.setattr(window_chrome, "install", installed.append)
+
+    assert launcher.show_window("http://127.0.0.1:1", tmp_path)
+
+    assert isinstance(made.get("js_api"), window_chrome.ChromeApi)
+    assert installed == [made["js_api"]]
+
+
+def test_elsewhere_the_window_keeps_its_own_title_bar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from graphme import window_chrome
+
+    made: dict[str, object] = {}
+    monkeypatch.setitem(launcher.sys.modules, "webview", _fake_webview(made))
+    monkeypatch.setattr(window_chrome, "wanted", lambda *a, **k: False)
+    monkeypatch.setattr(window_chrome, "install", lambda api: pytest.fail("installed"))
+
+    assert launcher.show_window("http://127.0.0.1:1", tmp_path)
+    assert made.get("js_api") is None
+
+
+def test_the_title_bar_starts_below_the_frame_a_maximized_window_hangs_off_screen() -> None:
+    from graphme.window_chrome import client_top, wanted
+
+    assert client_top(100, maximized=False, frame=8) == 100
+    assert client_top(-8, maximized=True, frame=8) == 0
+    assert wanted({}, platform="win32") and not wanted({}, platform="darwin")
+    assert not wanted({"GRAPHME_NATIVE_TITLE_BAR": "1"}, platform="win32")
