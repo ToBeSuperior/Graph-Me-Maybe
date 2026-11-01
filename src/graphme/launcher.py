@@ -90,7 +90,11 @@ def show_window(url: str, storage: Path) -> bool:
         # over the dark app whenever Windows is light.
         chrome = window_chrome.ChromeApi() if window_chrome.wanted() else None
         if chrome is not None:
-            window_chrome.install(chrome)
+            try:
+                window_chrome.install(chrome)
+            except Exception:  # noqa: BLE001 -- Windows' own title bar, then
+                logging.getLogger(__name__).exception("the window keeps its own title bar")
+                chrome = None
         window = webview.create_window("Graph-Me-Maybe", url, width=1280, height=860,
                                        min_size=(900, 600), text_select=True, js_api=chrome)
         if chrome is not None and window is not None:

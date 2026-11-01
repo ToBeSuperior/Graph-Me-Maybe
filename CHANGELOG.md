@@ -5,6 +5,13 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.54] - 2026-11-02
+
+### Fixed
+
+- The window opens with Windows' own title bar when the header cannot take its place, instead
+  of not opening (0.1.53's tests on Windows, with a stand-in webview, did not open it).
+
 ## [0.1.53] - 2026-11-02
 
 ### Changed

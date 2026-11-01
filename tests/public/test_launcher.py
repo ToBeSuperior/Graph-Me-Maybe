@@ -411,3 +411,23 @@ def test_the_title_bar_starts_below_the_frame_a_maximized_window_hangs_off_scree
     assert client_top(-8, maximized=True, frame=8) == 0
     assert wanted({}, platform="win32") and not wanted({}, platform="darwin")
     assert not wanted({"GRAPHME_NATIVE_TITLE_BAR": "1"}, platform="win32")
+
+
+def test_a_title_bar_that_cannot_be_taken_over_still_opens_the_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The header standing in for the title bar is a nicety: a webview without what it needs
+    (a stand-in module, an old build) opens the window with Windows' own title bar."""
+    from graphme import window_chrome
+
+    made: dict[str, object] = {}
+    monkeypatch.setitem(launcher.sys.modules, "webview", _fake_webview(made))
+    monkeypatch.setattr(window_chrome, "wanted", lambda *a, **k: True)
+
+    def cannot(api: object) -> None:
+        raise ModuleNotFoundError("No module named 'webview.platforms'")
+
+    monkeypatch.setattr(window_chrome, "install", cannot)
+
+    assert launcher.show_window("http://127.0.0.1:1", tmp_path)
+    assert made.get("js_api") is None

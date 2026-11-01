@@ -76,7 +76,7 @@ class ChromeApi:
 def install(api: ChromeApi) -> None:  # pragma: no cover -- Windows and WebView2 only
     """Hook pywebview's WebView2 start: the setting first, then the caption, on the UI thread
     the window belongs to, before the page is first loaded."""
-    from webview.platforms import edgechromium
+    from webview.platforms import edgechromium  # type: ignore[import-not-found,unused-ignore]
 
     original = edgechromium.EdgeChrome.on_webview_ready
 
@@ -88,9 +88,9 @@ def install(api: ChromeApi) -> None:  # pragma: no cover -- Windows and WebView2
                 api.custom = True
         except Exception:  # noqa: BLE001 -- an old runtime: the window keeps its title bar
             _log.exception("the window keeps its own title bar")
-        return original(self, sender, args)  # type: ignore[no-untyped-call]
+        return original(self, sender, args)  # type: ignore[no-untyped-call,unused-ignore]
 
-    edgechromium.EdgeChrome.on_webview_ready = ready  # type: ignore[method-assign]
+    edgechromium.EdgeChrome.on_webview_ready = ready  # type: ignore[method-assign,unused-ignore]
 
 
 def _hide_caption(hwnd: int) -> None:  # pragma: no cover -- Windows only
