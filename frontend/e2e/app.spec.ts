@@ -183,6 +183,29 @@ test('the search model is chosen from two, each saying whether it is installed',
   await expect(page.getByTestId('search-model-korean').getByRole('button', { name: '삭제' })).toHaveCount(0);
 });
 
+test('an MCP client is connected with one command, and reads only the workspaces switched on', async ({ page, context }) => {
+  const fake = await fakeApi(page);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/manage/settings');
+  await expect(page.getByText('claude mcp add graph-me-maybe -- graphme mcp')).toBeVisible();
+  await page.getByRole('button', { name: '복사' }).click();
+  await expect(page.getByRole('button', { name: '복사했습니다' })).toBeVisible();
+  // Switched on only after the notice that what it takes goes to the client's model.
+  await page.getByRole('checkbox', { name: 'Invented audits' }).click();
+  await expect(page.getByRole('dialog')).toContainText('클라이언트가 쓰는 모델');
+  await page.getByRole('button', { name: '취소' }).click();
+  expect(fake.workspaces.items[1].mcp).toBe(false);
+  await page.getByRole('checkbox', { name: 'Invented audits' }).click();
+  await page.getByRole('button', { name: '켜기' }).click();
+  await expect.poll(() => fake.workspaces.items[1].mcp).toBe(true);
+  await expect(page.getByRole('checkbox', { name: 'Invented audits' })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Default' })).not.toBeChecked();
+  // Off for all: every workspace refused, each one's own setting kept.
+  await page.getByRole('checkbox', { name: /MCP 사용/ }).click();
+  await expect.poll(() => fake.workspaces.mcp_enabled).toBe(false);
+  await expect(page.getByRole('checkbox', { name: 'Invented audits' })).toBeDisabled();
+});
+
 test('Box folders are browsed, picked and read into the graph', async ({ page }) => {
   const fake = await fakeApi(page);
   await page.goto('/manage/box');

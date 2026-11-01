@@ -121,6 +121,9 @@ def _stamp(path: str | Path) -> tuple[int, int] | None:
 
 PREVIEWS_KEPT = 24
 EMBED_WAIT_SECONDS = 30.0
+SIDE_IDLE_SECONDS = 300.0
+"""A workspace read beside the open one (`Demo.reader`) is let go once nobody has asked it
+for this long: its Neo4j holds memory the app's own graph may want."""
 """How long a workspace switch waits for the embedding the open workspace started."""
 PREVIEW_HOLD_SECONDS = 300.0
 """How long a cloud drive's file downloaded to draw a page is kept after it was last looked at:
@@ -342,6 +345,8 @@ class Demo:
         self.client = httpx.Client(timeout=600.0)
         # Every image and every poll looks a document up here: every document a folder brought.
         self.catalog: dict[str, str] = {}
+        self.agent_token: str | None = None
+        """The token the agent wrote in `server.json`: a client sending it is let in."""
         self.readers = ThreadPoolExecutor(max_workers=READERS, thread_name_prefix="read")
         self.reading_at_once = READERS
         """Documents read at once by `readers`: a build lets in twice as many, no more."""
@@ -381,6 +386,10 @@ class Demo:
         self._open_failed: Exception | None = None
         self._letting_go: tuple[Path, threading.Thread] | None = None
         """The graph left last, and what is stopping its Neo4j."""
+        self._side: tuple[str, GraphMe] | None = None
+        """A workspace read beside the open one (`reader`), and its graph: one at a time."""
+        self._side_asked = 0.0
+        self.siding = threading.RLock()
 
     def reconfigure(self, settings: Settings) -> None:
         """New keys or model, taken up from the next reading and the next question. The graph
@@ -412,6 +421,7 @@ class Demo:
         spaces.item(workspace)
         if workspace == spaces.active:
             return
+        self.stop_side(workspace)  # its Neo4j holds the folder
         # Opening a workspace embeds what it holds with the chosen search model, a second or
         # two: waited out, not refused as though a build ran. An embedding is never stopped
         # half way, so a long one still refuses once EMBED_WAIT_SECONDS have gone.
@@ -442,9 +452,59 @@ class Demo:
         self.search_models.embed_behind()  # a search model chosen while it was closed
         self.sweep_behind()
 
+    def reader(self, workspace: str | None) -> GraphMe:
+        """The graph to read `workspace` from: the open one's for None or the open one, else
+        one beside it -- its own Neo4j, opened here and kept while asked, the app's own left as
+        it is. Another workspace asked for lets the one beside go first. LookupError: none."""
+        spaces = self.workspaces
+        if workspace is None or spaces is None or workspace == spaces.active:
+            return self.graph
+        with self.siding:
+            if self._side is not None and self._side[0] == workspace:
+                self._side_asked = time.monotonic()
+                return self._side[1]
+            spaces.item(workspace)
+            self.stop_side()
+            root = spaces.graph(workspace) or spaces.home
+            leaving = self._letting_go
+            if leaving is not None and leaving[0] == root:
+                leaving[1].join()  # just left: its Neo4j holds the folder until it has stopped
+            graph = GraphMe(self.settings.model_copy(
+                update={"local_graph": spaces.graph(workspace)}))
+            try:
+                graph.graph_space()
+            except BaseException:
+                _let_go(graph, root)
+                raise
+            self._side, self._side_asked = (workspace, graph), time.monotonic()
+        threading.Thread(target=self._idle_side, args=(graph,), daemon=True).start()
+        return graph
+
+    def stop_side(self, workspace: str | None = None) -> None:
+        """The workspace read beside the open one let go -- only if it is `workspace`, when
+        one is named."""
+        with self.siding:
+            if self._side is None or workspace not in (None, self._side[0]):
+                return
+            graph, self._side = self._side[1], None
+        _let_go(graph, graph.settings.local_graph or self.workspace_registry().home)
+
+    def _idle_side(self, graph: GraphMe) -> None:
+        # ponytail: idle is counted from the last ask, not the last answer; an ask past
+        # SIDE_IDLE_SECONDS would lose its graph -- count running asks if one ever does.
+        while True:
+            time.sleep(min(SIDE_IDLE_SECONDS, 5.0))
+            with self.siding:
+                if self._side is None or self._side[1] is not graph:
+                    return
+                if time.monotonic() - self._side_asked >= SIDE_IDLE_SECONDS:
+                    self.stop_side()
+                    return
+
     def delete_workspace(self, workspace: str) -> None:
         """`workspace` and its graph deleted; never the one open."""
         spaces = self.workspace_registry()
+        self.stop_side(workspace)
         if self._letting_go is not None:
             self._letting_go[1].join()  # its Neo4j may be the one stopping
         graph = spaces.graph(workspace)

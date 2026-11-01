@@ -77,9 +77,11 @@ def running(port: int, home: Path, *, get: Callable[..., Any] = httpx.get) -> bo
         return False
 
 
-def show_window(url: str, storage: Path) -> bool:
+def show_window(url: str, storage: Path,
+                on_closing: Callable[[Any], None] | None = None) -> bool:
     """The page in a window of its own -- Edge WebView2 on Windows, WebKit on macOS -- until it
-    is closed. False when there is none to show it in (Linux and WSL install no webview)."""
+    is closed; `on_closing` is handed the window as it closes. False when there is none to show
+    it in (Linux and WSL install no webview)."""
     try:
         import webview  # type: ignore[import-not-found,unused-ignore]  # not on Linux
     except ImportError:
@@ -107,7 +109,9 @@ def show_window(url: str, storage: Path) -> bool:
         # what follows `start` never runs, and the Neo4j it started -- a process group of its
         # own -- would outlive it.
         if window is not None:
-            window.events.closed += _stop_neo4j
+            window.events.closed += stop_started
+            if on_closing is not None:
+                window.events.closing += lambda: on_closing(window)
         # Kept between runs, as a browser keeps them: the theme, the language, an API key.
         webview.start(private_mode=False, storage_path=str(storage))
     except Exception:  # noqa: BLE001 -- no WebView2 runtime, no GUI session
@@ -116,7 +120,7 @@ def show_window(url: str, storage: Path) -> bool:
     return True
 
 
-def _stop_neo4j() -> None:
+def stop_started() -> None:
     """The Neo4j and the search model servers this process started, stopped: `os._exit` runs
     no exit handler."""
     from graphme import runtime
@@ -126,7 +130,7 @@ def _stop_neo4j() -> None:
     runtime.stop_local_models()
 
 
-def _stop_on_endings() -> None:
+def _stop_on_endings(also: Callable[[], None] = lambda: None) -> None:
     """Ended by the system or `kill`, the Neo4j goes too, then the app. The main thread sits in
     the window's loop, where a Python signal handler never runs -- one installed there left
     the app ignoring the signal -- so the ending is blocked in every thread started after this
@@ -138,7 +142,8 @@ def _stop_on_endings() -> None:
 
     def wait() -> None:
         signal.sigwait(endings)
-        _stop_neo4j()
+        stop_started()
+        also()
         os._exit(0)
 
     threading.Thread(target=wait, name="endings", daemon=True).start()
@@ -195,26 +200,37 @@ def launch(
 
 
 def main() -> None:
-    """`graphme-app`: what the shortcut starts, with no console. A Windows shortcut cannot set
-    GRAPHME_HOME, so a home other than the default comes as the one argument -- a full path
-    only: a shortcut made for `graphme.exe app` still says `app`."""
+    """`graphme-app`: what the shortcut starts, with no console -- the window, on the agent
+    (`agent.py`), which it starts when none runs; `--agent` is the agent itself. A Windows
+    shortcut cannot set GRAPHME_HOME, so a home other than the default comes as an argument -- a
+    full path only: a shortcut made for `graphme.exe app` still says `app`."""
     # The webview finds its own files from the program's path, which the move into the home
     # below would leave pointing nowhere when it was given relative.
     sys.argv[0] = os.path.abspath(sys.argv[0])
-    if len(sys.argv) > 1 and Path(sys.argv[1]).is_absolute():
-        # Into this process's own environment: the server reads its settings, and its Neo4j's
-        # home, from there -- not from what the launcher alone is handed.
-        os.environ["GRAPHME_HOME"] = sys.argv[1]
+    given = sys.argv[1:]
+    for named in given:
+        if Path(named).is_absolute():
+            # Into this process's own environment: the server reads its settings, and its
+            # Neo4j's home, from there -- not from what the launcher alone is handed.
+            os.environ["GRAPHME_HOME"] = named
     environ = dict(os.environ)
     where = home(environ)
     if sys.stdout is None or sys.stderr is None:  # started without a console: say it in a file
         prepare(where)
         log = open(where / "app.log", "a", encoding="utf-8", buffering=1)  # noqa: SIM115
         sys.stdout = sys.stderr = log
-    _stop_on_endings()
-    launch(port=None, browser=True, environ=environ,
-           window=lambda url: show_window(url, where / "webview"))
-    # The window is closed: the Neo4j the app started goes with it (the window is gone, so the
-    # wait is not seen), then the app ends, whatever threads a build or a driver left.
-    _stop_neo4j()
+    from graphme import agent, agent_file
+
+    if "--agent" in given:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        _stop_on_endings(also=lambda: agent_file.remove_server_file(where))
+        agent.run_agent(where)
+    else:
+        _stop_on_endings()
+        agent.open_window(where)
+    # Ended: whatever threads a build or a driver left, the process goes.
     os._exit(0)
+
+
+if __name__ == "__main__":
+    main()

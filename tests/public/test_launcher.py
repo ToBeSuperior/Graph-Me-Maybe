@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from graphme import launcher, model_endpoint, processes
+from graphme import agent, launcher, model_endpoint, processes
 from graphme.config import load_settings, read_dotenv
 
 
@@ -262,8 +262,7 @@ def test_the_window_app_takes_only_a_full_path_for_its_home(
     seen: list[str] = []
     exits: list[int] = []
     monkeypatch.setenv("GRAPHME_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(launcher, "launch",
-                        lambda **kw: seen.append(kw["environ"]["GRAPHME_HOME"]))
+    monkeypatch.setattr(agent, "open_window", lambda home: seen.append(str(home)))
     monkeypatch.setattr(launcher.os, "_exit", exits.append)
     monkeypatch.setattr(launcher.sys, "argv", ["graphme-app", argument])
     launcher.main()
@@ -277,20 +276,22 @@ def test_the_window_app_takes_only_a_full_path_for_its_home(
     assert exits == [0, 0]
 
 
-def test_closed_it_stops_the_neo4j_it_started(
+def test_the_agent_is_the_one_given_agent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Without it the window app's Neo4j outlived it: os._exit skips what atexit would do.
-    from graphme.adapters.storage import local_neo4j
-
-    stopped: list[bool] = []
+    # The window ends the window alone; the agent (`--agent`) is what runs the server, its
+    # Neo4j and the icon, and stops them when quit (test_agent).
+    ran: list[tuple[str, str]] = []
     monkeypatch.setenv("GRAPHME_HOME", str(tmp_path))
-    monkeypatch.setattr(launcher, "launch", lambda **kw: None)
+    monkeypatch.setattr(agent, "run_agent", lambda home: ran.append(("agent", str(home))))
+    monkeypatch.setattr(agent, "open_window", lambda home: ran.append(("window", str(home))))
     monkeypatch.setattr(launcher.os, "_exit", lambda code: None)
-    monkeypatch.setattr(launcher.sys, "argv", ["graphme-app"])
-    monkeypatch.setattr(local_neo4j, "stop_started", lambda: stopped.append(True))
+    monkeypatch.setattr(launcher, "_stop_on_endings", lambda also=None: None)
+    monkeypatch.setattr(launcher.sys, "argv", ["graphme-app", "--agent"])
     launcher.main()
-    assert stopped == [True]
+    monkeypatch.setattr(launcher.sys, "argv", ["graphme-app"])
+    launcher.main()
+    assert ran == [("agent", str(tmp_path)), ("window", str(tmp_path))]
 
 
 def test_ended_by_a_signal_it_still_stops_the_neo4j_it_started(
@@ -310,7 +311,7 @@ def test_ended_by_a_signal_it_still_stops_the_neo4j_it_started(
     blocked: list[set[int]] = []
     stopped = threading.Event()
     monkeypatch.setenv("GRAPHME_HOME", str(tmp_path))
-    monkeypatch.setattr(launcher, "launch", lambda **kw: None)
+    monkeypatch.setattr(agent, "open_window", lambda home: None)
     monkeypatch.setattr(launcher.os, "_exit", lambda code: None)
     monkeypatch.setattr(launcher.sys, "argv", ["graphme-app"])
     monkeypatch.setattr(launcher.signal, "pthread_sigmask",

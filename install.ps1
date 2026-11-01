@@ -132,6 +132,24 @@ function Register-Uninstall([string]$Tag) {
     Set-ItemProperty $UninstallKey NoRepair 1 -Type DWord
 }
 
+# The app running behind its icon -- its window, then the agent -- ended through the pids it
+# wrote in server.json, with what each started (/T: the agent's Neo4j and search model). A pid
+# some other program has taken since is left alone.
+function Stop-App {
+    $file = Join-Path $AppHome 'server.json'
+    if (-not (Test-Path -LiteralPath $file)) { return }
+    try { $said = Get-Content -Raw -LiteralPath $file | ConvertFrom-Json } catch { return }
+    foreach ($id in @($said.window_pid, $said.pid)) {
+        if (-not $id) { continue }
+        $process = Get-Process -Id $id -ErrorAction SilentlyContinue
+        if ($process -and $process.Path -match 'python|graphme') {
+            Say 'quitting the running Graph-Me-Maybe'
+            Quiet { taskkill /PID $id /T /F }
+            Wait-Process -Id $id -Timeout 30 -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Uninstall {
     if ($env:GRAPHME_PURGE) {
         if (-not ([IO.Path]::IsPathRooted($AppHome) -and $AppHome -match '^([A-Za-z]:[\\/]|\\\\)')) {
@@ -151,6 +169,7 @@ function Uninstall {
         }
     }
     Ensure-Uv
+    Stop-App
     Quiet { uv tool uninstall $Tool }
     $bin = (uv tool dir --bin).Trim()
     if ((Test-Path -LiteralPath (Join-Path $bin 'graphme.exe')) -or (Test-Path -LiteralPath (Join-Path $bin 'graphme-app.exe'))) {
@@ -159,10 +178,12 @@ function Uninstall {
     foreach ($path in @((Join-Path $AppHome 'web'), (Join-Path $AppHome 'viewer'), (Join-Path $AppHome 'neo4j'), (Join-Path $AppHome 'jre'), $Shortcut)) {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
     }
+    # Start at login goes with the app.
+    Quiet { Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'Graph-Me-Maybe' }
     if (Test-Path $UninstallKey) { Remove-Item $UninstallKey -Force }
     if ($env:GRAPHME_PURGE -and (Test-Path -LiteralPath $AppHome)) {
         # Only what the app made; the folder goes only if nothing else is left in it.
-        foreach ($part in @('.env', '.graphme', 'app.log', 'install.ps1', 'webview', 'neo4j-data')) {
+        foreach ($part in @('.env', '.graphme', 'app.log', 'install.ps1', 'webview', 'neo4j-data', 'server.json', 'notices.json', 'agent.lock')) {
             $path = Join-Path $AppHome $part
             if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
         }
@@ -188,6 +209,7 @@ function Install {
         if (-not $wheel) { Fail 'no graph_me_maybe-*.whl in SHA256SUMS' }
         foreach ($name in @($wheel, 'web.zip', 'viewer.zip')) { Fetch $source $name $work; Verify $name $work }
         # A Graph-Me-Maybe already answering holds its files open; updating under it fails.
+        Stop-App
         $port = if ($env:GRAPHME_PORT) { $env:GRAPHME_PORT } else { '8765' }
         try { $health = Invoke-RestMethod -UseBasicParsing -TimeoutSec 2 "http://127.0.0.1:$port/health" } catch { $health = $null }
         # One that names another home -- WSL's app, reached by its localhost forwarding -- is not this one.

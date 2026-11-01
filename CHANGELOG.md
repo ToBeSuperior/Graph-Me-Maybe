@@ -5,6 +5,24 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.57] - 2026-11-02
+
+### Added
+
+- An MCP server: `claude mcp add graph-me-maybe -- graphme mcp` lets Claude Code (or Claude
+  Desktop, Cursor) search the documents, read an outline and a part of it, see a page, ask, and
+  add a folder. A workspace is read only once switched on for MCP in Manage › Keys and model,
+  after a notice that what a client takes goes to its model; one switch turns MCP off for all.
+  A workspace other than the one open is read beside it, on its own Neo4j, for five minutes.
+- The app keeps running when its window is closed, behind an icon in the menu bar (macOS) or
+  the notification area (Windows): open the app, MCP on or off, start at login (off until
+  chosen), quit completely. Closing the window the first time says so once.
+
+### Changed
+
+- The installers quit the running app -- its window, then the background app with its Neo4j --
+  before installing, instead of asking for it to be closed first.
+
 ## [0.1.56] - 2026-11-02
 
 ### Fixed

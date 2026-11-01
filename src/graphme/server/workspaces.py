@@ -42,27 +42,47 @@ class Workspaces:
         """The folder holding `workspace`'s graph; None for the home's own."""
         return None if workspace == FIRST else self.home / "workspaces" / workspace
 
-    def item(self, workspace: str) -> dict[str, str]:
+    def item(self, workspace: str) -> dict[str, Any]:
         found = next((i for i in self.listed()["items"] if i["id"] == workspace), None)
         if found is None:
             raise LookupError(f"no such workspace: {workspace}")
         return dict(found)
 
-    def create(self, name: str) -> dict[str, str]:
+    def create(self, name: str) -> dict[str, Any]:
         with self._lock:
             said = self._read()
-            item = {"id": uuid.uuid4().hex[:12], "name": self._fresh(said, name)}
+            item = {"id": uuid.uuid4().hex[:12], "name": self._fresh(said, name), "mcp": False}
             said["items"].append(item)
             self._write(said)
             return item
 
-    def rename(self, workspace: str, name: str) -> dict[str, str]:
+    def rename(self, workspace: str, name: str) -> dict[str, Any]:
         with self._lock:
             said = self._read()
             item = self._find(said, workspace)
             item["name"] = self._fresh(said, name, workspace)
             self._write(said)
             return dict(item)
+
+    def set_mcp(self, workspace: str, on: bool) -> dict[str, Any]:
+        """Whether an MCP client may read `workspace`: off until switched on."""
+        with self._lock:
+            said = self._read()
+            item = self._find(said, workspace)
+            item["mcp"] = on
+            self._write(said)
+            return dict(item)
+
+    @property
+    def mcp_enabled(self) -> bool:
+        """The one switch for all: off, no MCP client reads anything, whatever each allows."""
+        return bool(self.listed()["mcp_enabled"])
+
+    def set_mcp_enabled(self, on: bool) -> None:
+        with self._lock:
+            said = self._read()
+            said["mcp_enabled"] = on
+            self._write(said)
 
     def activate(self, workspace: str) -> None:
         with self._lock:
@@ -89,11 +109,14 @@ class Workspaces:
             said = json.loads(self._file.read_text(encoding="utf-8"))
             if said.get("items"):
                 return {"active": str(said.get("active") or said["items"][0]["id"]),
-                        "items": [{"id": str(i["id"]), "name": str(i["name"])}
+                        "mcp_enabled": bool(said.get("mcp_enabled", True)),
+                        "items": [{"id": str(i["id"]), "name": str(i["name"]),
+                                   "mcp": bool(i.get("mcp", False))}
                                   for i in said["items"]]}
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             pass
-        return {"active": FIRST, "items": [{"id": FIRST, "name": FIRST_NAME}]}
+        return {"active": FIRST, "mcp_enabled": True,
+                "items": [{"id": FIRST, "name": FIRST_NAME, "mcp": False}]}
 
     def _write(self, said: dict[str, Any]) -> None:
         self.home.mkdir(parents=True, exist_ok=True)
@@ -102,8 +125,8 @@ class Workspaces:
         kept.replace(self._file)
 
     @staticmethod
-    def _find(said: dict[str, Any], workspace: str) -> dict[str, str]:
-        found: dict[str, str] | None = next(
+    def _find(said: dict[str, Any], workspace: str) -> dict[str, Any]:
+        found: dict[str, Any] | None = next(
             (i for i in said["items"] if i["id"] == workspace), None)
         if found is None:
             raise LookupError(f"no such workspace: {workspace}")

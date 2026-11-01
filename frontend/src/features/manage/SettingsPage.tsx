@@ -1,12 +1,12 @@
 // The keys and model the demo runs with, put in here instead of in .env by hand. A key is shown
 // only as set or not -- the demo never sends one back -- and a new one is tried before it is kept.
 import { useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, TriangleAlert } from 'lucide-react';
+import { Check, CheckCircle2, Copy, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { api, call, ApiError } from '../../api/client';
-import { Badge, Button, Input, Spinner } from '../../components/ui';
+import { Badge, Button, Dialog, DialogContent, Input, Spinner } from '../../components/ui';
 import { useT } from '../../lib/i18n';
-import { keys, useSearchModels, useSettings } from '../../lib/queries';
+import { keys, useSearchModels, useSettings, useWorkspaces } from '../../lib/queries';
 import { PageHeader } from './ManageLayout';
 
 export function SettingsPage() {
@@ -100,6 +100,7 @@ export function SettingsPage() {
           <p className="flex items-center gap-2 text-sm text-muted"><CheckCircle2 className="size-4 text-ok" />{t('settingsReady')}</p>
         ))}
         <SearchModels />
+        <McpClients />
         <form className="grid gap-4" autoComplete="off" onSubmit={(e) => { e.preventDefault(); void save(); }}>
           {ordered.filter((f) => f.secret).map(field)}
           {/* Who answers, its address and model, and what else the server can take: kept out of
@@ -199,3 +200,71 @@ function SearchModels() {
   );
 }
 
+export const MCP_COMMAND = 'claude mcp add graph-me-maybe -- graphme mcp';
+
+/** What an MCP client is connected with, and which workspaces it may read: each off until
+ * switched on here, the first time after the notice that what it takes goes to its model. */
+function McpClients() {
+  const t = useT();
+  const client = useQueryClient();
+  const { data } = useWorkspaces();
+  const [copied, setCopied] = useState(false);
+  const [asking, setAsking] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (!data?.available || !data.items) return null;
+  const act = async (work: () => Promise<unknown>) => {
+    setError(null);
+    try {
+      await work();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    }
+    await client.invalidateQueries({ queryKey: keys.workspaces });
+  };
+  const allow = (workspace: string, mcp: boolean) => act(() => call(api.PATCH('/v1/workspaces/{workspace}', {
+    params: { path: { workspace } }, body: { mcp } })));
+  const allowAll = (enabled: boolean) => act(() => call(api.PUT('/v1/mcp', { body: { enabled } })));
+  const copy = async () => {
+    await navigator.clipboard.writeText(MCP_COMMAND);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <section className="grid gap-2" aria-labelledby="mcp-title">
+      <h2 id="mcp-title" className="text-sm font-medium">{t('mcpTitle')}</h2>
+      <p className="text-xs leading-5 text-faint">{t('mcpBody')}</p>
+      <div className="flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-2">
+        <code className="min-w-0 flex-1 truncate text-xs">{MCP_COMMAND}</code>
+        <Button size="sm" variant="secondary" onClick={() => void copy()}>
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}{copied ? t('mcpCopied') : t('mcpCopy')}
+        </Button>
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" className="accent-[var(--accent)]" checked={data.mcp_enabled}
+          onChange={(e) => void allowAll(e.target.checked)} />
+        {t('mcpAllowed')} <span className="text-xs text-faint">{t('mcpAllowedNote')}</span>
+      </label>
+      <fieldset className="grid gap-1 rounded-lg border border-line p-3" disabled={!data.mcp_enabled}>
+        <legend className="px-1 text-xs text-muted">{t('mcpWorkspaces')}</legend>
+        {data.items.map((w) => (
+          <label key={w.id} className="flex items-center gap-2 text-sm">
+            <input type="checkbox" className="accent-[var(--accent)]" checked={w.mcp}
+              onChange={(e) => { if (e.target.checked) setAsking(w.id); else void allow(w.id, false); }} />
+            {w.name}
+          </label>
+        ))}
+      </fieldset>
+      {error && <p role="alert" className="text-xs text-danger-fg">{error}</p>}
+      <Dialog open={asking !== null} onOpenChange={(on) => { if (!on) setAsking(null); }}>
+        <DialogContent title={t('mcpNoticeTitle')} description={t('mcpNoticeBody')} closeLabel={t('close')}>
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setAsking(null)}>{t('cancel')}</Button>
+            <Button variant="primary" onClick={() => { const w = asking; setAsking(null); if (w) void allow(w, true); }}>
+              {t('mcpNoticeOk')}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+}

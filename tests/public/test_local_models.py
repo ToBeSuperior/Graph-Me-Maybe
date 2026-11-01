@@ -148,6 +148,6 @@ def test_the_app_ending_stops_the_search_model_servers_it_started(
     monkeypatch.setattr(models, "stop_all", lambda: stopped.append("models"))
     monkeypatch.setattr(local_neo4j, "stop_started", lambda: stopped.append("neo4j"))
 
-    launcher._stop_neo4j()
+    launcher.stop_started()
 
     assert stopped == ["neo4j", "models"]

@@ -229,6 +229,8 @@ class Question(_Model):
     """How many documents to find; the server's setting when not given."""
     top_k: int | None = Field(default=None, deprecated=True)
     """The old name of `documents`, read as it."""
+    workspace: str | None = None
+    """The workspace asked, by id; the open one when not given."""
 
 
 class LinkedPassage(_Model):
@@ -262,11 +264,15 @@ class Source(_Model):
 
 class Found(_Model):
     sources: list[Source]
+    text_only: bool = False
+    """Searched by words alone: the workspace's passages were embedded with another search
+    model, and it is not the one open."""
 
 
 class Answer(_Model):
     answer: str
     sources: list[Source]
+    text_only: bool = False
 
 
 # Export -------------------------------------------------------------------------------------
@@ -429,6 +435,8 @@ class SearchModel(_Model):
 class Workspace(_Model):
     id: str
     name: str
+    mcp: bool = False
+    """Whether an MCP client may read it: off until switched on in the app."""
 
 
 class Workspaces(_Model):
@@ -436,8 +444,19 @@ class Workspaces(_Model):
     """Whether this server keeps workspaces: the app's own graph DB does, another one not."""
     active: str | None = None
     """The workspace open now."""
+    mcp_enabled: bool = True
+    """The one switch for all MCP clients; each workspace's own is kept while it is off."""
     items: list[Workspace] = Field(default_factory=list)
 
 
 class WorkspaceName(_Model):
     name: str
+
+
+class WorkspaceChange(_Model):
+    name: str | None = None
+    mcp: bool | None = None
+
+
+class McpSwitch(_Model):
+    enabled: bool

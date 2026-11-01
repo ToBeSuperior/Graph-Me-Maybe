@@ -294,6 +294,9 @@ class GraphRag:
                                          vector_property=vector_property)
         self._rag: _OnceRetriever | None = None
         """Made on the first question: building a retriever asks the database twice."""
+        self.text_only = False
+        """Searched by the passages' words alone, the question not embedded: a workspace read
+        beside the open one, whose passages another search model embedded."""
 
     @property
     def _driver(self) -> neo4j.Driver:
@@ -532,6 +535,9 @@ class GraphRag:
         if not first:
             return found
         retriever = self._retriever()
+        if retriever.text_only:  # the links are ranked by the question's vector
+            return [neo4j.Record({**dict(record), "linked": []})  # type: ignore[no-untyped-call]
+                    for record in found]
         assert retriever.embedder is not None
         records, _, _ = self._driver.execute_query(
             self._links_query(), ids=list(first),
@@ -672,7 +678,7 @@ class GraphRag:
                 f"AND c.`{self._model_property}` <> $model RETURN c.id LIMIT 1",
                 model=self._model,
             )
-            if records:
+            if records and not self.text_only:
                 # Both default embedders are 3072 wide: the index's size cannot tell them apart.
                 raise GraphNotEmbedded(
                     "passages were embedded with another model: run `graphme embed-graph`"
@@ -683,7 +689,8 @@ class GraphRag:
                 vector_index_name=self._index,
                 fulltext_index_name=self._text_index,
                 retrieval_query=self._retrieval_query(),
-                embedder=self._embedder,
+                embedder=None if self.text_only else self._embedder,
+                text_only=self.text_only,
             )
         return self._rag
 

@@ -56,7 +56,8 @@ stopped: list[Path] = []
 def test_a_home_starts_with_its_own_graph_as_the_one_workspace(home: Path) -> None:
     said = Workspaces(home).listed()
 
-    assert said == {"active": FIRST, "items": [{"id": FIRST, "name": "Default"}]}
+    assert said == {"active": FIRST, "mcp_enabled": True,
+                    "items": [{"id": FIRST, "name": "Default", "mcp": False}]}
     assert Workspaces(home).graph(FIRST) is None  # the graph where it always was
 
 
@@ -168,7 +169,7 @@ def test_workspaces_are_listed_made_renamed_opened_and_deleted_over_http(
     assert opened["active"] == made["id"] and opened["available"] is True
     assert refused.status_code == 409  # the one open
     assert elsewhere.status_code == 403
-    assert deleted["items"] == [{"id": made["id"], "name": "Invented audits"}]
+    assert deleted["items"] == [{"id": made["id"], "name": "Invented audits", "mcp": False}]
     assert client.post("/v1/workspaces", json={"name": ""}).status_code == 400
 
 

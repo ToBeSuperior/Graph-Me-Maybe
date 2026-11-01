@@ -62,8 +62,11 @@ class _OnceRetriever(HybridCypherRetriever):
     retriever for its constructor, which checks the two indexes are there."""
 
     def __init__(self, driver: neo4j.Driver, *, floor: float, dense_weight: float, rrf_k: int,
-                 **kwargs: Any) -> None:
+                 text_only: bool = False, **kwargs: Any) -> None:
         super().__init__(driver, **kwargs)
+        self.text_only = text_only
+        """The fulltext index alone (`_FUSED_WORDS`): passages embedded with another search
+        model, which a question embedded with this one cannot be compared with."""
         self.floor = floor
         """`Settings.relevance_floor`."""
         self.dense_weight = dense_weight
@@ -77,21 +80,23 @@ class _OnceRetriever(HybridCypherRetriever):
         both scores 1 -- the relative relevance the page shows. A passage is fused only with
         evidence it is about the question (`_FUSED`); none, and the search found nothing.
         Highest score first: the query's later steps keep no order."""
-        assert self.embedder is not None
         if not self._holds_any(named_identifiers(question)):
             return []
         dense, text = fusion_weights(question, dense=self.dense_weight)
+        asked: dict[str, Any] = {
+            "vector_index_name": self.vector_index_name,
+            "fulltext_index_name": self.fulltext_index_name,
+            "query_text": _lucene_escaped(question),
+            "every_word": every_word(question), "floor": self.floor,
+            "candidates": SEARCH_DEPTH,
+            "dense_weight": dense, "text_weight": text, "rrf_k": self.rrf_k,
+        }
+        if not self.text_only:
+            assert self.embedder is not None
+            asked["query_vector"] = self.embedder.embed_query(question)
         records, _, _ = self.driver.execute_query(
-            _FUSED + self.retrieval_query,
-            {
-                "vector_index_name": self.vector_index_name,
-                "fulltext_index_name": self.fulltext_index_name,
-                "query_text": _lucene_escaped(question),
-                "every_word": every_word(question), "floor": self.floor,
-                "query_vector": self.embedder.embed_query(question),
-                "candidates": SEARCH_DEPTH,
-                "dense_weight": dense, "text_weight": text, "rrf_k": self.rrf_k,
-            },
+            (_FUSED_WORDS if self.text_only else _FUSED) + self.retrieval_query,
+            asked,
             database_=self.neo4j_database,
             routing_=neo4j.RoutingControl.READ,
         )
@@ -115,15 +120,15 @@ class _OnceRetriever(HybridCypherRetriever):
         return bool(records and records[0]["found"])
 
 
-_FUSED = """
-CALL () {
+_DENSE = """
   CALL db.index.vector.queryNodes($vector_index_name, $candidates, $query_vector)
     YIELD node, score
   WITH collect({node: node, near: 2 * score - 1 >= $floor}) AS ranked
   UNWIND range(0, size(ranked) - 1) AS at
   RETURN ranked[at].node AS node, $dense_weight / ($rrf_k + at + 1) AS part,
          ranked[at].near AS about
-  UNION ALL
+  UNION ALL"""
+_WORDS = """
   CALL db.index.fulltext.queryNodes($fulltext_index_name, $query_text, {limit: $candidates})
     YIELD node, score
   WITH collect(node) AS ranked
@@ -140,6 +145,8 @@ WHERE about
 ORDER BY score DESC, elementId(node)
 LIMIT $candidates
 """
+_FUSED = "CALL () {" + _DENSE + _WORDS
+_FUSED_WORDS = "CALL () {" + _WORDS
 """Weighted reciprocal rank fusion of Neo4j's two indexes over the passages, each searched to
 `candidates`. Rank says nothing about whether anything was found -- every search has a first --
 so a passage is kept only with evidence it is about the question: its cosine (Neo4j gives

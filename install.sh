@@ -68,6 +68,32 @@ app_running() {
   esac
 }
 
+# The app running behind its icon -- its window, then the agent, which stops its Neo4j and
+# search model as it goes -- ended through the pids it wrote in server.json, and waited for.
+# A pid some other program has taken since is left alone.
+stop_app() {
+  file="$HOME_DIR/server.json"
+  [ -f "$file" ] || return 0
+  agent=$(grep -o '"pid": *[0-9]*' "$file" | grep -o '[0-9]*$' || true)
+  window=$(grep -o '"window_pid": *[0-9]*' "$file" | grep -o '[0-9]*$' || true)
+  ended=
+  for p in $window $agent; do
+    case $(ps -p "$p" -o command= 2>/dev/null) in
+      *graphme*) kill "$p" 2>/dev/null && ended="$ended $p" ;;
+    esac
+  done
+  [ -n "$ended" ] || return 0
+  say "quitting the running Graph-Me-Maybe"
+  i=0
+  while [ $i -lt 120 ]; do
+    alive=
+    for p in $ended; do kill -0 "$p" 2>/dev/null && alive=1; done
+    [ -n "$alive" ] || return 0
+    sleep 0.5
+    i=$((i + 1))
+  done
+}
+
 open_hint() {
   if [ -n "${GRAPHME_HOME:-}" ]; then printf 'GRAPHME_HOME="%s" graphme app\n' "$HOME_DIR"
   else printf 'graphme app\n'; fi
@@ -143,12 +169,15 @@ uninstall() {
     esac
   fi
   ensure_uv
+  stop_app
   uv tool uninstall "$TOOL" 2>/dev/null || true
   rm -rf "$HOME_DIR/web" "$HOME_DIR/viewer" "$HOME_DIR/neo4j" "$HOME_DIR/jre" \
-    "$HOME/Applications/Graph-Me-Maybe.app"
+    "$HOME/Applications/Graph-Me-Maybe.app" \
+    "$HOME/Library/LaunchAgents/io.github.tobesuperior.graph-me-maybe.plist"
   if [ -n "${GRAPHME_PURGE:-}" ]; then
     # Only what the app made; the folder goes only if nothing else is left in it.
-    for part in .env .graphme app.log install.ps1 webview neo4j-data; do
+    for part in .env .graphme app.log install.ps1 webview neo4j-data server.json notices.json \
+        agent.lock; do
       rm -rf "${HOME_DIR:?}/$part"
     done
     if rmdir "$HOME_DIR" 2>/dev/null; then say "removed $HOME_DIR"
@@ -169,6 +198,7 @@ install() {
   wheel=$(awk '$2 ~ /^graph_me_maybe-.*\.whl$/ { print $2; exit }' "$work/SHA256SUMS")
   [ -n "$wheel" ] || die "no graph_me_maybe-*.whl in SHA256SUMS"
   for name in "$wheel" web.zip viewer.zip; do fetch "$name" "$work"; verify "$name" "$work"; done
+  stop_app
   if app_running; then
     die "Graph-Me-Maybe is running -- quit it first (close its window, or pkill -f graphme), then run the installer again"
   fi

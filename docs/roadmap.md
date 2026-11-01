@@ -36,11 +36,6 @@ OneDrive/SharePoint through their desktop apps.
 - [ ] **Measure efficiency and performance on the latest GraphRAG benchmarks.** Record
       ingest time, model call count and tokens, and query latency, not only accuracy.
       Compare with other GraphRAG implementations under the same conditions.
-- [ ] **An MCP server, and the app running in the background.** Designed in
-      `docs/superpowers/specs/2026-10-27-mcp-server-design.md`: `graphme mcp` (stdio) over the
-      app's API; MCP allowed per workspace (off by default), a workspace not open read beside the
-      open one; the app split into a background agent with a tray / menu bar icon (open the app,
-      MCP on/off, start at login -- off by default --, quit completely) and a window of its own.
 - [ ] **A blog for the public site** (left for later; site plan in
       `docs/superpowers/specs/2026-10-29-public-site-design.md`). Candidates: why plain RAG
       breaks on spreadsheets and slides; how it works, from a rendered page to the graph; the

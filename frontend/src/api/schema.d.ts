@@ -235,8 +235,31 @@ export interface paths {
         delete: operations["workspace_delete_v1_workspaces__workspace__delete"];
         options?: never;
         head?: never;
-        /** Workspace Rename */
-        patch: operations["workspace_rename_v1_workspaces__workspace__patch"];
+        /**
+         * Workspace Change
+         * @description A workspace renamed, or opened to MCP clients or closed to them.
+         */
+        patch: operations["workspace_change_v1_workspaces__workspace__patch"];
+        trace?: never;
+    };
+    "/v1/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mcp Switch
+         * @description The one switch for every MCP client: off, `graphme mcp` reads nothing.
+         */
+        put: operations["mcp_switch_v1_mcp_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/workspaces/{workspace}/open": {
@@ -380,7 +403,8 @@ export interface paths {
          * @description Every document a reader can open, in one list: those in the graph space first --
          *     each matched, by its file, to the server's own reading of it when there is one -- then
          *     the files held here that are not in the space (yet, or that failed). `space_ok` is
-         *     false when the graph DB cannot be reached; the rest is still listed.
+         *     false when the graph DB cannot be reached; the rest is still listed. Another
+         *     workspace than the open one (`workspace`): the documents in its space alone.
          */
         get: operations["library_v1_documents_get"];
         put?: never;
@@ -963,6 +987,11 @@ export interface components {
             answer: string;
             /** Sources */
             sources: components["schemas"]["Source"][];
+            /**
+             * Text Only
+             * @default false
+             */
+            text_only: boolean;
         };
         /** AuraUpload */
         AuraUpload: {
@@ -1254,6 +1283,11 @@ export interface components {
         Found: {
             /** Sources */
             sources: components["schemas"]["Source"][];
+            /**
+             * Text Only
+             * @default false
+             */
+            text_only: boolean;
         };
         /** GraphNode */
         GraphNode: {
@@ -1378,6 +1412,11 @@ export interface components {
             /** Matched By */
             matched_by: string[];
         };
+        /** McpSwitch */
+        McpSwitch: {
+            /** Enabled */
+            enabled: boolean;
+        };
         /** PageInfo */
         PageInfo: {
             /** Index */
@@ -1446,6 +1485,8 @@ export interface components {
              * @deprecated
              */
             top_k?: number | null;
+            /** Workspace */
+            workspace?: string | null;
         };
         /** ReadRequest */
         ReadRequest: {
@@ -1576,6 +1617,18 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            /**
+             * Mcp
+             * @default false
+             */
+            mcp: boolean;
+        };
+        /** WorkspaceChange */
+        WorkspaceChange: {
+            /** Name */
+            name?: string | null;
+            /** Mcp */
+            mcp?: boolean | null;
         };
         /** WorkspaceName */
         WorkspaceName: {
@@ -1588,6 +1641,11 @@ export interface components {
             available: boolean;
             /** Active */
             active?: string | null;
+            /**
+             * Mcp Enabled
+             * @default true
+             */
+            mcp_enabled: boolean;
             /** Items */
             items?: components["schemas"]["Workspace"][];
         };
@@ -1963,7 +2021,7 @@ export interface operations {
             };
         };
     };
-    workspace_rename_v1_workspaces__workspace__patch: {
+    workspace_change_v1_workspaces__workspace__patch: {
         parameters: {
             query?: never;
             header?: never;
@@ -1974,7 +2032,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["WorkspaceName"];
+                "application/json": components["schemas"]["WorkspaceChange"];
             };
         };
         responses: {
@@ -1985,6 +2043,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mcp_switch_v1_mcp_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpSwitch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspaces"];
                 };
             };
             /** @description Validation Error */
@@ -2208,7 +2299,9 @@ export interface operations {
     };
     library_v1_documents_get: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2222,6 +2315,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Library"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2259,7 +2361,9 @@ export interface operations {
     };
     document_graph_v1_documents__document_id__graph_get: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string | null;
+            };
             header?: never;
             path: {
                 document_id: string;
@@ -2321,7 +2425,9 @@ export interface operations {
     };
     graph_map_v1_graph_map_get: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2335,6 +2441,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CorpusMap"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

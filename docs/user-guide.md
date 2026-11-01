@@ -192,6 +192,39 @@ script make the server parse every number and run out of memory).
 A `.dump` is made by the app's own `neo4j-admin`: the bundle is imported into a scratch database, a
 scratch Neo4j makes its indexes, and the database is dumped. The app's graph is never touched.
 
+## Using it from Claude Code, Claude Desktop or Cursor
+
+Graph-Me-Maybe is an MCP server too: a client searches your documents, reads an outline and a
+part of it, looks at a page, and can add a folder. Connect Claude Code once, in a terminal:
+
+```text
+claude mcp add graph-me-maybe -- graphme mcp
+```
+
+Claude Desktop (`claude_desktop_config.json`) and Cursor (`~/.cursor/mcp.json`) take the same
+command:
+
+```json
+{ "mcpServers": { "graph-me-maybe": { "command": "graphme", "args": ["mcp"] } } }
+```
+
+A client reads only the workspaces switched on for it, in **Manage › Keys and model › Connect an
+MCP client**. Each is off until switched on there: what a client takes out -- passages, outlines,
+page images -- goes to the model that client uses. The same page, and the app's icon, switch MCP off
+for every workspace at once.
+
+The app keeps running when its window is closed, behind an icon in the menu bar (macOS) or the
+notification area (Windows), so a client reaches it with no window open; `graphme mcp` starts it
+when it is not running. The icon's menu opens the window, switches MCP on or off, starts the app at
+login (off until chosen) and quits it completely. A workspace other than the one open is read
+beside it, on its own Neo4j, and let go after five minutes nobody asks it; pages are drawn only for
+the one open (`open_workspace` first).
+
+The tools: `list_workspaces`, `search`, `ask` (the app's model writes the answer, at its cost),
+`list_documents`, `get_outline`, `read_node`, `linked_documents`, `get_page_image`, `add_folder`,
+`build_status`, `cancel_build`, `open_workspace`. Nothing through MCP deletes, resets or changes
+keys.
+
 ## The command line
 
 The CLI works on the same graph as the app. In a folder without a `.env`, it uses the installed app's
@@ -207,6 +240,7 @@ graphme export-corpus OUT           # import bundle (--dump / --json / --cypher)
 graphme xlsx-bundle WORKBOOK OUT    # draw one workbook into pages and their cell mapping
 graphme serve                       # the HTTP API and the web app
 graphme app                         # the app in a browser tab
+graphme mcp                         # an MCP server on stdio, over the running app
 ```
 
 ## The HTTP API

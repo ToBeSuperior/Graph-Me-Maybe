@@ -18,6 +18,8 @@ from graphme.server.state import Demo
 
 
 class FakeRag:
+    text_only = False
+
     def __init__(self, failure: Exception | None = None) -> None:
         self.asked: list[int] = []
         self.failure = failure

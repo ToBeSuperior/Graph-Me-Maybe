@@ -438,3 +438,42 @@ def test_a_windows_without_the_vc_runtime_is_told_so_before_anything_else() -> N
         assert dll in check, dll
     assert "Microsoft.VCRedist.2015+" in check and "aka.ms/vs/17/release/vc_redist" in check
     assert "Fail" in check  # an app that cannot start is not installed
+
+
+@posix
+def test_the_installer_ends_the_agent_and_its_window_by_their_pids(tmp_path: Path) -> None:
+    """The app keeps running behind its icon: the installer ends it through `server.json` --
+    the window, then the agent, which stops its Neo4j as it goes -- and waits for both. A pid
+    some other program took since is left alone."""
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "server.json").write_text(
+        '{"port": 8765, "pid": 4001, "version": "0.0.0", "token": "t", "window_pid": 4002}')
+    log = tmp_path / "kills"
+    script = (f'GRAPHME_INSTALL_LIB=1 . "{ROOT / "install.sh"}"; HOME_DIR="{home}";'
+              f' kill() {{ echo "$*" >> "{log}"; [ "$1" != -0 ]; }};'
+              ' ps() { case "$2" in 4001|4002) echo "python -m graphme.launcher";;'
+              ' *) echo other;; esac; };'
+              ' stop_app')
+    done = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    assert log.read_text().splitlines()[:2] == ["4002", "4001"]
+
+    (home / "server.json").write_text('{"port": 8765, "pid": 4003, "version": "0", "token": "t"}')
+    log.unlink()
+    done = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0 and not log.exists()
+
+
+def test_the_windows_installer_ends_the_agent_and_its_window_first() -> None:
+    text = (ROOT / "install.ps1").read_text()
+    stop = text[text.index("function Stop-App"):]
+    stop = stop[:stop.index("\n}\n")]
+    for needed in ("server.json", "window_pid", "taskkill", "/T"):
+        assert needed in stop, needed
+    install = text[text.index("function Install"):]
+    assert install.index("Stop-App") < install.index("uv tool install")
+    uninstall = _windows_uninstall()
+    assert uninstall.index("Stop-App") < uninstall.index("uv tool uninstall")
+    # Start at login goes with the app.
+    assert "CurrentVersion\\Run" in uninstall and "'Graph-Me-Maybe'" in uninstall

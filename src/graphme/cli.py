@@ -16,7 +16,7 @@ from graphme.application.corpus_build import (
     StepListener,
 )
 from graphme.application.embedded_documents import shown_name
-from graphme.config import load_settings
+from graphme.config import app_home, load_settings
 from graphme.runtime import create_browser_renderer
 from graphme.xlsx_bundle import XlsxBundleOrchestrator
 
@@ -75,6 +75,15 @@ def create_app(
     @app.callback()
     def main() -> None:
         pass
+
+    @app.command("mcp", short_help="An MCP server on stdio, over the running app.")
+    def mcp_command() -> None:
+        """For an MCP client to start: `claude mcp add graph-me-maybe -- graphme mcp`. It reaches
+        the app running in the background, starting it if none runs, and reads only the
+        workspaces switched on for MCP in the app."""
+        from graphme.mcp_server import run
+
+        run(app_home())
 
     @app.command("export-corpus",
                  short_help="The graph space for Neo4j: bundle, .dump, JSON or Cypher.")

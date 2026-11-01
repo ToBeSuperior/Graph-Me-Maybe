@@ -67,13 +67,16 @@ def build_app(demo: Demo, web: Path | None) -> FastAPI:
                       load=demo_settings, extra=samples(demo))
 
 
-def run(port: int, web: Path | None, *, on_ready: Callable[[], None] | None = None) -> None:
+def run(port: int, web: Path | None, *, on_ready: Callable[[], None] | None = None,
+        token: str | None = None) -> None:
     """The server with the samples on 127.0.0.1:`port`, settings from the working directory's
-    `.env`; `on_ready` is called once it answers."""
+    `.env`; `on_ready` is called once it answers. `token`: the agent's, which lets a client in
+    (`agent_file`)."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     settings = demo_settings()
     preflight_behind(settings)
     demo = make_demo(settings)
+    demo.agent_token = token
     demo.search_models.ensure_chosen()  # fetched behind on a first start; the page says how far
 
     def warm() -> None:

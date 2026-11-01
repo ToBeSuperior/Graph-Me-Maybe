@@ -46,6 +46,7 @@ from graphme.adapters.sources.box import Picked as BoxPicked
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import MAX_DOCUMENTS, GraphNotEmbedded, GraphRag
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, modified_at
+from graphme.api import GraphMe
 from graphme.application.embedded_documents import name_part
 from graphme.application.ingest import documents_at
 from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop, read_node_crop
@@ -172,8 +173,10 @@ def create_app(
         scheme, _, token = request.headers.get("authorization", "").partition(" ")
         sent = (token if scheme.lower() == "bearer" else "",  # schemes ignore case (RFC 7235)
                 request.cookies.get(KEY_COOKIE, ""))
-        if not any(given and hmac.compare_digest(given.encode(), key.encode())
-                   for given in sent):
+        # The agent's token too: what `graphme mcp` read in `server.json` (agent_file.py).
+        keys = [k for k in (key, demo.agent_token) if k]
+        if not any(given and hmac.compare_digest(given.encode(), k.encode())
+                   for given in sent for k in keys):
             raise HTTPException(401, "an API key is required (GRAPHME_API_KEY)",
                                 headers={"WWW-Authenticate": "Bearer"})
 
@@ -317,11 +320,25 @@ def create_app(
             return demo.workspace_registry().create(body.name)
 
     @v1.patch("/workspaces/{workspace}", response_model=api.Workspace)
-    def workspace_rename(workspace: str, body: api.WorkspaceName,
-                         request: Request) -> dict[str, str]:
+    def workspace_change(workspace: str, body: api.WorkspaceChange,
+                         request: Request) -> dict[str, Any]:
+        """A workspace renamed, or opened to MCP clients or closed to them."""
+        changing(request)
+        spaces = demo.workspace_registry()
+        with refused():
+            if body.name is not None:
+                spaces.rename(workspace, body.name)
+            if body.mcp is not None:
+                spaces.set_mcp(workspace, body.mcp)
+            return spaces.item(workspace)
+
+    @v1.put("/mcp", response_model=api.Workspaces)
+    def mcp_switch(body: api.McpSwitch, request: Request) -> dict[str, Any]:
+        """The one switch for every MCP client: off, `graphme mcp` reads nothing."""
         changing(request)
         with refused():
-            return demo.workspace_registry().rename(workspace, body.name)
+            demo.workspace_registry().set_mcp_enabled(body.enabled)
+        return listedworkspace_registry()
 
     @v1.post("/workspaces/{workspace}/open", response_model=api.Workspaces)
     def workspace_open(workspace: str, request: Request) -> dict[str, Any]:
@@ -400,6 +417,22 @@ def create_app(
         except Exception as error:  # noqa: BLE001 -- said to the caller
             raise HTTPException(503, f"cannot connect to the graph DB: {error}") from error
 
+    def beside(workspace: str | None) -> GraphMe | None:
+        """The graph a workspace other than the open one is read from (`Demo.reader`); None
+        for the open one. 404 for a workspace there is none of."""
+        graph = demo.reader(None)
+        try:
+            found = demo.reader(workspace)
+        except LookupError as error:
+            raise HTTPException(404, f"no workspace {workspace!r}") from error
+        except Exception as error:  # noqa: BLE001 -- said to the caller
+            raise HTTPException(503, f"cannot open the workspace's graph DB: {error}") from error
+        return None if found is graph else found
+
+    def space_of(workspace: str | None) -> Neo4jGraphSpace:
+        side = beside(workspace)
+        return opened() if side is None else side.graph_space()
+
     def unbuilt() -> None:
         if demo.build.state in BUILDING:
             raise HTTPException(409, "not while a graph is being built")
@@ -414,11 +447,19 @@ def create_app(
         return docs
 
     @v1.get("/documents", response_model=api.Library)
-    def library() -> dict[str, Any]:
+    def library(workspace: str | None = None) -> dict[str, Any]:
         """Every document a reader can open, in one list: those in the graph space first --
         each matched, by its file, to the server's own reading of it when there is one -- then
         the files held here that are not in the space (yet, or that failed). `space_ok` is
-        false when the graph DB cannot be reached; the rest is still listed."""
+        false when the graph DB cannot be reached; the rest is still listed. Another
+        workspace than the open one (`workspace`): the documents in its space alone."""
+        if (side := beside(workspace)) is not None:
+            documents, _ = side.graph_space().document_map()
+            return {"space_ok": True, "items": [
+                {"name": d["label"], "format": Path(d["label"]).suffix.lower().lstrip("."),
+                 "in_space": True, "document_id": d["id"], "file_id": None, "state": "idle",
+                 "modified": d.get("modified_at"), "web_url": d.get("web_url")}
+                for d in documents]}
         catalog = list(demo.catalog.items())  # other threads add to it while this reads
         reading = {str(Path(path).resolve()): doc for doc, path in catalog}
         # The same file reached by two paths -- uploaded here, built from its own folder --
@@ -477,10 +518,10 @@ def create_app(
         return {"deleted": document_id}
 
     @v1.get("/documents/{document_id}/graph", response_model=api.DocumentGraph)
-    def document_graph(document_id: str) -> dict[str, Any]:
+    def document_graph(document_id: str, workspace: str | None = None) -> dict[str, Any]:
         """One document of the space, with the passages it is cut into -- the outline draws
         each one's span."""
-        space = opened()
+        space = space_of(workspace)
         found = space.document_graph(document_id)
         if not found["nodes"]:
             raise HTTPException(404, "the document is not in the graph")
@@ -503,9 +544,9 @@ def create_app(
         return {key: value for key, value in records.items() if key not in ("chunks", "covers")}
 
     @v1.get("/graph/map", response_model=api.CorpusMap)
-    def graph_map() -> dict[str, Any]:
+    def graph_map(workspace: str | None = None) -> dict[str, Any]:
         """The documents in the space and how they are tied -- what the map draws."""
-        space = opened()
+        space = space_of(workspace)
         documents, links = space.document_map()
         similar = space.similar_links()
         # A map of thousands is drawn by nobody: the best-linked documents, and their lines.
@@ -747,9 +788,9 @@ def create_app(
 
     # Questions ------------------------------------------------------------------------------
 
-    def asked(request: api.Question, run: Callable[[GraphRag, str, int], T]) -> T:
+    def asked(request: api.Question, run: Callable[[GraphRag, str, int], T]) -> tuple[T, bool]:
         """A question and how many documents it asks for checked, then `run` on the graph
-        space's GraphRAG."""
+        space's GraphRAG -- and whether it searched by words alone (`GraphRag.text_only`)."""
         question = request.question.strip()
         if not question:
             raise HTTPException(400, "the question is empty")
@@ -761,13 +802,27 @@ def create_app(
         documents = asked_for if asked_for is not None else demo.settings.retrieval_documents
         if not 1 <= documents <= MAX_DOCUMENTS:
             raise HTTPException(400, f"documents must be between 1 and {MAX_DOCUMENTS}")
-        opened()
+        side = beside(request.workspace)
+        if side is None:
+            opened()
         try:
-            rag = demo.rag()
+            if side is None:
+                rag = demo.rag()
+            else:
+                with demo.siding:  # two first questions at once make one engine
+                    rag = side.rag()
         except ValueError as error:  # a key or the graph DB not configured
             raise HTTPException(503, str(error)) from error
         try:
-            return run(rag, question, documents)
+            try:
+                return run(rag, question, documents), rag.text_only
+            except GraphNotEmbedded:
+                # A workspace beside is not embedded again here -- opening it does that -- so
+                # what another search model embedded is searched by its words.
+                if side is None or rag.text_only:
+                    raise
+                rag.text_only = True
+                return run(rag, question, documents), True
         except (GraphNotEmbedded, Neo4jError, ServiceUnavailable, SessionExpired):
             raise  # the graph DB's, not the model's: the handlers say them (409, 500)
         except Exception as error:  # noqa: BLE001 -- said to the caller, not a crash
@@ -780,14 +835,17 @@ def create_app(
     def search(request: api.Question) -> dict[str, Any]:
         """What a question finds -- the passages and the documents linked to theirs, hop by
         hop -- with no answer written."""
-        found = asked(request, lambda rag, question, n: rag.find(question, documents=n))
-        return {"sources": [asdict(source) for source in found]}
+        found, text_only = asked(
+            request, lambda rag, question, n: rag.find(question, documents=n))
+        return {"sources": [asdict(source) for source in found], "text_only": text_only}
 
     @v1.post("/ask", response_model=api.Answer)
     def ask(request: api.Question) -> dict[str, Any]:
         """A question answered from the graph space, with the passages it was answered from."""
-        answer = asked(request, lambda rag, question, n: rag.ask(question, documents=n))
-        return {"answer": answer.text, "sources": [asdict(source) for source in answer.sources]}
+        answer, text_only = asked(
+            request, lambda rag, question, n: rag.ask(question, documents=n))
+        return {"answer": answer.text, "sources": [asdict(source) for source in answer.sources],
+                "text_only": text_only}
 
     # Jobs -----------------------------------------------------------------------------------
 
