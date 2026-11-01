@@ -52,3 +52,13 @@ def test_one_page_and_no_page_are_said_plainly() -> None:
 
     assert "page 5" in one.partition("\n")[0]
     assert "page" not in none.partition("\n")[0].replace("weekly-notes", "")
+
+
+def test_a_file_time_kept_as_seconds_is_written_as_a_date() -> None:
+    """The graph keeps when a file was changed as seconds since 1970, and the first ten
+    characters of that number reached the answer as the date."""
+    seconds = 1_932_858_000.5  # 2031-04-02 01:00 UTC
+    head = _item(_record(modified=seconds)).content.partition("\n")[0]  # type: ignore[arg-type]
+
+    assert "Modified: 2031-04-02" in head
+    assert "1932858000" not in head

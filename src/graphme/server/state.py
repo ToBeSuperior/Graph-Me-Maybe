@@ -382,9 +382,13 @@ class Demo:
 
     def reconfigure(self, settings: Settings) -> None:
         """New keys or model, taken up from the next reading and the next question. The graph
-        space is kept: what it is reached by is not among what changes."""
+        space is kept: what it is reached by is not among what changes. The settings a save
+        loads name no home, so where the app's own Neo4j and data live is carried over -- without
+        it the next workspace opened looked for a Neo4j at the default address."""
         searched_with = self.settings.embedding_provider
-        settings = settings.model_copy(update={"local_graph": self.settings.local_graph})
+        settings = settings.model_copy(update={
+            "local_graph": self.settings.local_graph, "local_neo4j": self.settings.local_neo4j,
+            "data_dir": self.settings.data_dir})
         self.settings = settings
         self.graph.settings = settings
         with self.opening_space:

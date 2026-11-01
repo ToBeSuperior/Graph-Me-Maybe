@@ -5,6 +5,19 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.51] - 2026-11-02
+
+### Fixed
+
+- Saving a key or the model in Keys and model no longer breaks workspaces. The settings a save
+  loaded named no home, so the app forgot its own Neo4j: the next workspace opened looked for a
+  Neo4j at the default address and failed, and the app could not leave the workspace it was on
+  until it was started again.
+- When a passage's file was changed reaches the answer as a date. The graph keeps it as seconds
+  since 1970, and the answer was handed the first ten digits of that number.
+- On a phone, the answer's title keeps its line: squeezed by the note beside it, it broke a
+  letter a line in Korean.
+
 ## [0.1.50] - 2026-11-01
 
 ### Added

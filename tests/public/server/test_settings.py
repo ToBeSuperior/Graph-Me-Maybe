@@ -396,3 +396,22 @@ def test_a_missing_key_is_said_by_what_it_is_for_not_by_one_provider_s_variable(
 
     assert any(p.startswith("The LLM API key is empty") for p in said)
     assert not any(key in p for p in said for key in keys)
+
+
+def test_a_settings_save_keeps_the_graph_db_the_app_runs(
+    page: Any, tmp_path: Path
+) -> None:
+    """New keys or a new model change nothing about where the graph is. The settings a save
+    loads say no home, so the app's own Neo4j was dropped from them, and the next workspace
+    opened looked for a Neo4j at the default address instead of starting its own."""
+    client, demo, _, _ = page
+    home, data = tmp_path / "home", tmp_path / "data"
+    demo.settings = demo.graph.settings = demo.settings.model_copy(
+        update={"local_neo4j": home, "data_dir": data})
+
+    said = client.put("/v1/settings", json={"values": {"GRAPHME_MODEL": "new-model"}})
+
+    assert said.status_code == 200, said.text
+
+    assert demo.settings.model == "new-model"
+    assert demo.settings.local_neo4j == home and demo.settings.data_dir == data

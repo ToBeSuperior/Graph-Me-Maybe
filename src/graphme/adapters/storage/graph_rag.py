@@ -26,6 +26,7 @@ import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import httpx
@@ -854,8 +855,15 @@ def _document_line(record: Mapping[str, Any]) -> str:
         first, last = pages[0], pages[-1]
         parts.append(f"page {first}" if first == last else f"pages {first}-{last}")
     if record.get("modified"):
-        parts.append(f"Modified: {str(record['modified'])[:10]}")
+        parts.append(f"Modified: {_day(record['modified'])}")
     return "[" + " | ".join(parts) + "]"
+
+
+def _day(modified: object) -> str:
+    """When a file was changed, as a date: the graph keeps it as seconds since 1970 (UTC)."""
+    if isinstance(modified, int | float):
+        return datetime.fromtimestamp(modified, UTC).date().isoformat()
+    return str(modified)[:10]
 
 
 def _composed(text: str) -> str:

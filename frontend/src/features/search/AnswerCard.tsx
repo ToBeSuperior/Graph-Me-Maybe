@@ -86,9 +86,10 @@ export function AnswerCard({ state, answer, error, byLabel, onCite, onHover, onR
   return (
     <section className="rounded-xl border border-line bg-panel" aria-live="polite">
       <header className="flex items-center gap-2 px-4 pt-3 pb-1">
-        <Sparkles className="size-4 text-accent" />
-        <h2 className="text-sm font-semibold">{t('answerTitle')}</h2>
-        <span className="text-xs text-faint">{t('answerNote')}</span>
+        <Sparkles className="size-4 shrink-0 text-accent" />
+        {/* the title keeps its line on a phone; the note beside it is what wraps */}
+        <h2 className="shrink-0 whitespace-nowrap text-sm font-semibold">{t('answerTitle')}</h2>
+        <span className="min-w-0 text-xs text-faint">{t('answerNote')}</span>
         <div className="ml-auto">
           {state === 'pending' && <Button size="sm" variant="ghost" onClick={onCancel}><Square className="size-3" />{t('stop')}</Button>}
           {(state === 'error' || state === 'off') && <Button size="sm" variant="ghost" onClick={onRetry}><RotateCw className="size-3" />{t(state === 'off' ? 'writeAnswer' : 'retry')}</Button>}
