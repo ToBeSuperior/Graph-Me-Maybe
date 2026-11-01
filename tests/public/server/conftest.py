@@ -18,6 +18,16 @@ from tests.fakes.documents import named_document as _doc
 SETTINGS = Settings(profile="test", embedding_provider="hash")
 
 
+@pytest.fixture(autouse=True)
+def _no_settling_later(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A build gives back what it read again 30 s, 2 and 10 minutes later, on a thread that
+    looks `online_only` and `evict` up when it wakes: left to run, it woke inside a later test
+    and gave that test's stand-ins its own files. A test that wants it sets its own times."""
+    from graphme.server import state
+
+    monkeypatch.setattr(state, "SETTLE_SECONDS", ())
+
+
 class FakeSpace:
     """The graph space, held in memory: what the build and the routes ask of it."""
 
