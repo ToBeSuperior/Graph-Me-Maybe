@@ -24,11 +24,13 @@ class FakeV1:
 
     def __init__(self) -> None:
         self.mcp_enabled = True
+        self.mcp_changes = False
         self.sent: list[tuple[str, str, Any]] = []
         self.nodes = 3
 
     def workspaces(self) -> dict[str, Any]:
-        return {"available": True, "active": "main", "mcp_enabled": self.mcp_enabled, "items": [
+        return {"available": True, "active": "main", "mcp_enabled": self.mcp_enabled,
+                "mcp_changes": self.mcp_changes, "items": [
             {"id": "main", "name": "Invented main", "mcp": True},
             {"id": "w-closed", "name": "Closed notes", "mcp": False},
             {"id": "w-side", "name": "Side notes", "mcp": True},
@@ -83,6 +85,18 @@ class FakeV1:
             return httpx.Response(200, json={"file_id": "file-1"})
         if path == "/v1/files/file-1/pages/1/image":
             return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
+        if path == "/v1/documents/doc-1" and method == "DELETE":
+            return httpx.Response(200, json={"deleted": "doc-1"})
+        if path == "/v1/workspaces/w-side" and method == "DELETE":
+            return httpx.Response(200, json=self.workspaces())
+        if path == "/v1/graph/reset":
+            return httpx.Response(200, json={"deleted": 19})
+        if path == "/v1/settings" and method == "GET":
+            return httpx.Response(200, json={"endpoint": "anthropic", "problems": [], "fields": [
+                {"env": "GRAPHME_MODEL", "secret": False, "set": True, "value": "invented-model"},
+                {"env": "ANTHROPIC_API_KEY", "secret": True, "set": True, "value": None}]})
+        if path == "/v1/settings" and method == "PUT":
+            return httpx.Response(200, json={"endpoint": "anthropic", "problems": [], "fields": []})
         if path == "/v1/documents/doc-1/open":
             return httpx.Response(200, json={"opened": "Invented memo.docx"})
         if path == "/v1/jobs/build":
@@ -283,3 +297,47 @@ def test_a_document_is_opened_in_its_own_app_on_this_machine(v1: FakeV1) -> None
 
     assert not refused and said(text) == {"opened": "Invented memo.docx"}
     assert ("POST", "http://127.0.0.1:1/v1/documents/doc-1/open?workspace=w-side", None) in v1.sent
+
+
+def test_changes_are_refused_until_switched_on(v1: FakeV1) -> None:
+    refused, text, _ = call(v1, "delete_document", document_id="doc-1")
+
+    assert refused and "Allow changes" in text
+    assert not any(method == "DELETE" for method, _, _ in v1.sent)
+
+
+def test_a_deletion_waits_for_the_user_s_yes_and_its_code(v1: FakeV1) -> None:
+    v1.mcp_changes = True
+    server = mcp_server.build_server(
+        httpx.Client(base_url="http://127.0.0.1:1", transport=httpx.MockTransport(v1)))
+
+    async def run() -> list[Any]:
+        async with create_connected_server_and_client_session(server) as session:
+            first = await session.call_tool("delete_document", {"document_id": "doc-1"})
+            asked = json.loads(first.content[0].text)
+            wrong = await session.call_tool("delete_document",
+                                            {"document_id": "doc-1", "confirm": "nope"})
+            done = await session.call_tool("delete_document",
+                                           {"document_id": "doc-1", "confirm": asked["confirm"]})
+            return [asked, json.loads(wrong.content[0].text), json.loads(done.content[0].text)]
+
+    asked, wrong, done = anyio.run(run)
+
+    assert "Invented memo.docx" in asked["would"] and asked["confirm"]
+    assert wrong.get("confirm") and wrong["confirm"] != asked["confirm"]
+    assert done == {"deleted": "doc-1"}
+    assert [url for method, url, _ in v1.sent if method == "DELETE"] == [
+        "http://127.0.0.1:1/v1/documents/doc-1"]
+
+
+def test_settings_are_read_and_changed_but_never_a_key(v1: FakeV1) -> None:
+    v1.mcp_changes = True
+    _, shown, _ = call(v1, "get_settings")
+    refused, text, _ = call(v1, "change_settings", values={"ANTHROPIC_API_KEY": "sk-invented"})
+    _, changed, _ = call(v1, "change_settings", values={"GRAPHME_MODEL": "invented-other"})
+
+    assert said(shown)["settings"] == {"GRAPHME_MODEL": "invented-model"}
+    assert refused and "ANTHROPIC_API_KEY" in text and "in the app" in text
+    assert ("PUT", "http://127.0.0.1:1/v1/settings",
+            {"values": {"GRAPHME_MODEL": "invented-other"}}) in v1.sent
+    assert not any(b and "sk-invented" in json.dumps(b) for _, _, b in v1.sent)

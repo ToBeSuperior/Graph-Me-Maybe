@@ -227,6 +227,7 @@ function McpClients() {
   const allow = (workspace: string, mcp: boolean) => act(() => call(api.PATCH('/v1/workspaces/{workspace}', {
     params: { path: { workspace } }, body: { mcp } })));
   const allowAll = (enabled: boolean) => act(() => call(api.PUT('/v1/mcp', { body: { enabled } })));
+  const allowChanges = (changes: boolean) => act(() => call(api.PUT('/v1/mcp', { body: { changes } })));
   const copy = async () => {
     await navigator.clipboard.writeText(MCP_COMMAND);
     setCopied(true);
@@ -261,6 +262,11 @@ function McpClients() {
           </label>
         ))}
       </fieldset>
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" className="mt-1 accent-[var(--accent)]" checked={data.mcp_changes}
+          disabled={!data.mcp_enabled} onChange={(e) => void allowChanges(e.target.checked)} />
+        <span>{t('mcpChanges')} <span className="block text-xs text-faint">{t('mcpChangesNote')}</span></span>
+      </label>
       {error && <p role="alert" className="text-xs text-danger-fg">{error}</p>}
       <Dialog open={asking !== null} onOpenChange={(on) => { if (!on) setAsking(null); }}>
         <DialogContent title={t('mcpNoticeTitle')} description={t('mcpNoticeBody')} closeLabel={t('close')}>

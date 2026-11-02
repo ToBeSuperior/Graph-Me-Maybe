@@ -2,7 +2,7 @@
 // invented documents, so the checks need no server, graph DB or model.
 import type { Page, Route } from '@playwright/test';
 
-interface Fake { found: { box: boolean; google: boolean; onedrive: boolean }; workspaces: { active: string; mcp_enabled: boolean; items: { id: string; name: string; mcp: boolean }[] }; opened: string[]; deletedWorkspaces: string[]; connected: { box: boolean; google: boolean; onedrive: boolean }; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number }
+interface Fake { found: { box: boolean; google: boolean; onedrive: boolean }; workspaces: { active: string; mcp_enabled: boolean; mcp_changes: boolean; items: { id: string; name: string; mcp: boolean }[] }; opened: string[]; deletedWorkspaces: string[]; connected: { box: boolean; google: boolean; onedrive: boolean }; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number }
 
 /** A job as `GET /v1/jobs` lists it, newest first. */
 type FakeJob = Record<string, unknown> & { id: string; kind: string; state: string };
@@ -38,7 +38,7 @@ export async function fakeApi(page: Page,
         fetching: { done: 319724160, total: 639448320 }, error: null },
       { name: 'korean', model: 'KURE-v1', size: 437779008, installed: true, chosen: false, fetching: null, error: null },
     ],
-    workspaces: { active: 'default', mcp_enabled: true, items: [{ id: 'default', name: 'Default', mcp: false }, { id: 'w2', name: 'Invented audits', mcp: false }] },
+    workspaces: { active: 'default', mcp_enabled: true, mcp_changes: false, items: [{ id: 'default', name: 'Default', mcp: false }, { id: 'w2', name: 'Invented audits', mcp: false }] },
     found: { box: boxDrive, google: googleDrive, onedrive: oneDrive }, opened: [], deletedWorkspaces: [],
     connected: { box: false, google: false, onedrive: false }, boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
     installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0 };
@@ -70,7 +70,7 @@ export async function fakeApi(page: Page,
       fake.workspaces.items.push(made);
       return json(route, made);
     }
-    if (path === '/v1/mcp' && method === 'PUT') { fake.workspaces.mcp_enabled = route.request().postDataJSON().enabled; return json(route, listed()); }
+    if (path === '/v1/mcp' && method === 'PUT') { Object.assign(fake.workspaces, Object.fromEntries(Object.entries({ mcp_enabled: route.request().postDataJSON().enabled, mcp_changes: route.request().postDataJSON().changes }).filter(([, v]) => v !== undefined))); return json(route, listed()); }
     const ws = path.match(/^\/v1\/workspaces\/([^/]+)(\/open)?$/);
     if (ws) {
       const item = fake.workspaces.items.find((i) => i.id === ws[1])!;

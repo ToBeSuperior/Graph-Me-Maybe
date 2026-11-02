@@ -451,6 +451,8 @@ class Workspaces(_Model):
     """The workspace open now."""
     mcp_enabled: bool = True
     """The one switch for all MCP clients; each workspace's own is kept while it is off."""
+    mcp_changes: bool = False
+    """Whether MCP clients may change things -- delete, reset, settings -- not only read."""
     items: list[Workspace] = Field(default_factory=list)
 
 
@@ -464,4 +466,6 @@ class WorkspaceChange(_Model):
 
 
 class McpSwitch(_Model):
-    enabled: bool
+    enabled: bool | None = None
+    changes: bool | None = None
+    """Whether a client may change things (delete, reset, settings), not only read."""

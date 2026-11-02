@@ -252,7 +252,8 @@ export interface paths {
         get?: never;
         /**
          * Mcp Switch
-         * @description The one switch for every MCP client: off, `graphme mcp` reads nothing.
+         * @description The switches for every MCP client: `enabled` off, `graphme mcp` reads nothing;
+         *     `changes` on, it may delete, reset and change settings as well.
          */
         put: operations["mcp_switch_v1_mcp_put"];
         post?: never;
@@ -1437,7 +1438,9 @@ export interface components {
         /** McpSwitch */
         McpSwitch: {
             /** Enabled */
-            enabled: boolean;
+            enabled?: boolean | null;
+            /** Changes */
+            changes?: boolean | null;
         };
         /** Opened */
         Opened: {
@@ -1673,6 +1676,11 @@ export interface components {
              * @default true
              */
             mcp_enabled: boolean;
+            /**
+             * Mcp Changes
+             * @default false
+             */
+            mcp_changes: boolean;
             /** Items */
             items?: components["schemas"]["Workspace"][];
         };

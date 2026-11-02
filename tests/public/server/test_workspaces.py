@@ -56,7 +56,7 @@ stopped: list[Path] = []
 def test_a_home_starts_with_its_own_graph_as_the_one_workspace(home: Path) -> None:
     said = Workspaces(home).listed()
 
-    assert said == {"active": FIRST, "mcp_enabled": True,
+    assert said == {"active": FIRST, "mcp_enabled": True, "mcp_changes": False,
                     "items": [{"id": FIRST, "name": "Default", "mcp": False}]}
     assert Workspaces(home).graph(FIRST) is None  # the graph where it always was
 

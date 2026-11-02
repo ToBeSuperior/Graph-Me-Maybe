@@ -204,6 +204,9 @@ test('an MCP client is connected with one command, and reads only the workspaces
   await page.getByRole('checkbox', { name: 'Default' }).click();
   await expect.poll(() => fake.workspaces.items[0].mcp).toBe(true);
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  // Changes are a switch of their own, off until switched on.
+  await page.getByRole('checkbox', { name: /변경 허용/ }).click();
+  await expect.poll(() => fake.workspaces.mcp_changes).toBe(true);
   // Off for all: every workspace refused, each one's own setting kept.
   await page.getByRole('checkbox', { name: /MCP 사용/ }).click();
   await expect.poll(() => fake.workspaces.mcp_enabled).toBe(false);

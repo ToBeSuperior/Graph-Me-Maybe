@@ -223,8 +223,15 @@ the one open (`open_workspace` first).
 The tools: `list_workspaces`, `search`, `ask` (the app's model writes the answer, at its cost),
 `list_documents`, `get_outline`, `read_node`, `linked_documents`, `get_page_image`,
 `open_document` (the original, in its own app on this computer), `add_folder`,
-`build_status`, `cancel_build`, `open_workspace`. Nothing through MCP deletes, resets or changes
-keys.
+`build_status`, `cancel_build`, `open_workspace`.
+
+Changing things is a switch of its own, **Allow changes**, off until switched on. On, a client
+may also `delete_document`, `delete_workspace`, `reset_graph`, `get_settings` and
+`change_settings`. Each deletion and reset is asked first: the first call says what would go and
+gives a code, and only a second call with that code does it, so a client has to put the question
+to you -- words inside a document cannot both ask for a deletion and agree to it. Keys and secrets
+are never read or changed through MCP, and an Aura upload, which needs its password, stays in the
+app.
 
 ## The command line
 

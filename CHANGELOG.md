@@ -5,6 +5,15 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.62] - 2026-11-02
+
+### Added
+
+- With **Allow changes** switched on (Manage › Keys and model, off by default), an MCP client can
+  delete a document or a workspace, empty a workspace's graph, and read and change settings other
+  than keys. A deletion or reset is asked first with a confirm code the client has to bring back
+  after you agree. Keys, secrets and Aura uploads stay in the app.
+
 ## [0.1.61] - 2026-11-02
 
 ### Added

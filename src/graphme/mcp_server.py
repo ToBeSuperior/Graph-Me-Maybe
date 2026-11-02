@@ -10,6 +10,8 @@ paged -- so a client takes it whole.
 """
 from __future__ import annotations
 
+import secrets
+import time
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +26,9 @@ NODE_CHARS = 4000
 LABEL_CHARS = 80
 OUTLINE_NODES = 400
 LIST_LIMIT = 50
+CONFIRM_SECONDS = 300.0
+CHANGES_OFF = ("Changing things through MCP is off: switch on Allow changes in Graph-Me-Maybe, "
+               "Manage > Keys and model")
 OFF = ("MCP is turned off in Graph-Me-Maybe: switch it on from its icon's menu, or in "
        "Manage > Keys and model")
 FINISHED = ("idle", "done", "cancelled", "error")
@@ -163,6 +168,32 @@ def build_server(client: httpx.Client) -> FastMCP:
         wid, _ = allowed(workspace)
         return _Outline(get(f"/v1/documents/{document_id}/graph", workspace=wid))
 
+    pending: dict[str, tuple[str, float]] = {}
+    """Changes asked for and not yet confirmed: code -> (what, until when)."""
+
+    def changing() -> dict[str, Any]:
+        listed = workspaces()
+        if not listed.get("mcp_changes"):
+            raise ToolError(CHANGES_OFF)
+        return listed
+
+    def unconfirmed(what: str, would: str, confirm: str | None) -> dict[str, Any] | None:
+        """None when `confirm` is the code this change was given and is still good; else what
+        it would do and a fresh code, to be shown to the user -- a document's own words cannot
+        both ask for a deletion and say yes to it."""
+        now = time.monotonic()
+        for code, (_, until) in list(pending.items()):
+            if until < now:
+                del pending[code]
+        if confirm and pending.get(confirm, ("", 0.0))[0] == what:
+            del pending[confirm]
+            return None
+        code = secrets.token_hex(3)
+        pending[code] = (what, now + CONFIRM_SECONDS)
+        return {"would": would, "confirm": code,
+                "next": "Tell the user exactly what would happen and ask. Only once they say yes, "
+                        "call again with this confirm code. It lasts five minutes."}
+
     @server.tool()
     def list_workspaces() -> dict[str, Any]:
         """Every workspace (a graph kept apart), whether MCP may read it, and the one open in
@@ -268,6 +299,84 @@ def build_server(client: httpx.Client) -> FastMCP:
         file_id = post(f"/v1/documents/{document_id}/file")["file_id"]
         return Image(data=_said(client.get(f"/v1/files/{file_id}/pages/{page}/image")),
                      format="png")
+
+    @server.tool()
+    def delete_document(document_id: str, confirm: str | None = None) -> dict[str, Any]:
+        """Delete a document from the workspace open in the app, with its outline, passages
+        and links (the file itself stays). Asks first: the first call returns what would be
+        deleted and a confirm code for the user to agree to."""
+        changing()
+        allowed(None)
+        outline = graph(document_id, None)
+        name = next((_label(n) for n in outline.nodes.values() if _kind(n) == "Document"), "")
+        if not name:
+            raise ToolError(f"no document {document_id!r} in the graph")
+        asked = unconfirmed(f"delete_document:{document_id}",
+                            f"Delete {name} from the open workspace's graph, with its outline, "
+                            "passages and links. The file itself is not touched.", confirm)
+        if asked:
+            return asked
+        deleted: dict[str, Any] = _said(client.delete(f"/v1/documents/{document_id}"))
+        return deleted
+
+    @server.tool()
+    def delete_workspace(workspace: str, confirm: str | None = None) -> dict[str, Any]:
+        """Delete a workspace and its graph for good (not the one open in the app). Asks first,
+        as delete_document does."""
+        listed = changing()
+        wid, open_one = allowed(workspace)
+        if open_one:
+            raise ToolError("the workspace open in the app cannot be deleted: open_workspace "
+                            "another first")
+        name = next(i["name"] for i in listed["items"] if i["id"] == wid)
+        asked = unconfirmed(f"delete_workspace:{wid}",
+                            f"Delete the workspace {name!r} and its whole graph, for good.",
+                            confirm)
+        if asked:
+            return asked
+        _said(client.delete(f"/v1/workspaces/{wid}"))
+        return {"deleted": name}
+
+    @server.tool()
+    def reset_graph(confirm: str | None = None) -> dict[str, Any]:
+        """Empty the graph of the workspace open in the app: every document, passage and link
+        deleted (the files stay). Asks first, as delete_document does."""
+        listed = changing()
+        allowed(None)
+        name = next((i["name"] for i in listed.get("items", [])
+                     if i["id"] == listed.get("active")), "the open workspace")
+        asked = unconfirmed("reset_graph", f"Delete every document in {name!r} from its graph.",
+                            confirm)
+        if asked:
+            return asked
+        reset: dict[str, Any] = post("/v1/graph/reset", {"confirm": True})
+        return reset
+
+    def editable() -> dict[str, Any]:
+        return get("/v1/settings")  # type: ignore[no-any-return]
+
+    @server.tool()
+    def get_settings() -> dict[str, Any]:
+        """The app's settings that change_settings can change -- model, endpoint, search model,
+        readings per page. Keys are never shown here."""
+        changing()
+        said = editable()
+        return {"provider": said.get("endpoint"), "problems": said.get("problems", []),
+                "settings": {f["env"]: f.get("value") for f in said["fields"]
+                             if not f["secret"]}}
+
+    @server.tool()
+    def change_settings(values: dict[str, str]) -> dict[str, Any]:
+        """Change settings get_settings lists (taken up at once). Keys and secrets are changed
+        in the app only, never through a client."""
+        changing()
+        known = {f["env"]: f["secret"] for f in editable()["fields"]}
+        refused = sorted(k for k in values if known.get(k, True))
+        if refused:
+            raise ToolError(f"{', '.join(refused)}: keys, secrets and unknown names are set in "
+                            "the app, Manage > Keys and model -- not through a client")
+        said = _said(client.put("/v1/settings", json={"values": values}))
+        return {"provider": said.get("endpoint"), "problems": said.get("problems", [])}
 
     @server.tool()
     def open_document(document_id: str, workspace: str | None = None) -> dict[str, Any]:

@@ -334,10 +334,15 @@ def create_app(
 
     @v1.put("/mcp", response_model=api.Workspaces)
     def mcp_switch(body: api.McpSwitch, request: Request) -> dict[str, Any]:
-        """The one switch for every MCP client: off, `graphme mcp` reads nothing."""
+        """The switches for every MCP client: `enabled` off, `graphme mcp` reads nothing;
+        `changes` on, it may delete, reset and change settings as well."""
         changing(request)
         with refused():
-            demo.workspace_registry().set_mcp_enabled(body.enabled)
+            spaces = demo.workspace_registry()
+            if body.enabled is not None:
+                spaces.set_mcp_enabled(body.enabled)
+            if body.changes is not None:
+                spaces.set_mcp_changes(body.changes)
         return listedworkspace_registry()
 
     @v1.post("/workspaces/{workspace}/open", response_model=api.Workspaces)

@@ -56,3 +56,13 @@ def test_the_switches_over_http_and_from_this_machine_only(workspace_demo: Demo)
     assert client.put("/v1/mcp", json={"enabled": True}, headers=other).status_code == 403
     assert client.patch(f"/v1/workspaces/{made['id']}", json={"mcp": False},
                         headers=other).status_code == 403
+
+
+def test_changes_through_mcp_are_off_until_switched_on_and_kept(tmp_path: Path) -> None:
+    spaces = Workspaces(tmp_path)
+    assert spaces.listed()["mcp_changes"] is False
+
+    spaces.set_mcp_changes(True)
+
+    assert Workspaces(tmp_path).listed()["mcp_changes"] is True
+    assert Workspaces(tmp_path).listed()["mcp_enabled"] is True  # the other switch kept

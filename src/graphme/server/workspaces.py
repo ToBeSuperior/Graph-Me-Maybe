@@ -84,6 +84,14 @@ class Workspaces:
             said["mcp_enabled"] = on
             self._write(said)
 
+    def set_mcp_changes(self, on: bool) -> None:
+        """Whether an MCP client may change things -- delete, reset, settings -- as well as read:
+        off until switched on."""
+        with self._lock:
+            said = self._read()
+            said["mcp_changes"] = on
+            self._write(said)
+
     def activate(self, workspace: str) -> None:
         with self._lock:
             said = self._read()
@@ -110,12 +118,13 @@ class Workspaces:
             if said.get("items"):
                 return {"active": str(said.get("active") or said["items"][0]["id"]),
                         "mcp_enabled": bool(said.get("mcp_enabled", True)),
+                        "mcp_changes": bool(said.get("mcp_changes", False)),
                         "items": [{"id": str(i["id"]), "name": str(i["name"]),
                                    "mcp": bool(i.get("mcp", False))}
                                   for i in said["items"]]}
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             pass
-        return {"active": FIRST, "mcp_enabled": True,
+        return {"active": FIRST, "mcp_enabled": True, "mcp_changes": False,
                 "items": [{"id": FIRST, "name": FIRST_NAME, "mcp": False}]}
 
     def _write(self, said: dict[str, Any]) -> None:
