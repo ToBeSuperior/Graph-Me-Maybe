@@ -5,6 +5,19 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.58] - 2026-11-02
+
+### Changed
+
+- The menu bar icon on macOS is the app's mark in the menu bar's own colour, light or dark,
+  instead of the coloured square shrunk.
+- Switching a workspace on for MCP shows the notice about the client's model the first time
+  only.
+
+### Fixed
+
+- An MCP refusal names where MCP is switched on: Manage › Keys and model, or the icon's menu.
+
 ## [0.1.57] - 2026-11-02
 
 ### Added

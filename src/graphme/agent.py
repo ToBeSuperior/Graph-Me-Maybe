@@ -256,8 +256,8 @@ class _Icon:
         def items() -> Iterator[Any]:
             return (item(entry) for entry in agent_menu(self.state))
 
-        picture = Image.open(Path(__file__).parent / "icons" / "AppIcon.ico") \
-            .convert("RGBA").resize((64, 64))
+        picture = _menu_bar_mark() if sys.platform == "darwin" else Image.open(
+            Path(__file__).parent / "icons" / "AppIcon.ico").convert("RGBA").resize((64, 64))
         self.icon = pystray.Icon("graph-me-maybe", picture, "Graph-Me-Maybe",
                                  menu=pystray.Menu(items))
         if sys.platform == "darwin":
@@ -268,11 +268,34 @@ class _Icon:
 
         def setup(icon: Any) -> None:
             icon.visible = True
+            if sys.platform == "darwin":
+                # A template image: macOS draws it in the menu bar's own colour, light or dark.
+                with contextlib.suppress(AttributeError):
+                    icon._icon_image.setTemplate_(True)
             while True:  # the workspace switched in the window, MCP switched off
                 time.sleep(STATE_EVERY_SECONDS)
                 self.refresh()
 
         self.icon.run(setup=setup)
+
+
+def _menu_bar_mark() -> Any:
+    """The app's mark -- three nodes and their links, as in logo.svg -- in black on nothing,
+    for a menu bar that colours it itself."""
+    from PIL import Image, ImageDraw
+
+    scale = 44 / 26
+    picture = Image.new("RGBA", (44, 44))
+    draw = ImageDraw.Draw(picture)
+
+    def at(x: float, y: float) -> tuple[float, float]:
+        return x * scale, y * scale
+
+    for end in ((17.5, 8), (16, 17.5)):
+        draw.line([at(8.5, 9), at(*end)], fill="black", width=3)
+    for x, y, r in ((8.5, 9, 3.2), (17.5, 8, 2.6), (16, 17.5, 3.2)):
+        draw.ellipse([at(x - r, y - r), at(x + r, y + r)], fill="black")
+    return picture
 
 
 def run_agent(home: Path) -> None:

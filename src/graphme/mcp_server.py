@@ -24,7 +24,8 @@ NODE_CHARS = 4000
 LABEL_CHARS = 80
 OUTLINE_NODES = 400
 LIST_LIMIT = 50
-OFF = "MCP is turned off in Graph-Me-Maybe: switch it on from its icon's menu"
+OFF = ("MCP is turned off in Graph-Me-Maybe: switch it on from its icon's menu, or in "
+       "Manage > Keys and model")
 FINISHED = ("idle", "done", "cancelled", "error")
 
 INSTRUCTIONS = """Graph-Me-Maybe keeps documents (PDF, Word, PowerPoint, Excel) as graphs: each
@@ -150,7 +151,7 @@ def build_server(client: httpx.Client) -> FastMCP:
         chosen = found[0]
         if not chosen.get("mcp"):
             raise ToolError(f"MCP may not read the workspace {chosen['name']!r}: switch it on "
-                            "in Graph-Me-Maybe's workspace menu")
+                            "in Graph-Me-Maybe, Manage > Keys and model")
         return chosen["id"], chosen["id"] == listed["active"]
 
     def graph(document_id: str, workspace: str | None) -> _Outline:

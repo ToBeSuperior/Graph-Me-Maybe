@@ -201,9 +201,12 @@ function SearchModels() {
 }
 
 export const MCP_COMMAND = 'claude mcp add graph-me-maybe -- graphme mcp';
+const NOTICED = 'graphme.mcpNoticed';
+const noticed = () => { try { return localStorage.getItem(NOTICED) === '1'; } catch { return false; } };
 
 /** What an MCP client is connected with, and which workspaces it may read: each off until
- * switched on here, the first time after the notice that what it takes goes to its model. */
+ * switched on here. The first switch on waits for the notice that what a client takes goes to
+ * its model; said once, it is not said again. */
 function McpClients() {
   const t = useT();
   const client = useQueryClient();
@@ -249,7 +252,11 @@ function McpClients() {
         {data.items.map((w) => (
           <label key={w.id} className="flex items-center gap-2 text-sm">
             <input type="checkbox" className="accent-[var(--accent)]" checked={w.mcp}
-              onChange={(e) => { if (e.target.checked) setAsking(w.id); else void allow(w.id, false); }} />
+              onChange={(e) => {
+                if (!e.target.checked) void allow(w.id, false);
+                else if (noticed()) void allow(w.id, true);
+                else setAsking(w.id);
+              }} />
             {w.name}
           </label>
         ))}
@@ -259,7 +266,12 @@ function McpClients() {
         <DialogContent title={t('mcpNoticeTitle')} description={t('mcpNoticeBody')} closeLabel={t('close')}>
           <div className="flex justify-end gap-2">
             <Button onClick={() => setAsking(null)}>{t('cancel')}</Button>
-            <Button variant="primary" onClick={() => { const w = asking; setAsking(null); if (w) void allow(w, true); }}>
+            <Button variant="primary" onClick={() => {
+              const w = asking;
+              setAsking(null);
+              try { localStorage.setItem(NOTICED, '1'); } catch { /* said again next time */ }
+              if (w) void allow(w, true);
+            }}>
               {t('mcpNoticeOk')}
             </Button>
           </div>

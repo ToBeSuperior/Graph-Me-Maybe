@@ -36,6 +36,13 @@ OneDrive/SharePoint through their desktop apps.
 - [ ] **Measure efficiency and performance on the latest GraphRAG benchmarks.** Record
       ingest time, model call count and tokens, and query latency, not only accuracy.
       Compare with other GraphRAG implementations under the same conditions.
+- [ ] **A team workspace.** A workspace kept in a folder on a shared drive (Box, Google Drive,
+      OneDrive/SharePoint), so a team opens the same graph. That folder is left out of what a
+      build reads, whatever folder above it is chosen. To decide first: a running Neo4j's store
+      and transaction logs cannot sit in a folder a sync client rewrites, and two machines cannot
+      open one graph at once (Community is a single writer) -- so the shared folder may hold a
+      snapshot (`.dump` or import bundle) that one member publishes and others open read-only,
+      with the live graph staying local.
 - [ ] **A blog for the public site** (left for later; site plan in
       `docs/superpowers/specs/2026-10-29-public-site-design.md`). Candidates: why plain RAG
       breaks on spreadsheets and slides; how it works, from a rendered page to the graph; the
