@@ -5,6 +5,15 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.64] - 2026-11-02
+
+### Changed
+
+- A chart or diagram drawn in a PDF's own lines and words, not pasted in as a picture, is
+  described like any picture: its values and labels are written out, so a question about what it
+  shows finds it, not only one about its title. The outline is shown the figure too. On the public
+  benchmarks, measured on 0.1.59: MMLongBench-Doc 72.0%, DocBench 85.0%.
+
 ## [0.1.63] - 2026-11-02
 
 ### Fixed
