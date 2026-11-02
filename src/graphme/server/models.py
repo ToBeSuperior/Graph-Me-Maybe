@@ -220,6 +220,11 @@ class Deleted(_Model):
     deleted: str
 
 
+class Opened(_Model):
+    opened: str
+    """The file's name, as it was opened."""
+
+
 # Questions ----------------------------------------------------------------------------------
 
 

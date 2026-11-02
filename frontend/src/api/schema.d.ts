@@ -457,6 +457,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/documents/{document_id}/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Original
+         * @description The file a document was read from, opened on this machine in the app that opens it
+         *     -- what an MCP client asks for when the user wants the file itself. From this machine
+         *     only: it opens a window on it.
+         */
+        post: operations["open_original_v1_documents__document_id__open_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/documents/{document_id}/file": {
         parameters: {
             query?: never;
@@ -1416,6 +1438,11 @@ export interface components {
         McpSwitch: {
             /** Enabled */
             enabled: boolean;
+        };
+        /** Opened */
+        Opened: {
+            /** Opened */
+            opened: string;
         };
         /** PageInfo */
         PageInfo: {
@@ -2379,6 +2406,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentGraph"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_original_v1_documents__document_id__open_post: {
+        parameters: {
+            query?: {
+                workspace?: string | null;
+            };
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Opened"];
                 };
             };
             /** @description Validation Error */

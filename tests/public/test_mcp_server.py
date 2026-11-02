@@ -83,6 +83,8 @@ class FakeV1:
             return httpx.Response(200, json={"file_id": "file-1"})
         if path == "/v1/files/file-1/pages/1/image":
             return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
+        if path == "/v1/documents/doc-1/open":
+            return httpx.Response(200, json={"opened": "Invented memo.docx"})
         if path == "/v1/jobs/build":
             return httpx.Response(202, json={"id": "job-1", "kind": "build", "state": "reading"})
         if path == "/v1/jobs":
@@ -274,3 +276,10 @@ def test_connect_reaches_a_running_agent_without_starting_one(tmp_path: Path) ->
                                 answers=lambda said: True)
 
     assert str(client.base_url) == "http://127.0.0.1:8766"
+
+
+def test_a_document_is_opened_in_its_own_app_on_this_machine(v1: FakeV1) -> None:
+    refused, text, _ = call(v1, "open_document", document_id="doc-1", workspace="Side notes")
+
+    assert not refused and said(text) == {"opened": "Invented memo.docx"}
+    assert ("POST", "http://127.0.0.1:1/v1/documents/doc-1/open?workspace=w-side", None) in v1.sent

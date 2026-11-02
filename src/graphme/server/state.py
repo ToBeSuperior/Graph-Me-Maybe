@@ -28,6 +28,7 @@ from typing import Any
 
 import httpx
 
+from graphme import processes
 from graphme.adapters.export.neo4j_admin import LocalNeo4jAdmin
 from graphme.adapters.export.neo4j_import import write_import_bundle
 from graphme.adapters.rendering.browser_office import RenderedPage
@@ -345,6 +346,8 @@ class Demo:
         self.client = httpx.Client(timeout=600.0)
         # Every image and every poll looks a document up here: every document a folder brought.
         self.catalog: dict[str, str] = {}
+        self.open_file: Callable[[Path], None] = processes.open_file
+        """How a document's original is opened on this machine (`open_original`)."""
         self.agent_token: str | None = None
         """The token the agent wrote in `server.json`: a client sending it is let in."""
         self.readers = ThreadPoolExecutor(max_workers=READERS, thread_name_prefix="read")
@@ -823,6 +826,25 @@ class Demo:
             with contextlib.suppress(OSError):  # not kept: drawn again next time
                 _keep_page(self.preview_dir, page, png, preview_limit(self.settings))
         return png
+
+    def open_original(self, path: str) -> str:
+        """The file a document was read from, opened in its own app on this machine, and the
+        name it is opened under. A file kept by a desktop drive is opened where it is (the drive
+        fetches it); one only a cloud drive's API holds is fetched to a copy of its own first,
+        kept so the app opening it can read it. FileNotFoundError: the file is gone."""
+        if "://" not in path:
+            local = Path(path)
+            if not local.is_file():
+                raise FileNotFoundError(path)
+            self.open_file(local)
+            return local.name
+        name = shown_name(Path(path).name)
+        folder = self.root / "opened" / hashlib.sha256(path.encode()).hexdigest()[:16]
+        folder.mkdir(parents=True, exist_ok=True)
+        with self.sources.open_copy(path) as copy:
+            shutil.copyfile(copy, folder / name)
+        self.open_file(folder / name)
+        return name
 
     def open_path(self, path: str) -> str:
         """A document on this machine, opened by its path, and its id. One kept under

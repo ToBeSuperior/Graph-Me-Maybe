@@ -527,6 +527,22 @@ def create_app(
             raise HTTPException(404, "the document is not in the graph")
         return {**found, "chunks": space.chunk_spans(document_id)}
 
+    @v1.post("/documents/{document_id}/open", response_model=api.Opened)
+    def open_original(document_id: str, request: Request,
+                      workspace: str | None = None) -> dict[str, str]:
+        """The file a document was read from, opened on this machine in the app that opens it
+        -- what an MCP client asks for when the user wants the file itself. From this machine
+        only: it opens a window on it."""
+        if not from_here(request):
+            raise HTTPException(403, "documents are opened only from this machine")
+        path = space_of(workspace).source_path(document_id)
+        if not path:
+            raise HTTPException(404, "the document is not in the graph")
+        try:
+            return {"opened": demo.open_original(path)}
+        except (FileNotFoundError, LookupError) as error:
+            raise HTTPException(404, f"its file is not where it was read from: {path}") from error
+
     @v1.post("/documents/{document_id}/file", response_model=api.PagesOf)
     def document_file(document_id: str) -> dict[str, str]:
         """The file that draws a document's pages, drawn again if this start has not: no

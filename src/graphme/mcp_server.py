@@ -270,6 +270,16 @@ def build_server(client: httpx.Client) -> FastMCP:
                      format="png")
 
     @server.tool()
+    def open_document(document_id: str, workspace: str | None = None) -> dict[str, Any]:
+        """Open a document's original file on the user's computer, in the app that opens it
+        (Word, Excel, PowerPoint, a PDF reader) -- when the user wants to see or edit the file
+        itself. A file kept only in a cloud drive is fetched first."""
+        wid, _ = allowed(workspace)
+        opened: dict[str, Any] = _said(client.post(
+            f"/v1/documents/{document_id}/open", params={"workspace": wid} if wid else None))
+        return opened
+
+    @server.tool()
     def add_folder(path: str) -> dict[str, Any]:
         """A folder or file on this machine read into the open workspace's graph, as the app's
         build does (it costs the model's calls); build_status says how far it is."""

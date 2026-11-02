@@ -5,6 +5,14 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.61] - 2026-11-02
+
+### Added
+
+- An MCP client can open a document's original on your computer, in the app that opens it
+  (Word, Excel, PowerPoint, a PDF reader): ask it to open the file it found. A file kept only in a
+  cloud drive is fetched first.
+
 ## [0.1.60] - 2026-11-02
 
 ### Changed

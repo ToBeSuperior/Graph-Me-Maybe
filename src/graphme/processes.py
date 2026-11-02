@@ -9,6 +9,7 @@ import subprocess
 import sys
 import webbrowser
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 CREATE_NO_WINDOW = 0x08000000  # Windows' own value; `subprocess` names it only on Windows
@@ -30,6 +31,15 @@ def popen(args: Any, **kwargs: Any) -> subprocess.Popen[Any]:
     if sys.platform == "win32":
         kwargs.setdefault("creationflags", CREATE_NO_WINDOW)
     return subprocess.Popen(args, **kwargs)
+
+
+def open_file(path: Path) -> None:
+    """`path` opened in the app this machine opens it with: Word, Excel, a PDF reader."""
+    if sys.platform == "win32":  # pragma: no cover -- Windows only
+        os.startfile(path)  # type: ignore[attr-defined,unused-ignore]
+    else:
+        popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)],
+              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def open_in_browser(

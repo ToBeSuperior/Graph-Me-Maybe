@@ -221,7 +221,8 @@ beside it, on its own Neo4j, and let go after five minutes nobody asks it; pages
 the one open (`open_workspace` first).
 
 The tools: `list_workspaces`, `search`, `ask` (the app's model writes the answer, at its cost),
-`list_documents`, `get_outline`, `read_node`, `linked_documents`, `get_page_image`, `add_folder`,
+`list_documents`, `get_outline`, `read_node`, `linked_documents`, `get_page_image`,
+`open_document` (the original, in its own app on this computer), `add_folder`,
 `build_status`, `cancel_build`, `open_workspace`. Nothing through MCP deletes, resets or changes
 keys.
 
