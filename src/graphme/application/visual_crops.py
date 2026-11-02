@@ -34,6 +34,17 @@ VISUAL_TYPES = (NodeType.TABLE, NodeType.PIVOT_TABLE, NodeType.CHART, NodeType.I
 """What is read as a picture: cropped, captioned, and able to hold other units. The one
 definition -- three modules each kept their own copy of it."""
 CONTAINER_TYPES = {NodeType.TABLE, NodeType.PIVOT_TABLE}
+FIGURE_LEADER_KEY = "crop_widened_by"
+"""Set on the unit a figure's crop was widened around. Words that carry it lead a figure drawn
+in vectors -- a chart or a diagram, which never becomes a node of its own -- and are read as
+that figure: captioned, and shown to the outline with its crop."""
+
+
+def leads_a_figure(node: GraphNode) -> bool:
+    """Words standing for a figure the page drew around them, not a visual of their own."""
+    return node.type not in VISUAL_TYPES and bool(node.metadata.get(FIGURE_LEADER_KEY))
+
+
 FIGURE_TYPES = {NodeType.IMAGE, NodeType.CHART}
 """What a page draws lines around: a diagram's frame and its arrows belong to the figure,
 never to a table, whose own rules already say what its cells hold."""

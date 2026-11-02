@@ -119,13 +119,17 @@ def front(pid: int) -> bool:
     """The window of process `pid` brought to the front; False when it has none to bring."""
     try:
         if sys.platform == "darwin":
-            from AppKit import (  # type: ignore[import-not-found,import-untyped,unused-ignore]
-                NSApplicationActivateIgnoringOtherApps,
-                NSRunningApplication,
-            )
+            import AppKit  # type: ignore[import-not-found,import-untyped,unused-ignore]
 
-            app = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
-            return bool(app and app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps))
+            app = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+            if app is None:
+                return False
+            # macOS 14 lets an app come forward only when the app in front yields to it: the
+            # icon's menu, just clicked, is what is in front.
+            me = AppKit.NSApplication.sharedApplication()
+            if hasattr(me, "yieldActivationToApplication_"):
+                me.yieldActivationToApplication_(app)
+            return bool(app.activateWithOptions_(AppKit.NSApplicationActivateAllWindows))
         if sys.platform == "win32":  # pragma: no cover -- Windows only
             return _front_windows(pid)
     except Exception:  # noqa: BLE001 -- a new window, then
@@ -160,22 +164,41 @@ def _front_windows(pid: int) -> bool:  # pragma: no cover -- Windows only
 def _show(home: Path) -> Callable[[str], bool]:
     from graphme.launcher import show_window
 
-    def closing(window: Any) -> None:
-        if first_close(home):
-            try:
-                window.create_confirmation_dialog("Graph-Me-Maybe", BACKGROUND_NOTICE)
-            except Exception:  # noqa: BLE001 -- told nothing, the window still closes
-                log.exception("could not say the app keeps running")
+    return lambda url: show_window(url, home / "webview")
 
-    return lambda url: show_window(url, home / "webview", on_closing=closing)
+
+def _tell(text: str) -> None:
+    """`text` in a dialog of the system's own, in a process of its own, the window already gone.
+    Asked of the closing window, the dialog waited on the thread closing it and the window
+    froze; waited for here, the closed window stayed drawn until it was answered."""
+    try:
+        if sys.platform == "darwin":
+            quoted = text.replace("\\", "\\\\").replace('"', '\\"')
+            processes.popen(["osascript", "-e", f'display dialog "{quoted}" buttons {{"OK"}} '
+                             'default button 1 with title "Graph-Me-Maybe" with icon note'],
+                            start_new_session=True)
+        elif sys.platform == "win32":  # pragma: no cover -- Windows only
+            processes.popen([_python(), "-c", "import ctypes, sys; ctypes.windll.user32."
+                             "MessageBoxW(None, sys.argv[1], 'Graph-Me-Maybe', 0x40)", text])
+    except Exception:  # noqa: BLE001 -- told nothing; the app runs on all the same
+        log.exception("could not say the app keeps running")
 
 
 def open_window(
     home: Path, *, connect: Callable[[Path], httpx.Client] = agent_file.connect,
     show: Callable[[str], bool] | None = None, front: Callable[[int], bool] = front,
+    tell: Callable[[str], None] = _tell,
 ) -> None:
     """The app's window on the agent -- started first when none runs -- until it is closed;
-    one already open is brought forward instead."""
+    one already open is brought forward instead. Closed the first time, it says the app keeps
+    running behind its icon."""
+    if sys.platform == "darwin" and show is None:
+        # The window is the app: it checks in with macOS before the agent it starts does, or the
+        # agent is taken for the app and opening the app again only wakes the agent.
+        with contextlib.suppress(ImportError):
+            import AppKit  # type: ignore[import-not-found,import-untyped,unused-ignore]
+
+            AppKit.NSApplication.sharedApplication()
     connect(home).close()
     said = read_server_file(home)
     if said is None:
@@ -185,10 +208,13 @@ def open_window(
     url = f"http://127.0.0.1:{said.port}"
     agent_file.set_window_pid(home, os.getpid())
     try:
-        if not (show or _show(home))(url):
+        shown = (show or _show(home))(url)
+        if not shown:
             processes.open_in_browser(url)  # no webview here (Linux): the browser, once
     finally:
         agent_file.set_window_pid(home, None)
+    if shown and first_close(home):
+        tell(BACKGROUND_NOTICE)
 
 
 def _open_app(home: Path) -> None:
@@ -219,7 +245,10 @@ class _Icon:
     def act(self, action: str) -> None:
         try:
             if action == "open":
-                _open_app(self.home)
+                said = read_server_file(self.home)
+                if not (said and said.window_pid and pid_alive(said.window_pid)
+                        and front(said.window_pid)):
+                    _open_app(self.home)
             elif action == "mcp":
                 self.client.put("/v1/mcp", json={"enabled": not self.state.mcp_enabled})
             elif action == "login":

@@ -25,7 +25,7 @@ from graphme.application.page_units import (
     units_by_page,
 )
 from graphme.application.progress import Progress
-from graphme.application.visual_crops import VISUAL_TYPES
+from graphme.application.visual_crops import VISUAL_TYPES, leads_a_figure
 from graphme.domain.enums import EdgeType, EvidenceKind, NodeType
 from graphme.domain.ids import stable_id
 from graphme.domain.models import (
@@ -68,7 +68,14 @@ def caption_visuals(
 ) -> ExtractedDocument:
     """Add a caption node for every visual the pages show."""
     under = _headings_above(extracted)
-    by_page = units_by_page(extracted, pages, kinds=VISUAL_TYPES, page_of=page_of)
+    # A figure drawn in vectors is described through the words that lead it.
+    by_page = {
+        index: found
+        for index, units in units_by_page(
+            extracted, pages, kinds=(*VISUAL_TYPES, NodeType.TEXT_CHUNK), page_of=page_of
+        ).items()
+        if (found := tuple(n for n in units if n.type in VISUAL_TYPES or leads_a_figure(n)))
+    }
     jobs: list[_Job] = [
         (page, batch, {node.id: crops[node.id] for node in batch}, part)
         for page in pages
@@ -107,6 +114,8 @@ def caption_visuals(
         by_id = {node.id: node for node in described}
         for caption in answer.captions if answer is not None else ():
             if caption.decorative:
+                if leads_a_figure(by_id[caption.subject_id]):
+                    continue  # the file's own words: whether they are noise is the outline's call
                 # Seen up close, it carries nothing: dropped as the outline pass drops one,
                 # so its words never become a passage's words. The outline pass is asked the
                 # same of the whole page and misses an icon that has a word printed on it.

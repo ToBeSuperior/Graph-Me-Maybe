@@ -18,7 +18,12 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from graphme.application.unit_placement import UnitPlacer
-from graphme.application.visual_crops import CONTAINER_TYPES, CROP_ASSET_KEY, crop_box
+from graphme.application.visual_crops import (
+    CONTAINER_TYPES,
+    CROP_ASSET_KEY,
+    FIGURE_LEADER_KEY,
+    crop_box,
+)
 from graphme.domain.enums import NodeType
 from graphme.domain.models import ExtractedDocument, GraphNode, HierarchyFigureGroup
 from graphme.ports.storage import AssetStore
@@ -138,7 +143,7 @@ def _reshaped(
                     CROP_ASSET_KEY: asset_hash,
                     "crop_bbox": list(box),
                     # The first cut was measured; this one is what the page said.
-                    "crop_widened_by": "figure_parts",
+                    FIGURE_LEADER_KEY: "figure_parts",
                 }
             }
         )

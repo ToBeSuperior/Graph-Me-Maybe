@@ -53,7 +53,7 @@ def test_the_window_opens_on_the_running_agent_and_starts_none(tmp_path: Path) -
         return httpx.Client(base_url=f"http://127.0.0.1:{said.port}")
 
     agent.open_window(tmp_path, connect=connect, show=lambda url: shown.append(url) or True,
-                      front=lambda pid: False)
+                      front=lambda pid: False, tell=lambda text: None)
 
     assert shown == ["http://127.0.0.1:8799"]
     # Closed: the agent's file says no window again, and keeps the rest.
@@ -133,3 +133,25 @@ def test_start_at_login_on_windows_is_a_run_value() -> None:
     login_item.disable(platform="win32", registry=registry)
     login_item.disable(platform="win32", registry=registry)  # already off: nothing to do
     assert not login_item.enabled(platform="win32", registry=registry)
+
+
+def test_the_first_close_is_told_after_the_window_is_gone_and_once(tmp_path: Path) -> None:
+    # Told from the window's own closing handler, the dialog waited on the thread that was
+    # closing the window, and the window froze.
+    agent_file.write_server_file(tmp_path, port=8799, token="t")
+    told: list[str] = []
+    events: list[str] = []
+
+    def show(url: str) -> bool:
+        events.append("shown")
+        return True
+
+    def tell(text: str) -> None:
+        events.append("told")
+        told.append(text)
+
+    for _ in range(2):
+        agent.open_window(tmp_path, connect=lambda home: httpx.Client(), show=show,
+                          front=lambda pid: False, tell=tell)
+
+    assert events == ["shown", "told", "shown"] and told == [agent.BACKGROUND_NOTICE]

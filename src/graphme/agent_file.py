@@ -135,10 +135,15 @@ def start_agent(home: Path) -> None:
     """The app started in the background (its icon appears), apart from this process."""
     # A session of its own: the client ending `graphme mcp` does not end the app.
     detached = {} if sys.platform == "win32" else {"start_new_session": True}
-    popen([sys.executable, "-m", "graphme.launcher", "--agent"],
-          env={**os.environ, "GRAPHME_HOME": str(home)},
-          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-          **detached)
+    home.mkdir(parents=True, exist_ok=True)
+    with open(home / "app.log", "ab") as log:  # what it says, where the window's goes
+        # Not as the app: macOS gives the window the app's bundle id in __CFBundleIdentifier,
+        # and the agent that inherited it was taken for the app -- opening the app again from
+        # the Dock or the Applications folder only woke the agent, and no window came.
+        env = {k: v for k, v in os.environ.items() if k != "__CFBundleIdentifier"}
+        popen([sys.executable, "-m", "graphme.launcher", "--agent"],
+              env={**env, "GRAPHME_HOME": str(home)},
+              stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **detached)
 
 
 def answers(said: ServerFile) -> bool:

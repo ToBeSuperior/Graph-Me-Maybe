@@ -41,7 +41,7 @@ from graphme.application.unit_placement import (
     NormalizedBoxPlacer,
     UnitPlacer,
 )
-from graphme.application.visual_crops import read_node_crop
+from graphme.application.visual_crops import leads_a_figure, read_node_crop
 from graphme.domain.enums import FLOW_FORMATS, DocumentFormat, NodeType
 from graphme.domain.models import (
     ExtractedDocument,
@@ -73,13 +73,14 @@ def unit_crops(
     nodes: Mapping[str, GraphNode],
     asset_store: AssetStore,
 ) -> dict[str, bytes]:
-    """The stored crop of every picture in the scope, keyed by the unit's id."""
+    """The stored crop of every picture in the scope, and of the words leading a figure drawn
+    in vectors (its title says what it is, not what it shows), keyed by the unit's id."""
     crops: dict[str, bytes] = {}
     for unit in units:
-        if unit.node_type not in PICTURE_TYPES:
-            continue
         node = nodes.get(unit.id)
-        crop = None if node is None else read_node_crop(node, asset_store=asset_store)
+        if node is None or (unit.node_type not in PICTURE_TYPES and not leads_a_figure(node)):
+            continue
+        crop = read_node_crop(node, asset_store=asset_store)
         if crop is not None:
             crops[unit.id] = crop
     return crops

@@ -77,11 +77,9 @@ def running(port: int, home: Path, *, get: Callable[..., Any] = httpx.get) -> bo
         return False
 
 
-def show_window(url: str, storage: Path,
-                on_closing: Callable[[Any], None] | None = None) -> bool:
+def show_window(url: str, storage: Path) -> bool:
     """The page in a window of its own -- Edge WebView2 on Windows, WebKit on macOS -- until it
-    is closed; `on_closing` is handed the window as it closes. False when there is none to show
-    it in (Linux and WSL install no webview)."""
+    is closed. False when there is none to show it in (Linux and WSL install no webview)."""
     try:
         import webview  # type: ignore[import-not-found,unused-ignore]  # not on Linux
     except ImportError:
@@ -110,8 +108,6 @@ def show_window(url: str, storage: Path,
         # own -- would outlive it.
         if window is not None:
             window.events.closed += stop_started
-            if on_closing is not None:
-                window.events.closing += lambda: on_closing(window)
         # Kept between runs, as a browser keeps them: the theme, the language, an API key.
         webview.start(private_mode=False, storage_path=str(storage))
     except Exception:  # noqa: BLE001 -- no WebView2 runtime, no GUI session

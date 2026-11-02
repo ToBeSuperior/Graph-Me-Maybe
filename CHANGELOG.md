@@ -5,6 +5,17 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.59] - 2026-11-02
+
+### Fixed
+
+- Closing the window the first time no longer freezes it: the notice that the app keeps running
+  is shown once the window is gone.
+- Opening the app again from the Dock or the Applications folder after closing its window opens
+  a window; it only woke the app running in the background.
+- Open the app in the icon's menu brings the open window to the front.
+- The background app writes its log to `app.log` in the app's folder.
+
 ## [0.1.58] - 2026-11-02
 
 ### Changed

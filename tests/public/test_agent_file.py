@@ -59,3 +59,18 @@ def test_an_agent_removes_its_own_file_and_leaves_another_s(tmp_path: Path) -> N
 def test_this_process_is_alive_and_a_made_up_pid_is_not() -> None:
     assert agent_file.pid_alive(os.getpid())
     assert not agent_file.pid_alive(2**22 + 12345)
+
+
+def test_the_agent_is_not_started_as_the_app_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Started from the window, which macOS launched as the app, the agent inherited the app's
+    # bundle id and was registered as the app: opening the app again only woke the agent.
+    started: list[dict[str, str]] = []
+    monkeypatch.setenv("__CFBundleIdentifier", "io.github.tobesuperior.graph-me-maybe")
+    monkeypatch.setattr(agent_file, "popen", lambda args, **kw: started.append(kw["env"]))
+
+    agent_file.start_agent(tmp_path)
+
+    assert started and "__CFBundleIdentifier" not in started[0]
+    assert started[0]["GRAPHME_HOME"] == str(tmp_path)
