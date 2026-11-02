@@ -28,11 +28,15 @@ OFF = ("MCP is turned off in Graph-Me-Maybe: switch it on from its icon's menu, 
        "Manage > Keys and model")
 FINISHED = ("idle", "done", "cancelled", "error")
 
-INSTRUCTIONS = """Graph-Me-Maybe keeps documents (PDF, Word, PowerPoint, Excel) as graphs: each
-document's outline as the page reads, the passages it is cut into, and the documents it cites.
-Start with `search`; read a document's outline (`get_outline`) and a part of it (`read_node`)
-by the ids the answers give. Workspaces are graphs kept apart; each is read only once switched
-on for MCP in the app."""
+INSTRUCTIONS = """Graph-Me-Maybe holds the user's own work documents -- specifications,
+procedures, reports, records, minutes, price lists, contracts; PDF, Word, PowerPoint and Excel --
+as graphs: each document's outline as the page reads, the passages it is cut into, and the
+documents it cites. When a question could be answered from the user's or their company's
+documents -- a figure, a rule, a decision, what a document says -- search here first, whether or
+not Graph-Me-Maybe is named, and answer from what the tools return, naming the files. Start with
+`search`; read a document's outline (`get_outline`) and a part of it (`read_node`) by the ids
+the answers give. Workspaces are graphs kept apart; each is read only once switched on for MCP
+in the app."""
 
 
 def _cut(text: str, at: int) -> str:
@@ -64,8 +68,9 @@ def _label(node: dict[str, Any]) -> str:
 
 
 def _page(node: dict[str, Any]) -> int | None:
+    """The page a node is drawn on, numbered as the app numbers pages: from 1."""
     page = node["properties"].get("meta_page")
-    return int(page) + 1 if page is not None else None
+    return int(page) if page is not None else None
 
 
 class _Outline:
@@ -169,9 +174,10 @@ def build_server(client: httpx.Client) -> FastMCP:
 
     @server.tool()
     def search(question: str, top_k: int = 5, workspace: str | None = None) -> dict[str, Any]:
-        """The passages that answer a question, best first, top_k documents' worth, each with
-        the documents linked to its own (cites, cited_by, similar). No model writes an answer:
-        read the passages, then get_outline / read_node for more."""
+        """Search the user's own documents: the passages that answer a question, best first,
+        top_k documents' worth, each with the documents linked to its own (cites, cited_by,
+        similar). Use it for any question their files could answer. No answer is written: read
+        the passages, then get_outline / read_node for more."""
         wid, _ = allowed(workspace)
         found = post("/v1/search", {"question": question, "documents": top_k, "workspace": wid})
         return {"text_only": found.get("text_only", False), "sources": [
@@ -260,7 +266,7 @@ def build_server(client: httpx.Client) -> FastMCP:
             raise ToolError("pages are drawn only for the workspace open in the app: "
                             "open_workspace first")
         file_id = post(f"/v1/documents/{document_id}/file")["file_id"]
-        return Image(data=_said(client.get(f"/v1/files/{file_id}/pages/{page - 1}/image")),
+        return Image(data=_said(client.get(f"/v1/files/{file_id}/pages/{page}/image")),
                      format="png")
 
     @server.tool()

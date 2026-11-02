@@ -40,7 +40,7 @@ class FakeV1:
         nodes = [{"id": "doc-1", "labels": ["DocNode", "Document"],
                   "properties": {"label": "Invented memo.docx"}}]
         nodes += [{"id": f"n{i}", "labels": ["DocNode", "TextChunk"],
-                   "properties": {"text": f"Invented line {i}", "meta_page": 0}}
+                   "properties": {"text": f"Invented line {i}", "meta_page": 1}}
                   for i in range(self.nodes)]
         # n0 under the document, every other node under n0
         rels = [{"id": "r0", "type": "PARENT_OF", "start": "doc-1", "end": "n0", "properties": {}}]
@@ -81,7 +81,7 @@ class FakeV1:
                 "similar": [{"from": "doc-2", "to": "doc-3", "score": 0.8}]})
         if path == "/v1/documents/doc-1/file":
             return httpx.Response(200, json={"file_id": "file-1"})
-        if path == "/v1/files/file-1/pages/0/image":
+        if path == "/v1/files/file-1/pages/1/image":
             return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
         if path == "/v1/jobs/build":
             return httpx.Response(202, json={"id": "job-1", "kind": "build", "state": "reading"})

@@ -5,6 +5,18 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.60] - 2026-11-02
+
+### Changed
+
+- An MCP client searches Graph-Me-Maybe for any question your documents could answer, without
+  being told to use it.
+
+### Fixed
+
+- Page numbers through MCP match the app's: a slide deck's first slide was read as page 2, and
+  asking for page 1 found nothing.
+
 ## [0.1.59] - 2026-11-02
 
 ### Fixed
