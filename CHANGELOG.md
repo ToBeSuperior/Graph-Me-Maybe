@@ -5,6 +5,13 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.63] - 2026-11-02
+
+### Fixed
+
+- A workbook with a chart by date (days along the axis) is read; the whole file was refused as
+  unreadable.
+
 ## [0.1.62] - 2026-11-02
 
 ### Added

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -164,6 +165,11 @@ def _drawing_member_data(component: DrawingComponent) -> list[dict[str, JsonValu
         }
         for member in component.members
     ]
+
+
+def _plain(value: object) -> object:
+    """A cell's value as a node's metadata may hold it: a date or a time as ISO text."""
+    return value.isoformat() if isinstance(value, (dt.date, dt.time)) else value
 
 
 class ExcelExtractor:
@@ -1458,9 +1464,11 @@ class ExcelExtractor:
         target = sheet.parent[sheet_name]
         fallback_target = fallback.parent[sheet_name] if fallback is not None else None
         return [
-            cell.value
-            if cell.value is not None or fallback_target is None
-            else fallback_target.cell(row=cell.row, column=cell.column).value
+            _plain(
+                cell.value
+                if cell.value is not None or fallback_target is None
+                else fallback_target.cell(row=cell.row, column=cell.column).value
+            )
             # A range of one cell is one cell to `target[...]`, not rows of cells.
             for row in target.iter_rows(*_bounds(cell_ref))
             for cell in row
