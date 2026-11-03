@@ -38,6 +38,8 @@ from graphme.adapters.vision.prompts import (
     REFERENCE_SYSTEM_PROMPT,
     SCAN_SCHEMA_NAME,
     SCAN_SYSTEM_PROMPT,
+    TABLE_CHECK_SCHEMA_NAME,
+    TABLE_CHECK_SYSTEM_PROMPT,
 )
 from graphme.domain.ids import canonical_json, sha256_bytes
 from graphme.domain.models import (
@@ -361,6 +363,11 @@ class _ScanBlock(BaseModel):
     y1: float
 
 
+class _TableCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["table", "layout"]
+
+
 class _ScanAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid")
     has_text: bool
@@ -608,6 +615,20 @@ class ChatCompletionsVLMAdapter:
             user_content=[{"type": "text", "text": "Read this page."}, image_part(image)],
             read=lambda generated: _ScanAnswer.model_validate(generated).to_scanned_page(),
             failure="the model endpoint returned a malformed scanned-page response",
+        )
+
+    def is_a_table(self, image: bytes) -> bool:
+        """Whether the region outlined on the page is a table, not the page's layout."""
+        if not image:
+            raise ValueError("page image must not be empty")
+        return self._asked_until_answered(
+            schema_name=TABLE_CHECK_SCHEMA_NAME,
+            schema=strict_response_schema(_TableCheck),
+            system=TABLE_CHECK_SYSTEM_PROMPT,
+            user_content=[{"type": "text", "text": "Is the region outlined in red a table?"},
+                          image_part(image)],
+            read=lambda generated: _TableCheck.model_validate(generated).kind == "table",
+            failure="the model endpoint returned a malformed table check",
         )
 
     def group_page_units(

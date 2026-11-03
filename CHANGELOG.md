@@ -5,6 +5,26 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.65] - 2026-11-04
+
+### Changed
+
+- Pictures cut from pages (tables, charts, photographs, scans) are kept as WebP: lossy for
+  photographs, lossless for text and rules, so tables stay exact. The app's folder grows much
+  more slowly; on the public benchmarks the stored index went from 3.3 to 1.2 times the
+  documents' size (MMLongBench-Doc) and from 8.1 to 6.3 times (DocBench). Pictures kept before
+  are still read.
+- A graph's pictures are always kept beside it, wherever a command is run from.
+
+### Fixed
+
+- A PDF page laid out inside a frame -- a band down its side, a box around its text, ruled
+  columns of running text -- is read as text again, not as one table holding the whole page.
+  Real tables inside it are found as before. A table covering more than half of a page is
+  checked with the page-reading model before it is kept.
+
+On the public benchmarks, measured on this version: MMLongBench-Doc 71.2%, DocBench 85.9%.
+
 ## [0.1.64] - 2026-11-02
 
 ### Changed

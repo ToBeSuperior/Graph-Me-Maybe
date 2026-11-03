@@ -133,7 +133,8 @@ def test_a_scanned_page_is_read_and_its_words_are_the_models(tmp_path: Path) -> 
     scan = next(n for n in extracted.nodes if n.type is NodeType.IMAGE)
     # The scan is what the page is drawn on, and the picture an answer is shown.
     assert scan.metadata["background"] is True
-    assert store.kept[str(scan.metadata[CROP_ASSET_KEY])] == reader.pages[0]
+    kept = Image.open(io.BytesIO(store.kept[str(scan.metadata[CROP_ASSET_KEY])]))
+    assert kept.size == Image.open(io.BytesIO(reader.pages[0])).size  # the page it was read off
     assert {n.metadata["scan_of"] for n in read} == {scan.id}
     # Placed where the model saw them, in page coordinates.
     first = read[0].locator.bbox

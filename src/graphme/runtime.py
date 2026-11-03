@@ -153,7 +153,8 @@ def graph_parts(
             DocumentFormat.XLSX: ExcelExtractor(asset_store=assets),
             # A page that is a picture of a page is read by the page-reading model.
             DocumentFormat.PDF: PDFExtractor(
-                asset_store=assets, read_scan=vision.read_scanned_page, workers=workers),
+                asset_store=assets, read_scan=vision.read_scanned_page,
+                check_table=vision.is_a_table, workers=workers),
             DocumentFormat.PPTX: PowerPointExtractor(asset_store=assets),
             DocumentFormat.DOCX: DocxExtractor(asset_store=assets),
         },

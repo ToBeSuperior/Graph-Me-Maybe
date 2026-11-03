@@ -1,6 +1,6 @@
 # Graph-Me-Maybe — What Is Left to Do
 
-> Updated: 2026-10-29
+> Updated: 2026-11-04
 >
 > Finished work is not listed here. Confirmed behavior is in
 > [`../finalized_source.md`](../finalized_source.md), and the history is in
@@ -12,6 +12,9 @@ Extraction → browser render → unit crop → VLM hierarchy → graph space �
 end to end for worksheets, slides, DOCX and PDF, in an installed app (macOS, Windows) with its
 own Neo4j, search run on this machine, workspaces, and folders read from Box, Google Drive and
 OneDrive/SharePoint through their desktop apps.
+It keeps running behind a menu bar or tray icon, and MCP clients (Claude Code, Claude Desktop,
+Cursor) search, read and open its documents. Measured against six other systems on
+MMLongBench-Doc and DocBench, published on the site.
 
 ## 0 · Next plan
 
@@ -33,9 +36,6 @@ OneDrive/SharePoint through their desktop apps.
          with deprecations announced.
       3. The per-feature APIs of the item above.
       4. An API reference and example notebooks.
-- [ ] **Measure efficiency and performance on the latest GraphRAG benchmarks.** Record
-      ingest time, model call count and tokens, and query latency, not only accuracy.
-      Compare with other GraphRAG implementations under the same conditions.
 - [ ] **A team workspace.** A workspace kept in a folder on a shared drive (Box, Google Drive,
       OneDrive/SharePoint), so a team opens the same graph. That folder is left out of what a
       build reads, whatever folder above it is chosen. To decide first: a running Neo4j's store
@@ -79,8 +79,6 @@ OneDrive/SharePoint through their desktop apps.
 - [ ] Check the small-print rule (difference from the modal body size, presence of body text
       above and below) and the number of pieces per call on more document types. The rule was
       tuned on only two kinds, papers and Korean reports.
-- [ ] Check the frame-detection thresholds (area 15%, fill 50%, longest cell 200 characters)
-      on other PDFs. They are values tuned on only two documents.
 - [ ] Check an Aura upload end to end (the `.dump` is checked by loading it into an empty Neo4j
       5.26, and the `neo4j-admin database upload` options were checked against 5.26's own
       help). What is left needs an Aura instance and its password: the user's to run, from the

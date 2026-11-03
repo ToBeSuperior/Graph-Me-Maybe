@@ -482,7 +482,8 @@ OneDrive on Windows) once it is read; a preview gives its file back after `PREVI
 not looked at, a download once zipped. macOS's Spotlight reads a file just downloaded and has
 the drive download it again, so what was given back is looked at again (`SETTLE_SECONDS`).
 `local_usage` measures what a drive keeps here without walking a folder never opened.
-Crops and pictures go in `Settings.asset_dir` (a workspace's own beside its graph) and are swept
+Crops and pictures go in `Settings.asset_dir`, always beside the graph they belong to (a workspace's
+in its folder, the home's own graph's in `<home>/.graphme/assets`, never where a command ran) and are swept
 (`Demo.sweep_assets`, `LocalAssetStore.sweep`) after a build, a delete, a reset and on opening:
 kept is what the graph's nodes name (`crop_asset_hash`, the only asset read once a document is
 in), what a reading this run holds, and anything written in the last `SWEEP_GRACE` seconds; never

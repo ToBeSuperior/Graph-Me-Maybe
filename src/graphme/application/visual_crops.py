@@ -189,6 +189,39 @@ def read_node_crop(node: GraphNode, *, asset_store: AssetStore) -> bytes | None:
     return read_crop(asset_hash, asset_store)
 
 
+WEBP_QUALITY = 85
+WEBP_LOSSY_SHARE = 0.5
+"""A crop is kept lossy only when that takes at most this share of its lossless size: a
+photograph shrinks several times, while text and rules come out smaller lossless, and exact."""
+WEBP_LONGEST = 16383
+"""The longest side WebP holds. A table joined across many pages can run past it, and is kept
+shrunk to fit: the model is sent far smaller pictures than this anyway."""
+
+
+def put_crop(asset_store: AssetStore, image: bytes) -> str:
+    """Store a crop as WebP -- lossy or lossless by `WEBP_LOSSY_SHARE` -- and return its hash."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    try:
+        picture = Image.open(BytesIO(image)).convert("RGB")
+    except (OSError, ValueError):
+        return asset_store.put(image, suffix=".png")  # not a picture this side reads
+    if max(picture.size) > WEBP_LONGEST:
+        picture.thumbnail((WEBP_LONGEST, WEBP_LONGEST), Image.Resampling.LANCZOS)
+
+    def encoded(**options: object) -> bytes:
+        out = BytesIO()
+        picture.save(out, "WEBP", method=4, **options)
+        return out.getvalue()
+
+    exact = encoded(lossless=True)
+    lossy = encoded(quality=WEBP_QUALITY)
+    kept = lossy if len(lossy) <= WEBP_LOSSY_SHARE * len(exact) else exact
+    return asset_store.put(kept, suffix=".webp")
+
+
 def read_crop(asset_hash: str, asset_store: AssetStore) -> bytes | None:
     """A stored crop by its hash, or None when it was never written."""
     try:
@@ -341,7 +374,7 @@ def bind_page_visuals(
     # words are read from the source, and a picture of them says nothing the text does not.
     visual = {item.node.id for item in placed if item.node.type in VISUAL_TYPES}
     crops = {
-        node_id: (asset_store.put(crop(box.rounded()), suffix=".png"), box.rounded())
+        node_id: (put_crop(asset_store, crop(box.rounded())), box.rounded())
         for node_id, box in boxes.items()
         # A rule drawn across the page has no height to speak of. It still sits somewhere
         # and takes part in the merge, but a box that rounds away has no picture in it.
@@ -450,7 +483,7 @@ def stitch_across_pages(
             continue
         home = node.metadata.get("crop_page_index")
         parts = [own if index == home else cut(index, box.rounded()) for index, box in pieces]
-        joined = asset_store.put(join(parts), suffix=".png")
+        joined = put_crop(asset_store, join(parts))
         nodes.append(node.model_copy(
             update={"metadata": {**node.metadata, CROP_ASSET_KEY: joined}}))
     return extracted.model_copy(update={"nodes": tuple(nodes)})
@@ -480,7 +513,7 @@ def join_continued(
         crops = [crop for node_id in (first, *rest)
                  if (crop := read_node_crop(by_id[node_id], asset_store=asset_store))]
         if len(crops) > 1:
-            joined[first] = asset_store.put(join(crops), suffix=".png")
+            joined[first] = put_crop(asset_store, join(crops))
     held = {node_id for rest in pieces.values() for node_id in rest}
     nodes = tuple(
         node.model_copy(update={"metadata": {**node.metadata, CROP_ASSET_KEY: joined[node.id]}})

@@ -23,6 +23,7 @@ from graphme.application.visual_crops import (
     CROP_ASSET_KEY,
     FIGURE_LEADER_KEY,
     crop_box,
+    put_crop,
 )
 from graphme.domain.enums import NodeType
 from graphme.domain.models import ExtractedDocument, GraphNode, HierarchyFigureGroup
@@ -95,7 +96,7 @@ def widen_figures(
         if list(rounded) == (figure.metadata.get("crop_bbox") or []):
             continue
         try:
-            asset_hash = asset_store.put(crop(page, rounded), suffix=".png")
+            asset_hash = put_crop(asset_store, crop(page, rounded))
         except (OSError, ValueError) as error:
             _log.warning("figure %s could not be cut again -- %s", group.figure_id, error)
             continue

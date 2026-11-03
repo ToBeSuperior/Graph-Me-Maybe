@@ -37,6 +37,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from graphme import __version__, processes, runtime
+from graphme.adapters.chat import picture_type
 from graphme.adapters.export.neo4j import graph_records, records_cypher, to_cypher
 from graphme.adapters.export.neo4j_admin import AURA_URI
 from graphme.adapters.rendering.browser_office import RenderedPage
@@ -756,7 +757,7 @@ def create_app(
                        if session.store is not None else None)
         if picture is None:
             raise HTTPException(404, "this node has no stored image")
-        return Response(picture, media_type="image/png")
+        return Response(picture, media_type=picture_type(picture))
 
     @v1.get("/files/{file_id}/graph", response_model=api.DocumentGraph)
     def file_graph(file_id: str) -> dict[str, Any]:

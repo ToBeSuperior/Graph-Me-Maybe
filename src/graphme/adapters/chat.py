@@ -75,14 +75,23 @@ this, and a picture is uploaded no larger than it is read."""
 
 
 def image_part(png: bytes) -> dict[str, Any]:
-    """A PNG as one part of a chat message, held to `MODEL_IMAGE_LONG_EDGE` and
-    `MODEL_IMAGE_PIXELS`. The model answers in normalised coordinates and by unit ids, so a
-    smaller picture of the same page changes no answer's meaning."""
+    """A picture as one part of a chat message, under its own type, held to
+    `MODEL_IMAGE_LONG_EDGE` and `MODEL_IMAGE_PIXELS`. The model answers in normalised
+    coordinates and by unit ids, so a smaller picture of the same page changes no answer's
+    meaning."""
+    held = _held(png)
     return {
         "type": "image_url",
-        "image_url": {"url": "data:image/png;base64,"
-                      + base64.b64encode(_held(png)).decode("ascii")},
+        "image_url": {"url": f"data:{picture_type(held)};base64,"
+                      + base64.b64encode(held).decode("ascii")},
     }
+
+
+def picture_type(image: bytes) -> str:
+    """A picture's media type: crops are kept as WebP (as JPEG or PNG before), pages as PNG."""
+    if image[:4] == b"RIFF" and image[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg" if image.startswith(b"\xff\xd8") else "image/png"
 
 
 def _held(png: bytes) -> bytes:

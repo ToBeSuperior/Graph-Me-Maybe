@@ -269,9 +269,16 @@ class Settings(BaseModel):
 
     @property
     def asset_dir(self) -> Path:
-        """Where crops and pictures are kept: a workspace's beside its graph, so deleting the
-        workspace takes them and a sweep of one graph's never touches another's."""
-        return self.local_graph / "assets" if self.local_graph else self.data_dir / "assets"
+        """Where crops and pictures are kept: beside the graph they belong to -- a workspace's in
+        its folder, the home's own graph's in the home -- so deleting a workspace takes them, and
+        a sweep of one graph's never reads another's as unused. Taken from where the command ran,
+        a home named relatively opened an empty graph beside its real crops, and the sweep
+        deleted them all. A Neo4j of its own keeps them in the data folder."""
+        if self.local_graph is not None:
+            return self.local_graph / "assets"
+        if self.local_neo4j is not None:
+            return self.local_neo4j / ".graphme" / "assets"
+        return self.data_dir / "assets"
 
 
 def read_yaml(path: Path) -> dict[str, Any]:

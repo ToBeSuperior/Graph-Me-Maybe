@@ -20,7 +20,7 @@ from graphme.adapters.extractors.pdf_scans import (
     scan_dpi,
 )
 from graphme.adapters.extractors.pdf_tables import band_between, continued_tables
-from graphme.application.visual_crops import CROP_ASSET_KEY
+from graphme.application.visual_crops import CROP_ASSET_KEY, put_crop
 from graphme.domain.enums import (
     DocumentFormat,
     EdgeType,
@@ -238,6 +238,13 @@ FRAME_FILL_RATIO = 0.5
 """A real table is mostly filled in; a border is mostly empty space between rules."""
 FRAME_CELL_CHARS = 200
 """A cell holding this much text is a region of the page, not a value."""
+CHECKED_PAGE_SHARE = 0.5
+"""A table covering this much of its page is shown to the page-reading model before it is kept:
+ruled columns of running text and a panel a page is set in cover the page as a table does, and
+the rules alone cannot always tell them apart."""
+CHECK_DPI = 100
+"""Enough to read a table's narrow column of labels: at 72 dpi a two-column table of objectives
+and what was done about each was taken for columns of running text."""
 FRAME_DEPTH = 3
 """How many borders deep to look. A report is drawn inside one frame, sometimes two."""
 FRAME_INSET = 2.0
@@ -258,10 +265,12 @@ class PDFExtractor:
         *,
         asset_store: AssetStore | None = None,
         read_scan: Callable[[bytes], ScannedPage] | None = None,
+        check_table: Callable[[bytes], bool] | None = None,
         workers: int = 1,
     ) -> None:
         self._asset_store = asset_store
         self._read_scan = read_scan
+        self._check_table = check_table
         self._workers = workers
 
     def extract(self, source: Path) -> ExtractedDocument:
@@ -309,14 +318,16 @@ class PDFExtractor:
             words_the_document_writes = frozenset(
                 word for blocks in page_blocks for word in _written_words(blocks)
             )
-            for page_index, (page, text_blocks) in enumerate(
-                zip(document, page_blocks, strict=True), start=1
+            page_tables = self._checked_tables(document)
+            for page_index, (page, text_blocks, tables) in enumerate(
+                zip(document, page_blocks, page_tables, strict=True), start=1
             ):
                 page_units, has_text = self._extract_page(
                     page=page,
                     page_index=page_index,
                     text_blocks=text_blocks,
                     words_the_document_writes=words_the_document_writes,
+                    tables=tables,
                 )
                 pages.append(page_units)
                 native_text_pages += int(has_text)
@@ -400,10 +411,10 @@ class PDFExtractor:
         page_index: int,
         text_blocks: list[dict[str, Any]],
         words_the_document_writes: frozenset[str],
+        tables: list[Any],
     ) -> tuple[list[_NativeUnit], bool]:
         page_width = float(page.rect.width)
         page_height = float(page.rect.height)
-        tables = self._tables_of(page, page_width, page_height)
         table_bboxes = [self._bbox(table.bbox) for table in tables]
         units: list[_NativeUnit] = []
 
@@ -624,7 +635,7 @@ class PDFExtractor:
             )
         if not readable(read):
             return None
-        crop = None if self._asset_store is None else self._asset_store.put(png, suffix=".png")
+        crop = None if self._asset_store is None else put_crop(self._asset_store, png)
         kept = [
             unit if unit.type is not NodeType.IMAGE else replace(unit, metadata={
                 **unit.metadata, "background": True,
@@ -895,18 +906,60 @@ class PDFExtractor:
             if not self._is_layout_frame(table, page_width, page_height):
                 found.append(table)
                 continue
-            if depth >= FRAME_DEPTH:
-                continue
-            x0, y0, x1, y1 = table.bbox
-            inside = pymupdf.Rect(  # type: ignore[no-untyped-call]
-                x0 + FRAME_INSET, y0 + FRAME_INSET, x1 - FRAME_INSET, y1 - FRAME_INSET
-            )
-            if inside.is_empty or inside.width <= 0 or inside.height <= 0:
-                continue
-            found.extend(
-                self._tables_of(page, page_width, page_height, inside, depth + 1)
-            )
+            found.extend(self._opened(page, table, page_width, page_height, depth))
         return found
+
+    def _opened(
+        self, page: Any, frame: Any, page_width: float, page_height: float, depth: int = 0
+    ) -> list[Any]:
+        """The tables a frame encloses, searched a little way inside its own edges."""
+        if depth >= FRAME_DEPTH:
+            return []
+        x0, y0, x1, y1 = frame.bbox
+        inside = pymupdf.Rect(  # type: ignore[no-untyped-call]
+            x0 + FRAME_INSET, y0 + FRAME_INSET, x1 - FRAME_INSET, y1 - FRAME_INSET
+        )
+        if inside.is_empty or inside.width <= 0 or inside.height <= 0:
+            return []
+        return self._tables_of(page, page_width, page_height, inside, depth + 1)
+
+    def _checked_tables(self, document: Any) -> list[list[Any]]:
+        """Every page's tables, a table over `CHECKED_PAGE_SHARE` of its page kept only if the
+        page-reading model, shown it outlined on the page, says it is one; what it says is the
+        page's layout is opened like a frame. Asked `workers` at a time; a table the model
+        gives no answer for is kept, as the rules found it."""
+        pages = [
+            self._tables_of(page, float(page.rect.width), float(page.rect.height))
+            for page in document
+        ]
+        check = self._check_table
+        if check is None:
+            return pages
+        asked = [
+            (index, table)
+            for index, (page, tables) in enumerate(zip(document, pages, strict=True))
+            for table in tables
+            if _page_share(table.bbox, page) >= CHECKED_PAGE_SHARE
+        ]
+
+        def is_a_table(item: tuple[int, Any]) -> bool:
+            index, table = item
+            try:
+                return check(_outlined(document[index], table.bbox))
+            except (RuntimeError, ValueError) as error:
+                _log.warning("page %d: table not checked -- %s", index + 1, error)
+                return True
+
+        with ThreadPoolExecutor(max_workers=max(1, self._workers)) as pool:
+            verdicts = list(pool.map(is_a_table, asked))
+        for (index, table), kept in zip(asked, verdicts, strict=True):
+            if kept:
+                continue
+            page = document[index]
+            at = pages[index].index(table)
+            pages[index][at : at + 1] = self._opened(
+                page, table, float(page.rect.width), float(page.rect.height))
+        return pages
 
     @staticmethod
     def _is_highlight(page: Any, table: Any) -> bool:
@@ -940,25 +993,29 @@ class PDFExtractor:
         becomes one of its cells: the whole document collapses into a single table node
         holding the page's text, with nothing left to read separately.
 
-        A real table is mostly full and each cell is a value. A frame is mostly empty and
-        one of its cells is a paragraph -- that is what gives it away, not its size: a
-        genuine table can fill a page, and a frame can sit well inside the margins.
+        A real table is mostly full and sets values beside each other in a row. A frame is
+        mostly empty or never holds two things in one row, and one of its cells is a
+        paragraph -- that is what gives it away, not its size: a genuine table can fill a
+        page, and a frame can sit well inside the margins.
         """
         x0, y0, x1, y1 = table.bbox
         page_area = max(1.0, page_width * page_height)
         if (x1 - x0) * (y1 - y0) / page_area < FRAME_PAGE_SHARE:
             return False
-        cells = [
-            "" if value is None else str(value).strip()
+        rows = [
+            ["" if value is None else str(value).strip() for value in row]
             for row in table.extract()
-            for value in row
         ]
+        cells = [cell for row in rows for cell in row]
         if not cells:
             return False
         filled = [cell for cell in cells if cell]
-        return (
-            len(filled) / len(cells) < FRAME_FILL_RATIO
-            and max((len(cell) for cell in filled), default=0) > FRAME_CELL_CHARS
+        if max((len(cell) for cell in filled), default=0) <= FRAME_CELL_CHARS:
+            return False
+        # A table sets a value beside what it is; a band down the page's side and a rule
+        # across it fill half a frame's cells, but never two in one row.
+        return len(filled) / len(cells) < FRAME_FILL_RATIO or all(
+            sum(1 for cell in row if cell) < 2 for row in rows
         )
 
     @staticmethod
@@ -1244,3 +1301,21 @@ def _leading_spaces(block: dict[str, Any]) -> int:
     return 0
 
 
+def _page_share(bbox: Any, page: Any) -> float:
+    x0, y0, x1, y1 = bbox
+    return float((x1 - x0) * (y1 - y0)) / max(1.0, float(page.rect.width * page.rect.height))
+
+
+def _outlined(page: Any, bbox: Any) -> bytes:
+    """The page with `bbox` outlined in red, drawn for the model."""
+    from io import BytesIO
+
+    from PIL import Image, ImageDraw
+
+    scale = CHECK_DPI / 72
+    picture = Image.open(BytesIO(page.get_pixmap(dpi=CHECK_DPI).tobytes("png"))).convert("RGB")
+    x0, y0, x1, y1 = (float(v) * scale for v in bbox)
+    ImageDraw.Draw(picture).rectangle((x0, y0, x1, y1), outline=(220, 0, 0), width=3)
+    out = BytesIO()
+    picture.save(out, "PNG")
+    return out.getvalue()
