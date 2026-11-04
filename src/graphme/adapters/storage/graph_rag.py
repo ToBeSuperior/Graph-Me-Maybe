@@ -52,6 +52,7 @@ from graphme.adapters.storage.neo4j_space import CHUNK_TEXT_INDEX, Neo4jGraphSpa
 from graphme.adapters.storage.similar_documents import SimilarDocuments
 from graphme.adapters.strict_schema import strict_response_schema
 from graphme.application.corpus_links import document_numbers, documents_named
+from graphme.application.embedded_documents import shown_name
 from graphme.application.graph_chunks import CHUNK_RULE, chunks
 from graphme.application.passage_scores import IMPORTANCE_RULE, centroid, importance
 from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop
@@ -473,7 +474,8 @@ class GraphRag:
             # A crop not kept is a picture the passage's words still describe.
             if (png := read_crop(record["crop"], self._assets)) is None:
                 continue
-            pictures.append((f"Picture in [{_composed(record['file'])}]: {record['label']}", png))
+            named = shown_name(_composed(record["file"]))
+            pictures.append((f"Picture in [{named}]: {record['label']}", png))
             if len(pictures) == ANSWER_PICTURES:
                 break
         return pictures
@@ -818,7 +820,9 @@ def _item(record: neo4j.Record) -> RetrieverResultItem:
     with how it is linked and its passages nearest the question.
 
     Composed (NFC) throughout: macOS names a Korean file in loose jamo, and a model copying a
-    name back that way broke it into letters no document on the page is called."""
+    name back that way broke it into letters no document on the page is called. An attachment
+    is named as its reader knows it (`shown_name`): the answer cites what it reads. The
+    metadata keeps the whole name, which tells two files apart."""
     files = {record["document_id"]: _composed(record["file"])}
     linked = [{**doc, "file": _composed(doc["file"])} for doc in record["linked"]]
     files.update({doc["document_id"]: doc["file"] for doc in linked})
@@ -832,7 +836,7 @@ def _item(record: neo4j.Record) -> RetrieverResultItem:
         shown = doc["passages"][: LINKED_PASSAGES[doc["hop"]]]
         lines += [f"- {passage['text']}" for passage in shown]
     return RetrieverResultItem(
-        content=_composed("\n".join(lines)),
+        content=shown_name(_composed("\n".join(lines))),
         metadata={
             "id": record["id"],
             "score": record["score"],

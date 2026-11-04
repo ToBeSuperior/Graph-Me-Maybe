@@ -4,9 +4,10 @@
 <script type="module">
 const qs = new URLSearchParams(location.search);
 const kind = qs.get('kind'), width = Number(qs.get('width') || 1400), dpr = Number(qs.get('dpr') || 2);
-// A preview: one page (`only`, from 0; a worksheet's own index), and no measuring of where things
-// landed (`geometry=0`) -- that is the reading's question, and the slowest part of drawing.
-const only = qs.has('only') ? Number(qs.get('only')) : null;
+// A preview: the pages `only` lists (from 0, comma-separated; a worksheet's own index), and no
+// measuring of where things landed (`geometry=0`) -- that is the reading's question, and the
+// slowest part of drawing.
+const only = qs.has('only') ? new Set(qs.get('only').split(',').map(Number)) : null;
 const geometry = qs.get('geometry') !== '0';
 const stage = document.querySelector('#stage');
 // Browsers blank a canvas past these caps, so shrink the raster, never the layout.
@@ -31,7 +32,7 @@ try {
     let wb = await open();
 
     for (const sheet of plan.sheets) {
-      if (only !== null && sheet.index !== only) continue;
+      if (only !== null && !only.has(sheet.index)) continue;
       let ws;
       try {
         ws = await wb.getWorksheet(sheet.index);
@@ -129,7 +130,7 @@ try {
     if (v.waitUntilLayoutComplete) await v.waitUntilLayoutComplete();
     const count = kind === 'docx' ? v.pageCount : v.slideCount;
     for (let i = 0; i < count; i++) {
-      if (only !== null && i !== only) continue;
+      if (only !== null && !only.has(i)) continue;
       if (kind === 'docx') await v.goToPage(i); else await v.goToSlide(i);
       await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
       // Where the glyphs actually landed. A text box is sized for the words it could

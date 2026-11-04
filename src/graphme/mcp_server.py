@@ -20,6 +20,7 @@ from mcp.server.fastmcp import FastMCP, Image
 from mcp.server.fastmcp.exceptions import ToolError
 
 from graphme.agent_file import connect
+from graphme.application.embedded_documents import shown_name
 
 PASSAGE_CHARS = 1200
 NODE_CHARS = 4000
@@ -69,7 +70,7 @@ def _label(node: dict[str, Any]) -> str:
     p = node["properties"]
     said = p.get("text") if _kind(node) == "TextChunk" else None
     said = said or p.get("label") or p.get("cell_range") or ""
-    return _cut(" ".join(str(said).split()), LABEL_CHARS)
+    return _cut(shown_name(" ".join(str(said).split())), LABEL_CHARS)
 
 
 def _page(node: dict[str, Any]) -> int | None:
@@ -212,9 +213,11 @@ def build_server(client: httpx.Client) -> FastMCP:
         wid, _ = allowed(workspace)
         found = post("/v1/search", {"question": question, "documents": top_k, "workspace": wid})
         return {"text_only": found.get("text_only", False), "sources": [
-            {"document_id": s["document_id"], "file": s["file"], "score": round(s["score"], 3),
+            {"document_id": s["document_id"], "file": shown_name(s["file"]),
+             "score": round(s["score"], 3),
              "passage_id": s["id"], "text": _cut(s["context"], PASSAGE_CHARS),
-             "linked": [{"document_id": d["document_id"], "file": d["file"], "hop": d["hop"],
+             "linked": [{"document_id": d["document_id"], "file": shown_name(d["file"]),
+                         "hop": d["hop"],
                          "direction": d["direction"], "via": d["via"]}
                         for d in s.get("linked", [])]}
             for s in found["sources"]]}
@@ -226,7 +229,7 @@ def build_server(client: httpx.Client) -> FastMCP:
         wid, _ = allowed(workspace)
         answer = post("/v1/ask", {"question": question, "documents": top_k, "workspace": wid})
         return {"answer": answer["answer"], "text_only": answer.get("text_only", False),
-                "sources": [{"document_id": s["document_id"], "file": s["file"],
+                "sources": [{"document_id": s["document_id"], "file": shown_name(s["file"]),
                              "passage_id": s["id"]} for s in answer["sources"]]}
 
     @server.tool()
@@ -242,7 +245,7 @@ def build_server(client: httpx.Client) -> FastMCP:
         page = items[start:start + limit]
         return {"total": len(items),
                 "next_cursor": str(start + limit) if start + limit < len(items) else None,
-                "documents": [{"document_id": i["document_id"], "name": i["name"],
+                "documents": [{"document_id": i["document_id"], "name": shown_name(i["name"]),
                                "format": i["format"]} for i in page]}
 
     @server.tool()
@@ -266,7 +269,7 @@ def build_server(client: httpx.Client) -> FastMCP:
         p = node["properties"]
         items = outline.items.get(node_id, [])
         return {"id": node_id, "kind": _kind(node), "page": _page(node),
-                "text": _cut(str(p.get("text") or p.get("label") or ""), NODE_CHARS),
+                "text": _cut(shown_name(str(p.get("text") or p.get("label") or "")), NODE_CHARS),
                 "holds": [{"id": i, "kind": _kind(outline.nodes[i]),
                            "label": _label(outline.nodes[i])} for i in items[:LIST_LIMIT]],
                 "holds_more": max(0, len(items) - LIST_LIMIT)}
@@ -276,7 +279,7 @@ def build_server(client: httpx.Client) -> FastMCP:
         """The documents this one cites, those citing it, and those most like it."""
         wid, _ = allowed(workspace)
         mapped = get("/v1/graph/map", workspace=wid)
-        files = {d["id"]: d["label"] for d in mapped["documents"]}
+        files = {d["id"]: shown_name(d["label"]) for d in mapped["documents"]}
         linked = [{"document_id": other, "file": files.get(other, ""), "direction": way}
                   for link in mapped["links"]
                   for other, way in ((link["to"], "cites"), (link["from"], "cited_by"))

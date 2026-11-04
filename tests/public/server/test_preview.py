@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import fitz
+import pytest
 from fastapi.testclient import TestClient
 
 from graphme.adapters.export.neo4j import graph_records
@@ -13,10 +14,18 @@ from graphme.adapters.extractors.pdf import PDFExtractor
 from graphme.adapters.rendering.pdf_pages import PdfPageRenderer
 from graphme.adapters.rendering.visual_binding import with_geometry
 from graphme.domain.enums import DocumentFormat
-from graphme.server import create_app
+from graphme.server import create_app, state
 from graphme.server.jobs import Session
 from graphme.server.state import Demo
 from tests.public.server.conftest import SETTINGS, FakeSpace
+
+
+@pytest.fixture(autouse=True)
+def _one_page_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The page asked for alone: what these tests count. Drawing the pages around it is tested
+    on its own (`test_the_pages_around_one_looked_at_are_drawn_behind_it`)."""
+    monkeypatch.setattr(state, "PREVIEW_AROUND", 0)
+
 
 
 class _Counted(PdfPageRenderer):

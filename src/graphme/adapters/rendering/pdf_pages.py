@@ -6,6 +6,7 @@ and the hierarchy pass cannot tell the two apart.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import pymupdf
@@ -54,6 +55,14 @@ class PdfPageRenderer:
             pixmap = document.load_page(index - 1).get_pixmap(
                 dpi=PREVIEW_DPI, colorspace=pymupdf.csRGB, alpha=False)
             return bytes(pixmap.tobytes("png"))
+
+    def previews(self, source: Path, document_format: DocumentFormat, indexes: Sequence[int]
+                 ) -> dict[int, bytes]:
+        """The pages `indexes` (from 1) for a reader: those the file has, by index."""
+        with pymupdf.open(source) as document:  # type: ignore[no-untyped-call]
+            count = document.page_count
+        return {index: self.preview(source, document_format, index)
+                for index in indexes if 1 <= index <= count}
 
 
 INK_PAGE_SHARE = 0.1

@@ -16,6 +16,14 @@ from graphme.server.state import Demo
 from tests.public.server.conftest import SETTINGS, FakeSpace, until
 
 
+@pytest.fixture(autouse=True)
+def _one_page_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The page asked for alone: what these tests count. Drawing the pages around it is tested
+    on its own (`test_the_pages_around_one_looked_at_are_drawn_behind_it`)."""
+    monkeypatch.setattr(state, "PREVIEW_AROUND", 0)
+
+
+
 class _Counted(PdfPageRenderer):
     def __init__(self) -> None:
         super().__init__()
@@ -120,3 +128,24 @@ def test_a_document_deleted_takes_its_pages_kept(tmp_path: Path, client: Any = N
 
     kept = [p.name for p in (demo.root / "previews").iterdir()]
     assert len(kept) == 1 and not kept[0].startswith(doc)
+
+
+def test_the_pages_around_one_looked_at_are_drawn_behind_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reader turns the pages of what they opened: the five before and after the page drawn
+    are drawn behind it, in one go, so turning to them needs no drawing of its own."""
+    monkeypatch.setattr(state, "PREVIEW_AROUND", 5)
+    source = _pdf(tmp_path / "invented.pdf", pages=14)
+    renderer = _Counted()
+    demo = _demo(tmp_path, renderer)
+    doc = demo.open_path(str(source))
+
+    demo.preview(doc, 7)
+
+    assert until(lambda: len(list((demo.root / "previews").glob("*.png"))) == 11, 5)
+    assert sorted(renderer.drawn) == list(range(2, 13))
+    drawn = list(renderer.drawn)
+    for index in (2, 6, 12):
+        assert demo.preview(doc, index).startswith(b"\x89PNG")
+    assert renderer.drawn == drawn  # each one kept, none drawn again

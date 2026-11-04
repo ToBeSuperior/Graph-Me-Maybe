@@ -121,6 +121,10 @@ def _stamp(path: str | Path) -> tuple[int, int] | None:
 
 
 PREVIEWS_KEPT = 24
+PREVIEW_AROUND = 5
+"""How many pages before and after one drawn for a reader are drawn behind it, in one go: a
+reader turns the pages of what they opened, and a slide deck's page drawn alone starts a
+browser and reads the whole file each time."""
 EMBED_WAIT_SECONDS = 30.0
 SIDE_IDLE_SECONDS = 300.0
 """A workspace read beside the open one (`Demo.reader`) is let go once nobody has asked it
@@ -359,6 +363,8 @@ class Demo:
         self.previews: OrderedDict[tuple[str, int, tuple[int, int] | None], bytes] = OrderedDict()
         """Pages drawn for a reader, the latest PREVIEWS_KEPT: nothing is kept across starts."""
         self.previewing = threading.Lock()
+        self.drawing_around: set[str] = set()
+        """Documents whose pages around one looked at are being drawn behind it."""
         self.preview_dir = self.root / "previews"
         """The pages drawn for readers, kept on disk under `preview_cache_mb`."""
         self.viewed: dict[str, tuple[Path, float]] = {}
@@ -825,7 +831,38 @@ class Demo:
         if page is not None:
             with contextlib.suppress(OSError):  # not kept: drawn again next time
                 _keep_page(self.preview_dir, page, png, preview_limit(self.settings))
+            assert stamp is not None
+            self._draw_around(doc, index, original, session.format, stamp)
         return png
+
+    def _draw_around(self, doc: str, index: int, original: str, document_format: DocumentFormat,
+                     stamp: tuple[int, int]) -> None:
+        """The PREVIEW_AROUND pages before and after `index` not kept yet, drawn behind the
+        reader in one go and kept on disk; one document's at a time."""
+        def name(at: int) -> str:
+            return f"{doc}-{stamp[0]}-{stamp[1]}-{at}.png"
+
+        wanted = [at for at in range(max(1, index - PREVIEW_AROUND), index + PREVIEW_AROUND + 1)
+                  if at != index and not (self.preview_dir / name(at)).is_file()]
+        with self.previewing:
+            if not wanted or doc in self.drawing_around:
+                return
+            self.drawing_around.add(doc)
+
+        def draw() -> None:
+            try:
+                with self.sources.open_copy(original) as source, self.drawing:
+                    drawn = self.renderer.previews(source, document_format, wanted)
+                for at, png in drawn.items():
+                    with contextlib.suppress(OSError):
+                        _keep_page(self.preview_dir, name(at), png, preview_limit(self.settings))
+            except Exception:  # noqa: BLE001 -- a page not drawn ahead is drawn when opened
+                _log.debug("pages around %s not drawn ahead", index, exc_info=True)
+            finally:
+                with self.previewing:
+                    self.drawing_around.discard(doc)
+
+        threading.Thread(target=draw, daemon=True).start()
 
     def open_original(self, path: str) -> str:
         """The file a document was read from, opened in its own app on this machine, and the

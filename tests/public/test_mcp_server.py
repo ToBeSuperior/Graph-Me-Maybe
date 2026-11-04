@@ -341,3 +341,23 @@ def test_settings_are_read_and_changed_but_never_a_key(v1: FakeV1) -> None:
     assert ("PUT", "http://127.0.0.1:1/v1/settings",
             {"values": {"GRAPHME_MODEL": "invented-other"}}) in v1.sent
     assert not any(b and "sk-invented" in json.dumps(b) for _, _, b in v1.sent)
+
+
+class _AttachedV1(FakeV1):
+    """The same API, its documents attachments kept under their digests."""
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        reply = super().__call__(request)
+        if request.url.path in ("/v1/search", "/v1/documents", "/v1/graph/map"):
+            body = json.dumps(reply.json()).replace(".docx", ".emb1a2b3c4d.docx").replace(
+                ".pdf", ".emb0f0f0f0f.pdf")
+            return httpx.Response(reply.status_code, content=body.encode(),
+                                  headers={"content-type": "application/json"})
+        return reply
+
+
+def test_an_attachment_is_named_as_its_reader_knows_it() -> None:
+    for tool, args in [("search", {"question": "invented"}), ("list_documents", {}),
+                       ("linked_documents", {"document_id": "doc-1"})]:
+        refused, text, _ = call(_AttachedV1(), tool, **args)
+        assert not refused and ".emb" not in text and (".docx" in text or ".pdf" in text), tool

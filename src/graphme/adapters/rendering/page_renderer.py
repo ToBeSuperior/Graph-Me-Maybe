@@ -6,6 +6,7 @@ merge, the hierarchy pass -- works on pages and should not have to know which.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -26,6 +27,9 @@ class PreviewsPages(RendersPages, Protocol):
     """A renderer that can also draw one page for a reader to look at."""
 
     def preview(self, source: Path, document_format: DocumentFormat, index: int) -> bytes: ...
+
+    def previews(self, source: Path, document_format: DocumentFormat, indexes: Sequence[int]
+                 ) -> dict[int, bytes]: ...
 
 
 class PageRenderer:
@@ -60,3 +64,10 @@ class PageRenderer:
         """Page `index` (from 1) for a reader: that page alone, at a preview's resolution."""
         drawn = self._pdf if document_format is DocumentFormat.PDF else self._browser
         return drawn.preview(source, document_format, index)
+
+    def previews(self, source: Path, document_format: DocumentFormat, indexes: Sequence[int]
+                 ) -> dict[int, bytes]:
+        """The pages `indexes` (from 1) for a reader, at a preview's resolution, drawn in one
+        go: those the file has, by index."""
+        drawn = self._pdf if document_format is DocumentFormat.PDF else self._browser
+        return drawn.previews(source, document_format, indexes)

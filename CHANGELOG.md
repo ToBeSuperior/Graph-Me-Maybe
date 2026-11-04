@@ -5,6 +5,21 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.66] - 2026-11-05
+
+### Changed
+
+- Turning the pages of a document in the preview is faster: once a page is drawn, the five
+  pages before and after it are drawn behind it in one go, so they open without drawing.
+
+### Fixed
+
+- A question naming a code (letters and digits) that no document holds -- often a page number,
+  or a code shown only inside a picture -- is searched for the rest of what it asks instead of
+  finding nothing.
+- An attachment is named in answers and in what an MCP client gets as you know it
+  (`Memo.pdf`), without the tag that tells two attachments apart.
+
 ## [0.1.65] - 2026-11-04
 
 ### Changed

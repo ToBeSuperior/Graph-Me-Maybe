@@ -13,7 +13,7 @@ import json
 import re
 import tempfile
 import zipfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -310,8 +310,16 @@ class BrowserOfficeRenderer:
         drawn = self._draw(source, document_format, scale=device_pixel_ratio, view=view)
         return drawn[0].png
 
+    def previews(self, source: Path, document_format: DocumentFormat, indexes: Sequence[int],
+                 device_pixel_ratio: float = PREVIEW_DEVICE_PIXEL_RATIO) -> dict[int, bytes]:
+        """The pages `indexes` (from 1) for a reader, drawn in one browser: those the file
+        has, by index."""
+        view = {"only": [index - 1 for index in indexes], "dpr": device_pixel_ratio}
+        drawn = self._draw(source, document_format, scale=device_pixel_ratio, view=view)
+        return {page.index: page.png for page in drawn}
+
     def _draw(self, source: Path, document_format: DocumentFormat, *, scale: float,
-              view: dict[str, float] | None = None) -> tuple[RenderedPage, ...]:
+              view: Mapping[str, object] | None = None) -> tuple[RenderedPage, ...]:
         kind = BROWSER_FORMATS.get(document_format)
         if kind is None:
             raise ValueError(

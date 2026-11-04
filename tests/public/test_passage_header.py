@@ -62,3 +62,16 @@ def test_a_file_time_kept_as_seconds_is_written_as_a_date() -> None:
 
     assert "Modified: 2031-04-02" in head
     assert "1932858000" not in head
+
+
+def test_an_attachment_is_named_to_the_answer_as_its_reader_knows_it() -> None:
+    """An attachment is kept under a digest that tells two files apart (`Memo.emb1a2b3c4d.pdf`);
+    the answer cites what it reads, so it reads the name a person knows. The API keeps it whole."""
+    linked = [{"document_id": "doc-2", "file": "Plan.emb0f0f0f0f.xlsx", "hop": 2, "via": "doc-1",
+               "direction": "cites", "passages": [{"text": "Q3 targets."}]}]
+    item = _item(_record(file="Memo.emb1a2b3c4d.pdf", linked=linked,  # type: ignore[arg-type]
+                         text="Memo.emb1a2b3c4d.pdf > Budget\nThe plan moved to May."))
+
+    assert ".emb" not in item.content
+    assert "Memo.pdf" in item.content and "Plan.xlsx" in item.content
+    assert item.metadata is not None and item.metadata["file"] == "Memo.emb1a2b3c4d.pdf"

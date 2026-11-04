@@ -78,11 +78,16 @@ class _OnceRetriever(HybridCypherRetriever):
         """The passages both searches rank, fused: a passage ranked r by a search counts that
         search's weight / (rrf_k + r), and its score is the sum, scaled so a passage first in
         both scores 1 -- the relative relevance the page shows. A passage is fused only with
-        evidence it is about the question (`_FUSED`); none, and the search found nothing.
+        evidence it is about the question (`_FUSED`); none, and the search found nothing. A
+        question naming a code is weighted toward the words (`fusion_weights`) only where some
+        passage holds the code.
         Highest score first: the query's later steps keep no order."""
-        if not self._holds_any(named_identifiers(question)):
-            return []
-        dense, text = fusion_weights(question, dense=self.dense_weight)
+        # A code no passage holds says nothing about where the answer is (a page number dropped
+        # as furniture, a code inside a picture): the question is searched as one naming none.
+        if self._holds_any(named_identifiers(question)):
+            dense, text = fusion_weights(question, dense=self.dense_weight)
+        else:
+            dense, text = round(self.dense_weight, 6), round(1.0 - self.dense_weight, 6)
         asked: dict[str, Any] = {
             "vector_index_name": self.vector_index_name,
             "fulltext_index_name": self.fulltext_index_name,
@@ -105,8 +110,7 @@ class _OnceRetriever(HybridCypherRetriever):
 
     def _holds_any(self, named: list[str]) -> bool:
         """Whether some passage holds one of the identifiers a question names -- true when it
-        names none. One naming only numbers nothing holds asks about a document not here, and
-        passages that merely sound alike are no answer to it."""
+        names none."""
         if not named:
             return True
         records, _, _ = self.driver.execute_query(

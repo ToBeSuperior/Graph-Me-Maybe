@@ -93,8 +93,8 @@ def capture(kind: str, source: Path, workspace: Path, *, width: int, dpr: float,
             bundle: Path, browser_path: str | None) -> None:
     """Draw `source` and write each page as `page-NNN.png`, with `manifest.json` beside them.
 
-    A `view.json` in the workspace asks for a preview instead: one page (`only`, from 0) at
-    its own `dpr`, with nothing measured."""
+    A `view.json` in the workspace asks for a preview instead: the pages `only` lists (from 0;
+    one index or a list) at its own `dpr`, with nothing measured."""
     from playwright.sync_api import Error, sync_playwright
 
     part = bundle / ("xlsx" if kind == "xlsx" else "dist")
@@ -108,7 +108,8 @@ def capture(kind: str, source: Path, workspace: Path, *, width: int, dpr: float,
     asked = ""
     if "only" in view:
         dpr = float(view.get("dpr", dpr))
-        asked = f"&only={int(view['only'])}&geometry=0"
+        listed = view["only"] if isinstance(view["only"], list) else [view["only"]]
+        asked = f"&only={','.join(str(int(i)) for i in listed)}&geometry=0"
     site = workspace / "site"
     site.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, site / f"sample.{kind}")
