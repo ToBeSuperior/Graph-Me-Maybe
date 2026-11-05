@@ -155,3 +155,29 @@ def test_the_first_close_is_told_after_the_window_is_gone_and_once(tmp_path: Pat
                           front=lambda pid: False, tell=tell)
 
     assert events == ["shown", "told", "shown"] and told == [agent.BACKGROUND_NOTICE]
+
+
+def test_quit_completely_takes_the_icon_away_before_the_process_ends(
+    tmp_path: Path, monkeypatch: Any,
+) -> None:
+    """The process ends at once (`os._exit`), so a stop only posted to the icon's loop never
+    took it out of the notification area: Windows left it there until a pointer passed over."""
+    said: list[Any] = []
+
+    class Icon:
+        def __setattr__(self, name: str, value: Any) -> None:
+            said.append((name, value))
+
+        def stop(self) -> None:
+            said.append("stop")
+
+    client = httpx.Client(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"items": [], "mcp_enabled": True})))
+    monkeypatch.setattr(agent.login_item, "enabled", lambda: False)
+    monkeypatch.setattr(agent, "quit_completely", lambda home: said.append("ended"))
+    icon = agent._Icon(tmp_path, client)
+    icon.icon = Icon()
+
+    icon.act("quit")
+
+    assert said[:2] == [("visible", False), "stop"] and said.index("ended") > 1

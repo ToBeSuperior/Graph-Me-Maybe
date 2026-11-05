@@ -143,7 +143,8 @@ screen this slides in from the side.
 - **A document** — its outline graph on the left (radial, tree or Neo4j-style layout, or a list in
   reading order that shows even folded nodes), its rendered pages on the right. Clicking a node shows
   its text, crop and properties in place of the page. Passages are shown as bands behind the nodes:
-  the darker, the more important within the document.
+  the darker, the more important within the document. **Open original** opens the file it was read
+  from in the app this computer opens it with (Excel, Word, a PDF viewer).
 - **Citation links** join a document to every document whose name, number or title it writes, all
   versions of a file included.
 - **Similarity links** join two documents only when their closest pair of passages, weighted by

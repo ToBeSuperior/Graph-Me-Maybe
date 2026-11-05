@@ -1,7 +1,7 @@
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api/client';
-import { corpusMapOptions, graphReset, keys, libraryOptions, queryDefaults } from './queries';
+import { corpusMapOptions, graphReset, keys, libraryOptions, queryDefaults, workspaceOpened, workspacesOptions } from './queries';
 
 describe('the graph emptied', () => {
   it('keeps the build followed, so the next build is seen to end', () => {
@@ -37,5 +37,25 @@ describe('the map while the graph DB starts', () => {
   it('is asked again when the page comes back, for a graph the command line changed', () => {
     expect(corpusMapOptions.refetchOnWindowFocus).toBe('always');
     expect(libraryOptions.refetchOnWindowFocus).toBe('always');
+  });
+});
+
+describe('the workspaces, changed outside the page', () => {
+  it('are asked again when the window comes back and while it shows', () => {
+    // The icon's menu turned MCP off; the switch on Keys and model stayed on.
+    expect(workspacesOptions.refetchOnWindowFocus).toBe('always');
+    expect(workspacesOptions.refetchInterval({ state: { error: null } })).toBeGreaterThan(0);
+  });
+
+  it('drop what was drawn from the last graph when another is open', () => {
+    // Opened by an MCP client: the list showed the new workspace, the header the old one.
+    const client = new QueryClient();
+    client.setQueryData(keys.map, 'invented map');
+    client.setQueryData(keys.workspaces, 'kept');
+    expect(workspaceOpened(client, 'main', 'main')).toBe(false);
+    expect(client.getQueryData(keys.map)).toBe('invented map');
+    expect(workspaceOpened(client, 'main', 'other')).toBe(true);
+    expect(client.getQueryData(keys.map)).toBeUndefined();
+    expect(client.getQueryData(keys.workspaces)).toBe('kept');
   });
 });

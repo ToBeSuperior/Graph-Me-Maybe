@@ -257,6 +257,9 @@ class _Icon:
                 else:
                     login_item.enable(agent_command(self.home))
             elif action == "quit":
+                # Out of the notification area now: the process ends at once, before the
+                # icon's loop would take it out after a stop, and Windows would keep it there.
+                self.icon.visible = False
                 self.icon.stop()
                 quit_completely(self.home)
         except Exception:  # noqa: BLE001 -- the menu stays; the log says why

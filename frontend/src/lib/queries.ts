@@ -102,6 +102,38 @@ export const useSearchModels = () =>
   });
 
 
-/** The graphs kept apart, and the one open; `available` false on a server with its own graph DB. */
-export const useWorkspaces = () =>
-  useQuery({ queryKey: keys.workspaces, queryFn: () => call(api.GET('/v1/workspaces')) });
+/** How often the workspaces are asked again while the page shows. */
+export const WORKSPACES_EVERY = 5000;
+
+/** The graphs kept apart, the one open and whether MCP may read them; `available` false on a
+ * server with its own graph DB. Asked again when the window comes back and every few seconds
+ * while it shows: the icon's menu and an MCP client change them without the page knowing, and
+ * the switch here stayed on after the menu had turned MCP off. */
+export const workspacesOptions = {
+  queryKey: keys.workspaces, queryFn: () => call(api.GET('/v1/workspaces')), ...fresh,
+  refetchInterval: (query: { state: { error: unknown } }) =>
+    (isWaiting(query.state.error) ? 3000 : WORKSPACES_EVERY),
+};
+export const useWorkspaces = () => useQuery(workspacesOptions);
+
+/** Another workspace open than the one the page last saw: every answer drawn from the last
+ * graph is gone, the list of workspaces aside -- as when the page opens one itself. True when
+ * it was another. */
+export function workspaceOpened(client: QueryClient, seen: string | null, active: string | null): boolean {
+  if (!seen || !active || seen === active) return false;
+  void client.resetQueries({ predicate: (q) => q.queryKey[0] !== keys.workspaces[0] });
+  return true;
+}
+
+/** A workspace opened elsewhere (an MCP client, the command line) is followed: the header named
+ * the old one and counted its documents while the list showed the new one's. */
+export function useWorkspaceFollower() {
+  const client = useQueryClient();
+  const { data } = useWorkspaces();
+  const seen = useRef<string | null>(null);
+  const active = data?.active ?? null;
+  useEffect(() => {
+    workspaceOpened(client, seen.current, active);
+    if (active) seen.current = active;
+  }, [client, active]);
+}

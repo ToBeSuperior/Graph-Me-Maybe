@@ -5,6 +5,23 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.69] - 2026-11-05
+
+### Added
+
+- A document's page has **Open original**: the file it was read from opens in the app this
+  computer opens it with (Excel, Word, a PDF viewer). Only files in a cloud drive had a link.
+
+### Fixed
+
+- Changes made outside the window -- MCP switched from the icon's menu, a workspace opened by an
+  MCP client -- show in it within seconds: the MCP switch stayed on, and the top bar named the
+  old workspace and counted its documents.
+- "Quit completely" takes the icon out of the notification area; Windows kept it there until a
+  pointer passed over it.
+- The Windows installer ends an app from before 0.1.57, which writes no `server.json`, instead
+  of stopping at "Graph-Me-Maybe is running".
+
 ## [0.1.68] - 2026-11-05
 
 ### Changed

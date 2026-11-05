@@ -2,7 +2,7 @@
 // invented documents, so the checks need no server, graph DB or model.
 import type { Page, Route } from '@playwright/test';
 
-interface Fake { found: { box: boolean; google: boolean; onedrive: boolean }; workspaces: { active: string; mcp_enabled: boolean; mcp_changes: boolean; items: { id: string; name: string; mcp: boolean }[] }; opened: string[]; deletedWorkspaces: string[]; connected: { box: boolean; google: boolean; onedrive: boolean }; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; uploaded: string[]; built: string[][]; starting: number }
+interface Fake { found: { box: boolean; google: boolean; onedrive: boolean }; workspaces: { active: string; mcp_enabled: boolean; mcp_changes: boolean; items: { id: string; name: string; mcp: boolean }[] }; opened: string[]; originals: string[]; deletedWorkspaces: string[]; connected: { box: boolean; google: boolean; onedrive: boolean }; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; uploaded: string[]; built: string[][]; starting: number }
 
 /** A job as `GET /v1/jobs` lists it, newest first. */
 type FakeJob = Record<string, unknown> & { id: string; kind: string; state: string };
@@ -40,7 +40,7 @@ export async function fakeApi(page: Page,
       { name: 'korean', model: 'KURE-v1', size: 437779008, installed: true, chosen: false, fetching: null, error: null },
     ],
     workspaces: { active: 'default', mcp_enabled: true, mcp_changes: false, items: [{ id: 'default', name: 'Default', mcp: false }, { id: 'w2', name: 'Invented audits', mcp: false }] },
-    found: { box: boxDrive, google: googleDrive, onedrive: oneDrive }, opened: [], deletedWorkspaces: [],
+    found: { box: boxDrive, google: googleDrive, onedrive: oneDrive }, opened: [], originals: [], deletedWorkspaces: [],
     connected: { box: false, google: false, onedrive: false }, boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
     installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0,
     uploaded: [], built: [], starting };
@@ -194,6 +194,14 @@ export async function fakeApi(page: Page,
     if (path === '/v1/graph/reset' && method === 'POST') {
       fake.reset += 1;
       return json(route, { deleted: docs.length });
+    }
+    const original = path.match(/^\/v1\/documents\/([^/]+)\/open$/);
+    if (original && method === 'POST') { fake.originals.push(original[1]); return json(route, { opened: docs.find((d) => d.id === original[1])!.label }); }
+    const outline = path.match(/^\/v1\/documents\/([^/]+)\/graph$/);
+    if (outline) {
+      const doc = docs.find((d) => d.id === outline[1])!;
+      return json(route, { nodes: [{ id: doc.id, labels: ['Document'], properties: { label: doc.label } }],
+        relationships: [], chunks: [], pages: {}, crops: [] });
     }
     const file = path.match(/^\/v1\/documents\/(.+)\/file$/);
     if (file && method === 'POST') return json(route, { file_id: `file-${file[1]}` });

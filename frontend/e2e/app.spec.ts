@@ -631,3 +631,23 @@ test('what keeps the server from running is listed on the settings page until it
   await expect(page.getByText('준비됐습니다')).toBeVisible();
   await expect(listed).toHaveCount(0);
 });
+
+test('MCP and the workspace changed outside the page are shown without reopening it', async ({ page }) => {
+  // The icon's menu turned MCP off and the switch stayed on; a workspace opened by an MCP client
+  // left the top bar naming the old one.
+  const fake = await fakeApi(page);
+  await page.goto('/manage/settings');
+  const allowed = page.getByRole('checkbox', { name: /MCP 사용/ });
+  await expect(allowed).toBeChecked();
+  fake.workspaces.mcp_enabled = false;
+  fake.workspaces.active = 'w2';
+  await expect(allowed).not.toBeChecked({ timeout: 8000 });
+  await expect(page.getByRole('button', { name: /워크스페이스: Invented audits/ })).toBeVisible();
+});
+
+test('a document opens its original in the app this computer opens it with', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto('/manage/docs/spec');
+  await page.getByRole('button', { name: '원본 열기' }).click();
+  await expect.poll(() => fake.originals).toEqual(['spec']);
+});

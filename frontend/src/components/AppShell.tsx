@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { isBuilding } from '../api/client';
 import { cn } from '../lib/format';
 import { useLang, useT, type Lang } from '../lib/i18n';
-import { useBuild, useBuildFollower, useCorpusMap, useSettings } from '../lib/queries';
+import { useBuild, useBuildFollower, useCorpusMap, useSettings, useWorkspaceFollower } from '../lib/queries';
 import { useTheme, type Theme } from '../lib/theme';
 import { useUpload } from '../features/upload/upload';
 import { WindowControls, useWindowChrome } from './WindowControls';
@@ -97,6 +97,7 @@ export function AppShell() {
   const t = useT();
   const chrome = useWindowChrome();
   // How a build ended is said once, wherever the reader is.
+  useWorkspaceFollower();
   useBuildFollower((build) => {
     const failed = build.failed.length ? `${t('notProcessed', build.failed.length)} · ${build.failed.join(' · ')}` : undefined;
     const done = [t('buildDone', build.documents, build.embedded),

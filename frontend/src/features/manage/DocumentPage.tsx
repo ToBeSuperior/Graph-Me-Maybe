@@ -20,6 +20,7 @@ import { keys, useBuild } from '../../lib/queries';
 import { pageName, pageNameAt, usePages } from '../../lib/pages';
 import { PagesPending, PageTabs } from '../../components/PageTabs';
 import { DeleteDocument } from './DeleteDocument';
+import { OpenOriginal } from './OpenOriginal';
 
 const WORKING = ['rendering', 'grouping', 'reading', 'captioning', 'referencing'];
 
@@ -41,7 +42,10 @@ function SpaceDocument({ id }: { id: string }) {
     <DocumentView name={name ?? id} graph={outline.data} graphError={outline.error as Error | null}
       demoDoc={pages.doc} sheets={pages.sheets} pagesOfNodes={pages.pagesOfNodes} crops={pages.crops}
       pagesError={pages.error as Error | null}
-      actions={name && <DeleteDocument id={id} name={name} onDeleted={() => navigate('/manage')} />} />
+      actions={name && <>
+        <OpenOriginal id={id} />
+        <DeleteDocument id={id} name={name} onDeleted={() => navigate('/manage')} />
+      </>} />
   );
 }
 

@@ -477,3 +477,16 @@ def test_the_windows_installer_ends_the_agent_and_its_window_first() -> None:
     assert uninstall.index("Stop-App") < uninstall.index("uv tool uninstall")
     # Start at login goes with the app.
     assert "CurrentVersion\\Run" in uninstall and "'Graph-Me-Maybe'" in uninstall
+
+
+def test_the_windows_installer_ends_an_app_from_before_server_json() -> None:
+    """An app from before 0.1.57 writes no `server.json`: updating one left running stopped
+    at "Graph-Me-Maybe is running -- quit it first". It is found by where it runs from -- the
+    tool's own commands and Python -- and ended with what it started."""
+    text = (ROOT / "install.ps1").read_text()
+    stop = text[text.index("function Stop-App"):]
+    stop = stop[:stop.index("\n}\n")]
+    missing = stop.index("Test-Path -LiteralPath $file")
+    untracked = stop[missing:]
+    for needed in ("graphme-app", "uv tool dir", "taskkill", "/T"):
+        assert needed in untracked, needed

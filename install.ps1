@@ -134,10 +134,22 @@ function Register-Uninstall([string]$Tag) {
 
 # The app running behind its icon -- its window, then the agent -- ended through the pids it
 # wrote in server.json, with what each started (/T: the agent's Neo4j and search model). A pid
-# some other program has taken since is left alone.
+# some other program has taken since is left alone. An app from before 0.1.57 writes no
+# server.json: it is found by where it runs from -- the tool's graphme-app.exe and its Python.
 function Stop-App {
     $file = Join-Path $AppHome 'server.json'
-    if (-not (Test-Path -LiteralPath $file)) { return }
+    if (-not (Test-Path -LiteralPath $file)) {
+        $tools = (uv tool dir).Trim()
+        $bin = (uv tool dir --bin).Trim()
+        $own = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.Path -and (($_.Path -eq (Join-Path $bin 'graphme-app.exe')) -or
+                          $_.Path.StartsWith((Join-Path $tools $Tool) + '\', 'OrdinalIgnoreCase'))
+        })
+        if ($own) { Say 'quitting the running Graph-Me-Maybe' }
+        foreach ($process in $own) { Quiet { taskkill /PID $process.Id /T /F } }
+        foreach ($process in $own) { Wait-Process -Id $process.Id -Timeout 30 -ErrorAction SilentlyContinue }
+        return
+    }
     try { $said = Get-Content -Raw -LiteralPath $file | ConvertFrom-Json } catch { return }
     foreach ($id in @($said.window_pid, $said.pid)) {
         if (-not $id) { continue }

@@ -373,6 +373,8 @@ const ko = {
   boxBuild: 'Box에서 그래프 만들기',
   boxBuilding: '고른 폴더와 파일을 읽고 있습니다. 전에 읽은 버전은 건너뜁니다.',
   openOriginal: '원본 열기',
+  openOriginalTip: '이 컴퓨터에서 이 파일을 여는 앱(Excel, Word, PDF 뷰어)으로 엽니다',
+  cannotOpenOriginal: '원본을 열 수 없습니다',
   keysTitle: '키와 모델',
   keysBody: '이 데모가 쓰는 키와 모델입니다. 저장하면 .env에 남고 바로 적용됩니다. 키는 저장하기 전에 확인하고(모델 호출 없음, 비용 없음), 화면에 다시 보내지 않습니다.',
   settingName: (env: string) => ({
@@ -813,6 +815,8 @@ const en: Words = {
   boxBuild: 'Build from Box',
   boxBuilding: 'Reading the picked folders and files; versions read before are passed over.',
   openOriginal: 'Open original',
+  openOriginalTip: 'Opens the file in the app this computer opens it with (Excel, Word, a PDF viewer)',
+  cannotOpenOriginal: 'Could not open the original',
   keysTitle: 'Keys and model',
   keysBody: 'The keys and model this demo uses. Saved, they go into .env and take effect at once. Keys are tried before saving (no model call, no cost) and are never sent back to the page.',
   settingName: (env) => ({
