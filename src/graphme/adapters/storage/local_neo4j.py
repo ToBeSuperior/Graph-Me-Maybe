@@ -47,6 +47,8 @@ _log = logging.getLogger(__name__)
 NEO4J_VERSION = "5.26.32"
 JAVA_MAJOR = 21
 FIRST_PORT = 7687
+PORT_TRIES = 5
+"""Ports tried in turn when what answers on the one started is another home's Neo4j."""
 WAIT_SECONDS = 120
 _starting = threading.Lock()
 _started: list[tuple[Neo4jHome, subprocess.Popen[bytes]]] = []
@@ -447,9 +449,19 @@ def ensure_local_neo4j(
             return f"bolt://127.0.0.1:{record['port']}"
         if not home.installed():
             home = replace(installing(root), graph=graph)
-        port = next(p for p in range(FIRST_PORT, FIRST_PORT + 100) if free(p))
-        _log.warning("starting the graph DB (Neo4j) on 127.0.0.1:%s", port)
-        child = _up(home, port, memory, starting, answers, sleep)
+        tried: set[int] = set()
+        while True:
+            port = next(p for p in range(FIRST_PORT, FIRST_PORT + 100)
+                        if p not in tried and free(p))
+            tried.add(port)
+            _log.warning("starting the graph DB (Neo4j) on 127.0.0.1:%s", port)
+            child = _up(home, port, memory, starting, answers, sleep)
+            # Another home starting at the same moment can bind the port found free first:
+            # ours then cannot, and theirs answers on it. What answers must be this home's.
+            if is_ours(home.data, port) or len(tried) == PORT_TRIES:
+                break
+            stop(child)
+            _started.remove((home, child))
         if password(home.graph_root) is None:
             _given_password(home, port, secure)
             stop(child)

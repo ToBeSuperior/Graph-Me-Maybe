@@ -280,7 +280,7 @@ wheels = [
 
 [[package]]
 name = "graph-me-maybe"
-version = "0.1.66"
+version = "0.1.67"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

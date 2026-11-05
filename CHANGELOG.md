@@ -5,6 +5,19 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.67] - 2026-11-05
+
+### Changed
+
+- A part of a figure (one panel of a chart, one piece of a diagram) no longer keeps its own
+  picture beside the figure's, which already holds it; the app's folder keeps one picture per
+  figure. Picking a part in the app shows the figure it belongs to.
+
+### Fixed
+
+- Two graphs whose Neo4j starts at the same moment no longer take the same port: the one that
+  finds another graph answering there moves to the next free port.
+
 ## [0.1.66] - 2026-11-05
 
 ### Changed

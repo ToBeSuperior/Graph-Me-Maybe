@@ -151,5 +151,7 @@ def _reshaped(
     figure_id = part_of.get(node.id)
     if figure_id is None:
         return node
-    # A part is shown with the figure it belongs to, not on its own beside it.
-    return node.model_copy(update={"metadata": {**node.metadata, "part_of_figure": figure_id}})
+    # A part is shown with the figure it belongs to, not on its own beside it: every reader
+    # sends the figure's crop, which holds it, so its own is let go (the sweep takes it).
+    kept = {k: v for k, v in node.metadata.items() if k != CROP_ASSET_KEY}
+    return node.model_copy(update={"metadata": {**kept, "part_of_figure": figure_id}})

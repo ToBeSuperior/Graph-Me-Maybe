@@ -71,13 +71,10 @@ MMLongBench-Doc and DocBench, published on the site.
 
 ## 1 · Wire the hierarchy into production indexing
 
-- [ ] Measure on a real corpus how the outline (hierarchy edges) changes search results.
-      Every build reads the outline off the page now; what it buys in answers is not measured.
-- [ ] Decide the readings per page (`GRAPHME_HIERARCHY_READINGS`, 1; the app 2) from per-page
-      call cost and latency -- with 2 readings the calls double, and only pages where the
-      readings differ cost one more.
-- [ ] Decide whether to record the places where readings differ. Today which reading was
-      chosen and why stays in the log only, not in the graph.
+- [x] (Closed 2026-11-05, kept as a record) Record the places where readings differ in the
+      graph. Not taken: nothing reads such a record yet (no app mark, no analysis), so which
+      reading was chosen and why stays in the log. Add it when the work to reduce build-to-build
+      differences needs it.
 - [ ] Check the page-carry rule for flowing documents on longer documents. Today, within a
       budget of 1,200 tokens, it carries the open chain → the heading skeleton (up to half
       the budget) → the recent section whole, and sends the bottom 30% image along. Check
@@ -91,27 +88,14 @@ MMLongBench-Doc and DocBench, published on the site.
       help). What is left needs an Aura instance and its password: the user's to run, from the
       app's export. Top-level units need no `OUTLINE_PARENT`: the published `PARENT_OF`
       (`final_edges`) already gives every node one parent (`test_published_tree.py`).
-- [ ] Reduce how much one build of a document differs from the next. The same document read
-      twice comes out with different table text, captions and block cuts, which moves question
-      accuracy by a few points between builds. Candidate: take a table's words from the PDF's
-      own text instead of the page-reading model, and keep the model to the structure.
 
 ## 1.5 · Search and the web app
 
-- [ ] (Later) Draw a preview in the app's own window with the same viewer: no server render at
-      all, and sharp at any zoom. The boxes come from the server's Chromium, and macOS's window is
-      WebKit, so text measured differently would move them; check that first.
-- [ ] Measure what asking for documents costs and buys against asking for passages, on a real
-      corpus and a question set with the expected documents. Build the graph in a home of its
-      own (`GRAPHME_HOME`, the Neo4j install copied) so no other graph is touched, then ask each
-      question both ways (5 passages; 5 documents) and compare: passages gathered, documents
-      found, answer tokens, documents the 12,000-token budget leaves unread (efficiency);
-      whether the expected document is found and read, and answers graded O/△/X (effect);
-      search, link walk and answer time (speed). The build and the answers are model calls:
-      decide first whether to grade answers or stop at the search measures.
-- [ ] Tune RRF `k` (60), the weight (0.6) and each search model's relevance floor (0.39 general,
-      0.46 Korean, 0.2 OpenAI) on a real question set. Today they are set from literature values
-      and the invented samples only.
+- [x] (Closed 2026-11-05, kept as a record) Draw a preview in the app's own window with the same
+      viewer instead of on the server. Not taken: the app window is WebKit on macOS and an
+      Edge (Chromium) WebView on Windows, so drawing there would need each platform matched to the
+      boxes the server's Chromium measures. Pages stay drawn by the server's one Chromium on every
+      platform; turning pages was made fast by drawing the pages around one ahead.
 - [x] (Closed 2026-11-05, kept as a record) Some pages keep watermarks and repeated header
       elements without `drop`. Checked on a public benchmark build: short text repeated on many
       pages of one document is partly furniture (page numbers, a running header) and partly
@@ -132,9 +116,6 @@ MMLongBench-Doc and DocBench, published on the site.
       and key in Keys and model; rooms and folders browsed in the app, picked files fetched while
       read). A room kept on an outside storage (OneDrive, Box, Google Drive) is read through that
       drive's tab already; Workspace's WebDAV can be mounted and added as a folder.
-- [ ] Check that lossy WebP crops do not cost picture questions. After crops moved to WebP, one
-      benchmark's picture questions came out lower on two answer runs over the same build; try
-      the same build with lossless or higher-quality photographs before deciding.
 
 ## 1.6 · The background app and MCP on Windows
 
@@ -209,16 +190,34 @@ no picture. If one is needed, draw a fresh one then.
       hidden secondary category axis): `UPSTREAM`'s `commit` and `npm_version`. Then drop
       `chart_axes.py`, `picture_anchors.py` (fixed upstream in `d7f60b865`) and dist patch
       `0003`, and check every other patch still applies and is still needed.
-- [ ] A part of a figure keeps the crop it had before the figure was widened, and nothing reads
-      it any more: every reader sends the figure's own crop. Drop the part's crop name when it
-      joins a figure, once the app's preview of a part is checked.
-- [ ] Two homes starting their Neo4j at the same moment can choose the same free Bolt port; the
-      second then fails to sign in. Hold the port until the server answers, or retry on the next.
 
 ## 8 · Refinements (low priority)
 
 Kept for later; nothing here is scheduled.
 
+- [ ] Measure on a real corpus how the outline (hierarchy edges) changes search results.
+      Every build reads the outline off the page now; what it buys in answers is not measured.
+- [ ] Decide the readings per page (`GRAPHME_HIERARCHY_READINGS`, 1; the app 2) from per-page
+      call cost and latency -- with 2 readings the calls double, and only pages where the
+      readings differ cost one more.
+- [ ] Reduce how much one build of a document differs from the next. The same document read
+      twice comes out with different table text, captions and block cuts, which moves question
+      accuracy by a few points between builds. Candidate: take a table's words from the PDF's
+      own text instead of the page-reading model, and keep the model to the structure.
+- [ ] Measure what asking for documents costs and buys against asking for passages, on a real
+      corpus and a question set with the expected documents. Build the graph in a home of its
+      own (`GRAPHME_HOME`, the Neo4j install copied) so no other graph is touched, then ask each
+      question both ways (5 passages; 5 documents) and compare: passages gathered, documents
+      found, answer tokens, documents the 12,000-token budget leaves unread (efficiency);
+      whether the expected document is found and read, and answers graded O/△/X (effect);
+      search, link walk and answer time (speed). The build and the answers are model calls:
+      decide first whether to grade answers or stop at the search measures.
+- [ ] Tune RRF `k` (60), the weight (0.6) and each search model's relevance floor (0.39 general,
+      0.46 Korean, 0.2 OpenAI) on a real question set. Today they are set from literature values
+      and the invented samples only.
+- [ ] Check that lossy WebP crops do not cost picture questions. After crops moved to WebP, one
+      benchmark's picture questions came out lower on two answer runs over the same build; try
+      the same build with lossless or higher-quality photographs before deciding.
 - [ ] Shorten the time to answer one question. Every question makes two model calls (the split
       and the answer); a question that names no document and asks one thing may not need the
       split.

@@ -197,6 +197,11 @@ def kept_from(records: dict[str, Any], fmt: DocumentFormat
                 boxes[node["id"]] = (page, [int(v) for v in box])
         if isinstance(crop := properties.get(f"meta_{CROP_ASSET_KEY}"), str):
             crops[node["id"]] = crop
+    # A figure's part is shown by the figure's crop: the figure holds it, and keeps the only one.
+    for node in records["nodes"]:
+        figure = node["properties"].get("meta_part_of_figure")
+        if node["id"] not in crops and figure in crops:
+            crops[node["id"]] = crops[figure]
     return Kept(records, page_of, boxes, crops), pages
 
 

@@ -175,6 +175,13 @@ def crop_box(node: GraphNode) -> PixelBox | None:
     return PixelBox(x0, y0, x1, y1)
 
 
+def crop_holder(node: GraphNode, nodes: Mapping[str, GraphNode]) -> GraphNode:
+    """The node whose crop shows `node`: a figure's part is shown by the figure, which holds it
+    and keeps the only crop of it."""
+    figure = node.metadata.get("part_of_figure")
+    return nodes.get(figure, node) if isinstance(figure, str) else node
+
+
 def read_node_crop(node: GraphNode, *, asset_store: AssetStore) -> bytes | None:
     """The crop this module stored for a node, or None when it stored none.
 

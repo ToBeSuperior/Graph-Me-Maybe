@@ -50,7 +50,12 @@ from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, modified_at
 from graphme.api import GraphMe
 from graphme.application.embedded_documents import name_part
 from graphme.application.ingest import documents_at
-from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop, read_node_crop
+from graphme.application.visual_crops import (
+    CROP_ASSET_KEY,
+    crop_holder,
+    read_crop,
+    read_node_crop,
+)
 from graphme.config import Settings, load_settings
 from graphme.runtime import create_browser_renderer
 from graphme.server import models as api
@@ -750,10 +755,11 @@ def create_app(
             assets = LocalAssetStore(demo.settings.asset_dir)
             picture = read_crop(stored, assets) if stored else None
         else:
-            found = next((n for n in session.read().nodes if n.id == node), None)
+            nodes = {n.id: n for n in session.read().nodes}
+            found = nodes.get(node)
             if found is None:
                 raise HTTPException(404, "this node cannot be found")
-            picture = (read_node_crop(found, asset_store=session.store)
+            picture = (read_node_crop(crop_holder(found, nodes), asset_store=session.store)
                        if session.store is not None else None)
         if picture is None:
             raise HTTPException(404, "this node has no stored image")
@@ -767,12 +773,14 @@ def create_app(
             return {**session.kept.records, "pages": session.kept.page_of,
                     "crops": list(session.kept.crops)}
         extracted = session.read()
-        present = {n.id for n in extracted.nodes}
+        nodes_by_id = {n.id: n for n in extracted.nodes}
+        present = set(nodes_by_id)
         return {
             **graph_records(extracted),
             # Measured before any outline; a node a reading dropped is no longer drawn.
             "pages": {n: p for n, p in session.page_of.items() if n in present},
-            "crops": [n.id for n in extracted.nodes if n.metadata.get(CROP_ASSET_KEY)],
+            "crops": [n.id for n in extracted.nodes if crop_holder(
+                n, nodes_by_id).metadata.get(CROP_ASSET_KEY)],
         }
 
     @v1.get("/files/{file_id}/boxes", response_model=api.Boxes)

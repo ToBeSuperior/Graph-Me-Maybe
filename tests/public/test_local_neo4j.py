@@ -188,7 +188,7 @@ def test_one_answering_that_is_not_this_home_s_is_left_and_ours_started_elsewher
         return _Child()
 
     uri = local_neo4j.ensure_local_neo4j(
-        tmp_path, ("1g", "512m"), is_ours=lambda data, port: False,
+        tmp_path, ("1g", "512m"), is_ours=lambda data, port: port == 7688,
         installing=lambda root: home, starting=starting,  # type: ignore[arg-type]
         free=lambda port: port != 7687, answers=lambda port: port == 7688,
         secure=lambda port, secret: None)
@@ -206,7 +206,7 @@ def test_not_installed_it_is_fetched_first(tmp_path: Path,
         return Neo4jHome(root)
 
     local_neo4j.ensure_local_neo4j(
-        tmp_path, ("1g", "512m"), installing=installing, is_ours=lambda d, p: False,
+        tmp_path, ("1g", "512m"), installing=installing, is_ours=lambda d, p: True,
         starting=lambda *a, **k: _Child(), free=lambda p: True,  # type: ignore[arg-type,return-value]
         answers=lambda p: True,
         secure=lambda port, secret: None)
@@ -303,7 +303,7 @@ def test_the_first_start_sets_a_password_kept_only_for_this_user_and_starts_agai
         return _Child()
 
     uri = local_neo4j.ensure_local_neo4j(
-        tmp_path, ("1g", "512m"), installing=lambda root: home, is_ours=lambda d, p: False,
+        tmp_path, ("1g", "512m"), installing=lambda root: home, is_ours=lambda d, p: True,
         starting=starting, free=lambda p: True, answers=lambda p: True,  # type: ignore[arg-type]
         secure=lambda port, password: secured.append((port, password)))
 
@@ -347,7 +347,7 @@ def test_a_workspace_s_graph_runs_from_the_home_s_neo4j_over_its_own_folder_and_
 
     local_neo4j.ensure_local_neo4j(
         tmp_path, ("1g", "512m"), graph=graph, installing=lambda root: Neo4jHome(root),
-        is_ours=lambda d, p: False, starting=starting,  # type: ignore[arg-type]
+        is_ours=lambda d, p: True, starting=starting,  # type: ignore[arg-type]
         free=lambda p: True, answers=lambda p: True, secure=lambda port, password: None)
 
     assert set(over) == {graph / "neo4j-data"}
@@ -431,3 +431,25 @@ def test_a_neo4j_started_by_an_app_that_blocks_its_ending_signals_still_takes_th
     finally:
         if child.poll() is None:
             child.kill()
+
+
+def test_a_port_another_home_took_in_the_same_moment_is_given_up_for_the_next(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two homes starting at once both found 7687 free; the other's Neo4j bound it first, ours
+    could not, and the other's answered on the port -- signed in to with our password, it
+    refused. What answers is checked to be this home's; if it is not, the next port is tried."""
+    monkeypatch.setattr(local_neo4j, "_started", [])
+    home = Neo4jHome(tmp_path)
+    began: list[int] = []
+
+    def starting(home: Neo4jHome, data: Path, port: int, memory: Any, **_: Any) -> _Child:
+        began.append(port)
+        return _Child()
+
+    uri = local_neo4j.ensure_local_neo4j(
+        tmp_path, ("1g", "512m"), installing=lambda root: home, starting=starting,  # type: ignore[arg-type]
+        is_ours=lambda data, port: port == 7688, free=lambda port: True,
+        answers=lambda port: True, secure=lambda port, secret: None)
+
+    assert began[0] == 7687 and set(began[1:]) == {7688} and uri == "bolt://127.0.0.1:7688"
