@@ -218,7 +218,6 @@ def _outline_payload(request: HierarchyScopeRequest) -> list[str]:
     return [
         "  " * depth(unit.id) + " ".join(unit.label.split())
         + (" (open)" if unit.id in still_open else "")
-        + (f" (+{count} not shown)" if (count := request.outline_omitted.get(unit.id)) else "")
         for unit in request.outline
     ]
 

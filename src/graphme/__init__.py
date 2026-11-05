@@ -14,7 +14,7 @@ from graphme.application.embedded_documents import shown_name
 from graphme.config import Settings, load_settings
 from graphme.domain.models import ExtractedDocument
 
-__version__ = "0.1.67"
+__version__ = "0.1.68"
 
 __all__ = [
     "BuildReport", "ExtractedDocument", "GraphAnswer", "GraphMe", "GraphNotEmbedded",

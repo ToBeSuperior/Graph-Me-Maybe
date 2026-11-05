@@ -440,24 +440,15 @@ heading of the same shape went under the title on one page and under the documen
 next. So what is handed over was changed to **the hierarchy built so far itself**. A heading
 arrives with what reads under it, and that is the only ground for saying it is the same heading.
 
-The hierarchy handed over keeps **what it keeps whole**. Three things go out. The **open chain**
-is the path in the document up to where the previous page stopped. Since it is where this page
-attaches, it always goes, even with its branches cut. Next to it goes the **heading skeleton**:
-units that have children, shallowest first, only those whose parent is already carried, up to half
-of the budget (`SKELETON_SHARE`). Filling only the newest sections made the early chapters of a
-long document vanish from the reference, and later pages were read without knowing the shape of
-the document. With the remaining budget goes a **complete subgraph**: a node goes with all its
-descendants or not at all. A heading that arrives with its children left behind reads as "a
-section that starts there and holds nothing", which is worse than not sending it, and a node that
-arrives with its parent left behind looks like a place to attach but is not one.
-
-The budget is 1,200 tokens (`CARRY_TOKEN_BUDGET`). That is twice a search unit, because this is
-the **reference frame** a page uses to check its own units. Korean is about one token per
-character, so counting bytes ÷ 4 gives a third of the real figure and the budget would never be
-reached. Hangul is counted separately. The newest subgraphs are kept first. A section decided two
-pages ago is where this page continues, and a section from the first page of the document is not.
-A subgraph that cannot get a place is left on its parent as a count (`outline_omitted`). Without
-that, a section with its front part cut would read as "a section that began here".
+What is handed over has **no budget**. It once had one: 1,200 tokens, twice a search unit, filled
+with the open chain, then the heading skeleton shallowest first up to half of it, then the newest
+sections whole, with what did not fit left on its parent as a count. In a long document that cut
+the deepest headings first, and a late page read its own subsection without the ones beside it.
+Since pages are read side by side, what travels is the document's headings (asked once, on text
+alone) before the page, and a later page is only read as well as what came before it is known --
+so all of them go. The **open chain**, the path down to where the previous page stopped, is
+marked on it: that is where this page attaches. A heading is sent at its opening words
+(`CARRY_LABEL_CHARS`): it is there to be recognised, not read.
 
 Also, when a page ended inside a figure, the innermost item of the chain became the **label
 printed on the figure**. The prompt says "it usually continues under the innermost", so this

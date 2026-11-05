@@ -233,12 +233,9 @@ the cover's organisation line. Reading the pages in order instead, each carrying
 the pages before built, made a document only as fast as its slowest chain of pages, and let
 one page's mistake travel into every page after it.
 
-What the headings travel as is `carried_outline.Placements.carried`: the open chain down to the last
-heading before the page, the headings shallowest first up to `SKELETON_SHARE` of
-`CARRY_TOKEN_BUDGET`, each only with its parent already carried. A heading that arrives
-without its items carries how many it holds (`outline_omitted`). Headings are sent at
-`CARRY_LABEL_CHARS`. Korean is about a token a character, so the estimate counts Hangul
-separately.
+What the headings travel as is `carried_outline.Placements.carried`: every heading before the
+page, with no token budget -- a later page is only read as well as what came before it is
+known -- and the open chain down to the last one. Headings are sent at `CARRY_LABEL_CHARS`.
 
 Text grouping (`application/unit_grouping.py`) explodes PDF blocks into printed lines and
 slide shapes into paragraphs (a Word paragraph, already whole, is offered as it is -- a hand-wrapped

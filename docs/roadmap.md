@@ -75,14 +75,6 @@ MMLongBench-Doc and DocBench, published on the site.
       graph. Not taken: nothing reads such a record yet (no app mark, no analysis), so which
       reading was chosen and why stays in the log. Add it when the work to reduce build-to-build
       differences needs it.
-- [ ] Check the page-carry rule for flowing documents on longer documents. Today, within a
-      budget of 1,200 tokens, it carries the open chain → the heading skeleton (up to half
-      the budget) → the recent section whole, and sends the bottom 30% image along. Check
-      whether it is acceptable that deep headings drop first when the skeleton exceeds the
-      budget in documents of dozens of pages.
-- [ ] Check the small-print rule (difference from the modal body size, presence of body text
-      above and below) and the number of pieces per call on more document types. The rule was
-      tuned on only two kinds, papers and Korean reports.
 - [ ] Check an Aura upload end to end (the `.dump` is checked by loading it into an empty Neo4j
       5.26, and the `neo4j-admin database upload` options were checked against 5.26's own
       help). What is left needs an Aura instance and its password: the user's to run, from the
@@ -159,10 +151,10 @@ MMLongBench-Doc and DocBench, published on the site.
 
 ## 5 · Extending browser automation
 
-- [ ] The e2e checks (`frontend/e2e`) cover asking, citations, the folders, builds and their
-      failures, a stopped search, a wrong key, the drives and workspaces. Not yet: a folder
-      dropped or picked and read, and the readiness states -- the graph still starting (503,
-      Retry-After) and `preflight()` warnings shown on the settings page.
+Nothing open. The e2e checks (`frontend/e2e`) cover asking, citations, the folders, builds and
+their failures, a stopped search, a wrong key, the drives and workspaces, a folder picked or
+dropped and built, the graph still starting (503, Retry-After), and `preflight()` warnings on
+the settings page.
 
 ## 6 · Reconciling documents
 
@@ -221,6 +213,10 @@ Kept for later; nothing here is scheduled.
 - [ ] Shorten the time to answer one question. Every question makes two model calls (the split
       and the answer); a question that names no document and asks one thing may not need the
       split.
+- [ ] Check the small-print rule (difference from the modal body size, presence of body text
+      above and below) and the number of pieces per call on more document types. The rule was
+      tuned on only two kinds, papers and Korean reports: brochures, PDF slides, financial
+      reports, manuals with sidebars and dense pages (contents, references) are unchecked.
 
 ## Operating constraints
 

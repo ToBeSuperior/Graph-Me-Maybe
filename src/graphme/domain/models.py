@@ -276,9 +276,8 @@ class HierarchyScopeRequest(DomainModel):
     units: tuple[HierarchyUnit, ...] = Field(min_length=1, max_length=500)
     """Every unit needs a decision and every unit may parent another, so the two lists
     that used to say which were the same list twice."""
-    outline: tuple[HierarchyUnit, ...] = Field(default=(), max_length=300)
-    """The outline earlier pages built, as far as it fits: units already decided, in
-    reading order.
+    outline: tuple[HierarchyUnit, ...] = ()
+    """The outline earlier pages built, all of it: units already decided, in reading order.
 
     A page is a place the paper ran out, not a place the document changed subject, so the
     first line of a page usually belongs under a heading printed on the page before. What
@@ -293,12 +292,7 @@ class HierarchyScopeRequest(DomainModel):
     outline_open: tuple[str, ...] = Field(default=(), max_length=50)
     """The units still open where this page begins, outermost first -- the path from the
     document down to where the page before stopped. These are the places this page can
-    attach to, and they are the only carried units allowed to be missing children: what
-    hangs off them may have been dropped to fit, while everything else in `outline` is
-    carried whole or not at all."""
-    outline_omitted: dict[str, int] = Field(default_factory=dict)
-    """How many of a carried unit's own subtrees were dropped to fit, by its id. Without
-    it a section whose earlier items did not fit reads as a section that began here."""
+    attach to."""
     image: HierarchyImageDescriptor
 
     @model_validator(mode="after")
@@ -323,8 +317,6 @@ class HierarchyScopeRequest(DomainModel):
             raise ValueError("a carried unit's parent must be carried with it")
         if set(self.outline_open) - carried_ids:
             raise ValueError("an open unit must be carried in the outline")
-        if set(self.outline_omitted) - carried_ids:
-            raise ValueError("an omitted count must be keyed by a carried unit")
 
         if self.image.document_id != self.document_id or self.image.scope != self.scope:
             raise ValueError("hierarchy image must match request document and scope")

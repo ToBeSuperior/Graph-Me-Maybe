@@ -32,8 +32,14 @@ export async function droppedFiles(items: DataTransferItemList): Promise<{ file:
       }
     }
   };
-  const entries = [...items].map((item) => item.webkitGetAsEntry()).filter((e): e is FileSystemEntry => !!e);
-  for (const entry of entries) await walk(entry, '');
+  // An item with no entry -- a file a page or an app hands over rather than one from the disk's
+  // folders -- is taken as the file it is.
+  const got = [...items].filter((item) => item.kind === 'file')
+    .map((item) => ({ entry: item.webkitGetAsEntry(), file: item.getAsFile() }));
+  for (const { entry, file } of got) {
+    if (entry) await walk(entry, '');
+    else if (file) out.push({ file, path: file.name });
+  }
   return out;
 }
 

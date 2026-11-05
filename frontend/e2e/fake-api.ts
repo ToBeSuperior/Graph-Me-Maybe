@@ -2,7 +2,7 @@
 // invented documents, so the checks need no server, graph DB or model.
 import type { Page, Route } from '@playwright/test';
 
-interface Fake { found: { box: boolean; google: boolean; onedrive: boolean }; workspaces: { active: string; mcp_enabled: boolean; mcp_changes: boolean; items: { id: string; name: string; mcp: boolean }[] }; opened: string[]; deletedWorkspaces: string[]; connected: { box: boolean; google: boolean; onedrive: boolean }; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number }
+interface Fake { found: { box: boolean; google: boolean; onedrive: boolean }; workspaces: { active: string; mcp_enabled: boolean; mcp_changes: boolean; items: { id: string; name: string; mcp: boolean }[] }; opened: string[]; deletedWorkspaces: string[]; connected: { box: boolean; google: boolean; onedrive: boolean }; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; uploaded: string[]; built: string[][]; starting: number }
 
 /** A job as `GET /v1/jobs` lists it, newest first. */
 type FakeJob = Record<string, unknown> & { id: string; kind: string; state: string };
@@ -31,7 +31,8 @@ const BUILD_STARTED = { id: 'bx', kind: 'build', state: 'reading', done: 0, tota
 
 export async function fakeApi(page: Page,
   { box = true, boxDrive = true, googleDrive = true, oneDrive = true, workspaces = true, empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[],
-    progress = null as Record<string, unknown> | null, elapsed = null as number | null } = {}): Promise<Fake> {
+    progress = null as Record<string, unknown> | null, elapsed = null as number | null, starting = 0,
+    problems = null as string[] | null } = {}): Promise<Fake> {
   const fake: Fake = {
     searchModels: [
       { name: 'general', model: 'harrier-oss-v1-0.6b', size: 639448320, installed: false, chosen: true,
@@ -41,7 +42,8 @@ export async function fakeApi(page: Page,
     workspaces: { active: 'default', mcp_enabled: true, mcp_changes: false, items: [{ id: 'default', name: 'Default', mcp: false }, { id: 'w2', name: 'Invented audits', mcp: false }] },
     found: { box: boxDrive, google: googleDrive, onedrive: oneDrive }, opened: [], deletedWorkspaces: [],
     connected: { box: false, google: false, onedrive: false }, boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
-    installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0 };
+    installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0,
+    uploaded: [], built: [], starting };
   const json = (route: Route, body: unknown, status = 200) =>
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/v1/**', async (route) => {
@@ -109,7 +111,10 @@ export async function fakeApi(page: Page,
       return json(route, listed[at]);
     }
     if (path === '/v1/jobs/build' && method === 'POST') {
-      fake.boxDrive.push(route.request().postDataJSON().paths ?? []);
+      // A drive's build names paths; an upload's, the files it uploaded.
+      const { paths, files } = route.request().postDataJSON();
+      if (files?.length) { fake.built.push(files); return json(route, { ...BUILD_STARTED, source: 'upload', total: files.length }, 202); }
+      fake.boxDrive.push(paths ?? []);
       return json(route, { ...BUILD_STARTED, source: 'Box Drive' }, 202);
     }
     if (path === '/v1/cloud/box') return json(route, { configured: fake.box.configured, connected: fake.box.connected, picked: fake.box.picked });
@@ -142,18 +147,30 @@ export async function fakeApi(page: Page,
         }
       }
       const key = !!fake.saved.length;
-      return json(route, { endpoint: 'openai', samples, problems: key ? [] : ['The LLM API key is empty'], fields: [
+      return json(route, { endpoint: 'openai', samples, problems: key ? [] : problems ?? ['The LLM API key is empty'], fields: [
         { env: 'OPENAI_API_KEY', secret: true, set: key, value: null, hint: key ? 'abcd' : null },
         { env: 'GRAPHME_PROVIDER', secret: false, set: true, value: 'openai', hint: null,
           choices: { openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', gemini: 'GEMINI_API_KEY' } },
         { env: 'GRAPHME_MODEL', secret: false, set: true, value: 'gpt-x', hint: null },
       ] });
     }
+    // The graph DB still starting: the server answers 503 with Retry-After (`GraphStarting`).
+    if (path === '/v1/graph/map' && fake.starting > 0) {
+      fake.starting -= 1;
+      return route.fulfill({ status: 503, contentType: 'application/json', headers: { 'Retry-After': '1' },
+        body: JSON.stringify({ detail: 'The graph DB is starting' }) });
+    }
     if (path === '/v1/graph/map') {
       return json(route, empty || fake.reset ? { documents: [], total: 0, links: [], similar: [] }
         : { documents: docs, total: docs.length, links: [{ from: 'proc', to: 'spec', count: 1, matched_by: ['number'] }], similar: [] });
     }
     if (path === '/v1/jobs') return json(route, jobs);
+    if (path === '/v1/files' && method === 'POST') {
+      // The form's file part names the file; nothing of it is read.
+      const name = (route.request().postData() ?? '').match(/filename="([^"]+)"/)?.[1]?.split('/').pop() ?? '';
+      fake.uploaded.push(name);
+      return json(route, { id: `up${fake.uploaded.length}` });
+    }
     const cancel = path.match(/^\/v1\/jobs\/([^/]+)\/cancel$/);
     if (cancel && method === 'POST') {
       fake.cancelled.push(cancel[1]);

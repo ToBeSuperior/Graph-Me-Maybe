@@ -510,7 +510,6 @@ class RenderedHierarchyScopeProvider:
             outline=carried.units,
             outline_parents=carried.parents,
             outline_open=carried.open,
-            outline_omitted=carried.omitted,
             image=HierarchyImageDescriptor(
                 asset_hash=hashlib.sha256(page.png).hexdigest(),
                 size_bytes=len(page.png),

@@ -5,6 +5,19 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.68] - 2026-11-05
+
+### Changed
+
+- Each page of a long PDF or Word document is read knowing every heading before it. The
+  headings shown to a page were cut to a budget, deepest first, so a late page could read its
+  own subsection without the ones beside it.
+
+### Fixed
+
+- A file dropped on the app from another app or a page, rather than from a folder on the disk,
+  is uploaded; it was passed over as nothing readable.
+
 ## [0.1.67] - 2026-11-05
 
 ### Changed

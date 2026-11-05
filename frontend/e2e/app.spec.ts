@@ -1,6 +1,8 @@
 // The app as a reader meets it, against the fake API: an empty graph invites a folder; a
 // question gathers folders, its answer's citation opens the cited document; the tree answers to
 // the keyboard; the graph is reset only once the word is typed.
+import fs from 'node:fs';
+import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import { fakeApi } from './fake-api';
 
@@ -574,4 +576,58 @@ test('a connected drive says how much of it is kept on this computer', async ({ 
   await drive.getByRole('button', { name: '연결', exact: true }).click();
   await expect(drive.getByText('이 컴퓨터에서 차지하는 용량 · 991.9 MB (파일 102개)')).toBeVisible();
   await expect(drive.getByText('빌드가 읽은 온라인 전용 파일은', { exact: false })).toBeVisible();
+});
+
+test('a folder picked is uploaded, its documents only, and built into the graph', async ({ page }) => {
+  const fake = await fakeApi(page, { empty: true });
+  const folder = test.info().outputPath('Invented folder');
+  for (const [name, text] of [['Valve Spec.docx', 'x'], ['Sub/Leak Test.pdf', 'x'], ['notes.txt', 'x'],
+    ['~$Valve Spec.docx', 'lock'], ['.hidden/Old.pdf', 'x']]) {
+    fs.mkdirSync(path.dirname(path.join(folder, name)), { recursive: true });
+    fs.writeFileSync(path.join(folder, name), text);
+  }
+  await page.goto('/');
+  await page.locator('input[type=file]').first().setInputFiles(folder);
+  await expect(page.getByText('2개 올림 · 3개 건너뜀')).toBeVisible();
+  expect(fake.uploaded.sort()).toEqual(['Leak Test.pdf', 'Valve Spec.docx']);
+  await expect.poll(() => fake.built).toEqual([['up1', 'up2']]); // asked once the toast is up
+});
+
+test('a folder dropped on the page is uploaded and built the same way', async ({ page }) => {
+  const fake = await fakeApi(page, { empty: true });
+  await page.goto('/');
+  const dropped = await page.evaluateHandle(() => {
+    const data = new DataTransfer();
+    for (const name of ['Valve Spec.docx', 'notes.txt']) data.items.add(new File(['x'], name));
+    return data;
+  });
+  const box = page.getByText('문서 폴더를 끌어다 놓으세요');
+  await box.dispatchEvent('dragover', { dataTransfer: dropped });
+  await box.dispatchEvent('drop', { dataTransfer: dropped });
+  await expect(page.getByText('1개 올림 · 1개 건너뜀')).toBeVisible();
+  expect(fake.uploaded).toEqual(['Valve Spec.docx']);
+  await expect.poll(() => fake.built).toEqual([['up1']]);
+});
+
+test('while the graph DB starts the page says so, and goes on once it answers', async ({ page }) => {
+  const fake = await fakeApi(page, { starting: 1 });
+  await page.goto('/');
+  await expect(page.getByText('그래프 DB를 준비하는 중')).toBeVisible();
+  await expect(page.getByText('그래프 DB를 준비하는 중')).toBeHidden({ timeout: 10_000 });
+  expect(fake.starting).toBe(0);
+  await expect(page.getByText('그래프 DB 준비 중…')).toBeHidden();
+});
+
+test('what keeps the server from running is listed on the settings page until it is put right', async ({ page }) => {
+  await fakeApi(page, { problems: ['The LLM API key is empty', 'The viewer bundle is missing'] });
+  await page.goto('/');
+  await expect(page.getByRole('alert')).toContainText('The LLM API key is empty (+1)');
+  await page.getByRole('link', { name: '설정 열기' }).click();
+  const listed = page.getByRole('list', { name: '준비 안 됨' });
+  await expect(listed.getByRole('listitem')).toHaveText(['The LLM API key is empty', 'The viewer bundle is missing']);
+  await expect(page.getByRole('alert')).toHaveCount(0); // not said twice on the page that puts it right
+  await page.getByLabel('OpenAI API 키').fill('sk-test-abcd');
+  await page.getByRole('button', { name: '저장' }).click();
+  await expect(page.getByText('준비됐습니다')).toBeVisible();
+  await expect(listed).toHaveCount(0);
 });

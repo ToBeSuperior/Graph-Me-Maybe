@@ -51,8 +51,8 @@ of text an entry, in reading order, set in two spaces for each level under the l
 holds it. It is there so a heading on this page is known for what it is: one of the same
 kind as an entry -- the same numbering, marker or look -- is of that entry's rank, and
 what an entry holds shows what reads under such a heading. "(open)" marks the sections this
-page begins inside; "(+N not shown)" counts what an entry holds that was not sent. None of
-it is decided here and none of it has an id: a unit it would hold is `root`. When the page
+page begins inside. None of it is decided here and none of it has an id: a unit it would
+hold is `root`. When the page
 before this one is shown, it is shown for the same reason.
 
 Use drop for a unit that carries no content of its own -- a page number, a header or footer
