@@ -1,11 +1,12 @@
 // Where documents come in: a folder dropped anywhere on the box, or picked with the button, or
 // the samples. The box itself is the invitation -- on an empty graph it is the whole page.
 import { FolderOpen, FolderPlus, Sparkles, Upload } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useRef, useState, type ReactNode } from 'react';
 import { Button } from '../../components/ui';
 import { cn } from '../../lib/format';
 import { useT } from '../../lib/i18n';
-import { useSettings } from '../../lib/queries';
+import { useMailWorkspace, useSettings } from '../../lib/queries';
 import { droppedFiles, useUpload } from './upload';
 
 /** The hidden folder picker and a way to open it. */
@@ -36,6 +37,7 @@ export function AddFolderButton({ variant = 'secondary', size = 'md', children }
   const t = useT();
   const { uploading } = useUpload();
   const picker = useFolderPicker();
+  if (useMailWorkspace()) return null;
   return (
     <>
       {picker.element}
@@ -53,6 +55,10 @@ export function FolderDrop({ large = false, className }: { large?: boolean; clas
   const { data: settings } = useSettings();
   const picker = useFolderPicker();
   const [over, setOver] = useState(false);
+  // A mail workspace takes no folder: it points to the Mail page instead.
+  if (useMailWorkspace()) {
+    return <p className={cn('text-center text-sm text-muted', className)}>{t('mailEmptyHere')} <Link to="/manage/mail" className="underline">{t('mailTitle')}</Link></p>;
+  }
   return (
     <div
       onDragOver={(e) => { e.preventDefault(); setOver(true); }}

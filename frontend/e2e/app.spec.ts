@@ -241,7 +241,7 @@ test('Box Drive is read only once the user connects it, and then on every start'
   await expect(drive.getByRole('checkbox', { name: 'Plan.pdf' })).toBeVisible();
   await page.reload();
   await expect(page.getByTestId('box-drive').getByRole('checkbox', { name: 'Plan.pdf' })).toBeVisible();
-  expect(fake.connected).toEqual({ box: true, google: false, onedrive: false });
+  expect(fake.connected).toMatchObject({ box: true, google: false, onedrive: false, dropbox: false });
 });
 
 test('Box Drive is browsed like a folder: double-click opens, only documents can be checked', async ({ page }) => {
@@ -458,7 +458,7 @@ test('Google Drive for desktop is connected once, then browsed and built from', 
   await drive.getByRole('checkbox', { name: 'Plan.pdf' }).check();
   await drive.getByRole('button', { name: 'Google Drive에서 그래프 만들기' }).click();
   await expect.poll(() => fake.boxDrive).toEqual([['/Users/me/Library/CloudStorage/GoogleDrive-me@invented.test/Plan.pdf']]);
-  expect(fake.connected).toEqual({ box: false, google: true, onedrive: false });
+  expect(fake.connected).toMatchObject({ box: false, google: true, onedrive: false, dropbox: false });
   await drive.getByRole('button', { name: '연결 해제' }).click();
   await expect(drive.getByRole('button', { name: '연결', exact: true })).toBeVisible();
 });
@@ -552,6 +552,8 @@ test('a server with its own graph DB shows no workspaces', async ({ page }) => {
 test('OneDrive and its SharePoint libraries are connected once, browsed and built from', async ({ page }) => {
   const fake = await fakeApi(page);
   await page.goto('/manage');
+  // One Drives entry in the side menu, a tab per drive inside it.
+  await page.getByRole('navigation', { name: '관리' }).getByRole('link', { name: '드라이브' }).click();
   await page.getByRole('link', { name: 'OneDrive/SharePoint' }).click();
   await expect(page.getByText('SharePoint 라이브러리는', { exact: false })).toBeVisible();  // how to sync one
   const drive = page.getByTestId('onedrive-drive');
@@ -567,6 +569,20 @@ test('without OneDrive the page links to its download', async ({ page }) => {
   await page.goto('/manage/onedrive');
   await expect(page.getByTestId('onedrive-drive').getByRole('link', { name: 'OneDrive 설치하기' }))
     .toHaveAttribute('href', 'https://www.microsoft.com/microsoft-365/onedrive/download');
+});
+
+test('Dropbox, iCloud Drive and Synology Drive share one page: a found one is built from', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto('/manage/drive');
+  await page.getByRole('link', { name: '다른 드라이브' }).click();
+  await expect(page.getByTestId('icloud-drive').getByRole('link', { name: 'iCloud Drive 설치하기' })).toBeVisible();
+  await expect(page.getByTestId('synology-drive').getByRole('link', { name: 'Synology Drive 설치하기' })).toBeVisible();
+  const drive = page.getByTestId('dropbox-drive');
+  await drive.getByRole('button', { name: '연결', exact: true }).click();
+  await drive.getByRole('checkbox', { name: 'Plan.pdf' }).check();
+  await drive.getByRole('button', { name: 'Dropbox에서 그래프 만들기' }).click();
+  await expect.poll(() => fake.boxDrive).toEqual([['/Users/me/Library/CloudStorage/Dropbox/Plan.pdf']]);
+  expect(fake.connected).toMatchObject({ dropbox: true, icloud: false, synology: false });
 });
 
 test('a connected drive says how much of it is kept on this computer', async ({ page }) => {
@@ -650,4 +666,141 @@ test('a document opens its original in the app this computer opens it with', asy
   await page.goto('/manage/docs/spec');
   await page.getByRole('button', { name: '원본 열기' }).click();
   await expect.poll(() => fake.originals).toEqual(['spec']);
+});
+
+// Mail --------------------------------------------------------------------------------------
+
+const english = async (page: import('@playwright/test').Page) =>
+  page.addInitScript(() => localStorage.setItem('lang', 'en'));
+
+async function connectNaverWorks(page: import('@playwright/test').Page) {
+  await page.goto('/manage/mail');
+  await page.getByLabel('Mail service').selectOption({ label: 'NAVER WORKS' });
+  await expect(page.getByLabel('IMAP server')).toHaveValue('imap.worksmobile.com');
+  await page.getByLabel('Email address').fill('kim@invented.test');
+  await page.getByLabel('App password').fill('invented-app-password');
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+}
+
+test('a mailbox is connected with a preset, counted, and asked before it is read', async ({ page }) => {
+  await english(page);
+  const fake = await fakeApi(page);
+  await connectNaverWorks(page);
+  await expect(page.getByLabel('App password')).toHaveValue('');  // never kept in the page
+  await expect(page.getByLabel('App password')).toHaveAttribute('type', 'password');
+  await expect(page.getByTestId('mail-question')).toHaveText('1,240 messages since 2021-03 · 96 attachments (38 MB)');
+  expect(fake.mail.connected).toEqual([{ host: 'imap.worksmobile.com', port: 993, address: 'kim@invented.test', password: 'invented-app-password' }]);
+  await expect(page.getByRole('button', { name: 'Only the last 12 months' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
+  await page.getByRole('button', { name: 'Read all' }).click();
+  await expect.poll(() => fake.mail.read).toEqual([null]);
+});
+
+test('Gmail is connected by a Google sign-in and asked about like any mailbox', async ({ page }) => {
+  await english(page);
+  await fakeApi(page);
+  await page.goto('/manage/mail');
+  await page.getByRole('button', { name: 'Sign in with Google' }).click();
+  // The account the browser signed in lands on the server; the page asks for it until it does.
+  await expect(page.getByTestId('mail-question')).toHaveText('3,200 messages since 2021-04 · 410 with attachments');
+  await expect(page.getByRole('button', { name: 'Read all' })).toBeVisible();
+});
+
+test('only the last months reads from that date and offers the earlier mail later', async ({ page }) => {
+  await english(page);
+  const fake = await fakeApi(page);
+  await connectNaverWorks(page);
+  await page.getByLabel('Months').fill('6');
+  await page.getByRole('button', { name: 'Only the last 6 months' }).click();
+  await expect.poll(() => fake.mail.read.length).toBe(1);
+  const since = new Date(); since.setUTCMonth(since.getUTCMonth() - 6);
+  expect(fake.mail.read[0]).toBe(since.toISOString().slice(0, 10));
+  await page.getByRole('button', { name: 'Read earlier mail' }).click();
+  await expect.poll(() => fake.mail.earlier).toBe(1);
+});
+
+test('a refused login says the server\'s words beside the form', async ({ page }) => {
+  await english(page);
+  await fakeApi(page, { mailRefused: 'The mail server refused the login (invented).' });
+  await connectNaverWorks(page);
+  await expect(page.getByRole('form', { name: 'Connect' }).getByRole('alert')).toHaveText('The mail server refused the login (invented).');
+  await expect(page.getByTestId('mail-question')).toHaveCount(0);
+});
+
+test('a mail workspace shows no folder, drive or upload entries', async ({ page }) => {
+  await english(page);
+  await fakeApi(page, { mailWorkspace: true });
+  await page.goto('/manage');
+  const nav = page.getByRole('navigation', { name: 'Manage' });
+  await expect(nav.getByRole('link', { name: 'Mail' })).toBeVisible();
+  for (const name of ['Drives', 'Box', 'Google Drive', 'OneDrive/SharePoint', 'Other drives']) await expect(nav.getByRole('link', { name })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add folder' })).toHaveCount(0);
+});
+
+test('a mail workspace deletes and empties nothing from the app: its mailbox says what it holds', async ({ page }) => {
+  await english(page);
+  await fakeApi(page, { mailWorkspace: true });
+  await page.goto('/manage/docs/spec');
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete document' })).toHaveCount(0);
+  await page.goto('/manage/danger');
+  await expect(page.getByText('A mail workspace follows its mailbox')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reset graph' })).toHaveCount(0);
+});
+
+test('a message found shows under its subject, and its preview is the message, not pages', async ({ page }) => {
+  await english(page);
+  await fakeApi(page, { mailDoc: true });
+  await page.goto('/?q=valve%20order');
+  const found = page.getByRole('treeitem').first();
+  await expect(found).toContainText('Invented valve order');
+  await expect(found).not.toContainText('emb0a1b2c3d');  // the digest is the program's, not the reader's
+  await found.click();
+  const preview = page.getByLabel('Preview');
+  await expect(preview.getByTestId('mail-headers')).toContainText('lee@invented.test');
+  await expect(preview.getByText('Please confirm the invented order.')).toBeVisible();
+  await expect(preview.getByText('Cannot draw the pages')).toHaveCount(0);
+});
+
+test('a message opens with its headers, body and attachments', async ({ page }) => {
+  await english(page);
+  await fakeApi(page, { mailDoc: true });
+  await page.goto('/manage/docs/msg');
+  await expect(page.getByRole('heading', { name: 'Invented valve order' })).toBeVisible();
+  const headers = page.getByTestId('mail-headers');
+  await expect(headers).toContainText('lee@invented.test');
+  await expect(headers).toContainText('kim@invented.test');
+  await expect(page.getByText('Please confirm the invented order.')).toBeVisible();
+  // A document the body only names by number is not an attachment.
+  await expect(page.getByRole('link', { name: /PROC-2/ })).toHaveCount(0);
+  await page.getByRole('link', { name: /SPEC-1_가상 규격서/ }).click();
+  await expect(page).toHaveURL(/\/manage\/docs\/spec/);
+});
+
+test('Cancel on the first question forgets the account and its empty workspace at once', async ({ page }) => {
+  await english(page);
+  const fake = await fakeApi(page);
+  await connectNaverWorks(page);
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect.poll(() => fake.mail.left).toEqual(['a1:delete']);
+  await expect(page.getByTestId('mail-question')).toHaveCount(0);
+});
+
+test('disconnecting keeps the workspace at one click, and deletes it only once its address is typed', async ({ page }) => {
+  await english(page);
+  const fake = await fakeApi(page);
+  await connectNaverWorks(page);
+  await page.getByRole('button', { name: 'Read all' }).click();
+  await page.getByRole('button', { name: 'Disconnect' }).click();
+  const del = page.getByRole('button', { name: 'Delete its workspace too' });
+  await expect(del).toBeDisabled();
+  await page.getByLabel(/Type kim@invented.test/).fill('kim@invented.test');
+  await del.click();
+  await expect.poll(() => fake.mail.left).toEqual(['a1:delete']);
+
+  await connectNaverWorks(page);
+  await page.getByRole('button', { name: 'Read all' }).click();
+  await page.getByRole('button', { name: 'Disconnect' }).click();
+  await page.getByRole('button', { name: 'Keep its workspace' }).click();
+  await expect.poll(() => fake.mail.left).toEqual(['a1:delete', 'a1:keep']);
 });

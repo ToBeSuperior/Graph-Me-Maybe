@@ -6,6 +6,7 @@ class DocumentFormat(StrEnum):
     PPTX = "pptx"
     DOCX = "docx"
     PDF = "pdf"
+    EML = "eml"
 
 
 FLOW_FORMATS = (DocumentFormat.DOCX, DocumentFormat.PDF)

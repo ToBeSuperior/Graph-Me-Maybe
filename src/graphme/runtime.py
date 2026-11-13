@@ -14,6 +14,7 @@ from graphme.adapters.embedding import OpenAIBatchEmbeddings
 from graphme.adapters.export.neo4j_admin import LocalNeo4jAdmin
 from graphme.adapters.extractors.docx import DocxExtractor
 from graphme.adapters.extractors.excel import ExcelExtractor
+from graphme.adapters.extractors.mail import MailExtractor
 from graphme.adapters.extractors.pdf import PDFExtractor
 from graphme.adapters.extractors.powerpoint import PowerPointExtractor
 from graphme.adapters.local_models import LocalModels
@@ -157,6 +158,7 @@ def graph_parts(
                 check_table=vision.is_a_table, workers=workers),
             DocumentFormat.PPTX: PowerPointExtractor(asset_store=assets),
             DocumentFormat.DOCX: DocxExtractor(asset_store=assets),
+            DocumentFormat.EML: MailExtractor(),
         },
         "visual_binder": RenderedVisualBinder(renderer=renderer, asset_store=assets),
         "hierarchy_provider": RenderedHierarchyScopeProvider(

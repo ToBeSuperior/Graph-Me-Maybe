@@ -4,7 +4,10 @@
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { pageImage } from '../../api/client';
+import { useQuery } from '@tanstack/react-query';
+import { api, call, pageImage } from '../../api/client';
+import { MailContent } from '../manage/MailMessage';
+import { keys } from '../../lib/queries';
 import { FileIcon, HopBadge, RelationChip } from '../../components/docs';
 import { PageViewer, type Mark } from '../../components/PageViewer';
 import { PagesPending, PageTabs } from '../../components/PageTabs';
@@ -20,10 +23,10 @@ export const Preview = memo(function Preview({ row, question }: { row: Row; ques
   const t = useT();
   const { lang } = useLang();
   const { doc } = row.entry;
-  const { doc: demoDoc, sheets, pagesOfNodes, boxes, error } = usePages(doc.id);
+  const format = formatOf(doc.label);
+  const { doc: demoDoc, sheets, pagesOfNodes, boxes, error } = usePages(doc.id, format !== 'eml');
   const [passage, setPassage] = useState(0);
   const [page, setPage] = useState<number | null>(null);
-  const format = formatOf(doc.label);
 
   // Where each passage is: the page its first drawn unit is on.
   const passagePages = useMemo(() => doc.passages.map((p) =>
@@ -105,7 +108,7 @@ export const Preview = memo(function Preview({ row, question }: { row: Row; ques
       </section>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
-        {error || !demoDoc || !sheets || !pages.length ? (
+        {format === 'eml' ? <MailPreview id={doc.id} /> : error || !demoDoc || !sheets || !pages.length ? (
           <PagesPending error={error as Error | null} sheets={sheets} />
         ) : (
           <>
@@ -118,6 +121,16 @@ export const Preview = memo(function Preview({ row, question }: { row: Row; ques
     </div>
   );
 });
+
+/** A mail message has no pages to draw: the message itself is shown, as on its own page. */
+function MailPreview({ id }: { id: string }) {
+  const graph = useQuery({
+    queryKey: keys.document(id),
+    queryFn: () => call(api.GET('/v1/documents/{document_id}/graph', { params: { path: { document_id: id } } })),
+  });
+  return graph.data ? <MailContent id={id} graph={graph.data} className="min-h-0 flex-1 overflow-y-auto px-1" />
+    : <PagesPending error={graph.error as Error | null} sheets={undefined} />;
+}
 
 /** "Open in Manage" as a link that looks like a button. */
 function OpenInManage({ id }: { id: string }) {

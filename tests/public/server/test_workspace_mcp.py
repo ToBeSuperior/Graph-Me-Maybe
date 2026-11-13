@@ -46,7 +46,8 @@ def test_the_switches_over_http_and_from_this_machine_only(workspace_demo: Demo)
     made = client.post("/v1/workspaces", json={"name": "Invented project"}).json()
 
     turned: dict[str, Any] = client.patch(f"/v1/workspaces/{made['id']}", json={"mcp": True}).json()
-    assert turned == {"id": made["id"], "name": "Invented project", "mcp": True}
+    assert turned == {"id": made["id"], "name": "Invented project", "mcp": True,
+                      "kind": "documents", "account": None}
     listed = client.get("/v1/workspaces").json()
     assert listed["mcp_enabled"] is True
     assert {i["id"]: i["mcp"] for i in listed["items"]}[made["id"]] is True

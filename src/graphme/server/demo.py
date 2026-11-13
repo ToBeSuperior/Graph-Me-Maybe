@@ -38,6 +38,7 @@ def samples(demo: Demo) -> APIRouter:
 
     @router.post("/samples", response_model=Samples)
     def corpus_samples() -> dict[str, Any]:
+        demo.not_in_mail_workspace()
         if demo.build.state in BUILDING:  # its files may be being read: not written over
             raise HTTPException(409, "a graph build is already running")
         written = write_samples(demo.root / "samples")

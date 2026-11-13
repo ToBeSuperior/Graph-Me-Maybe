@@ -211,6 +211,7 @@ def test_the_mac_shortcut_opens_the_window_app_in_its_home(tmp_path: Path) -> No
     assert (data / "app.log").read_text().strip() == f"HOME_IS={data}"
 
 
+@posix
 def test_the_mac_shortcut_wears_the_app_icon(tmp_path: Path) -> None:
     """The shortcut is drawn with the app's own icon, taken from the package just installed --
     a bundle naming no icon showed macOS's blank one."""

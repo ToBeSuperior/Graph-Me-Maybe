@@ -1,6 +1,6 @@
 # Graph-Me-Maybe — What Is Left to Do
 
-> Updated: 2026-11-04
+> Updated: 2026-11-05
 >
 > Finished work is not listed here. Confirmed behavior is in
 > [`../finalized_source.md`](../finalized_source.md), and the history is in
@@ -36,6 +36,8 @@ MMLongBench-Doc and DocBench, published on the site.
          with deprecations announced.
       3. The per-feature APIs of the item above.
       4. An API reference and example notebooks.
+      Design for steps 1, 2 and 4 written (`docs/superpowers/specs/2026-11-05-pip-library-design.md`:
+      reading only, with no Neo4j or Java, and the whole pipeline); no implementation plan yet.
 - [ ] **A team workspace.** A workspace kept in a folder on a shared drive (Box, Google Drive,
       OneDrive/SharePoint), so a team opens the same graph. That folder is left out of what a
       build reads, whatever folder above it is chosen. To decide first: a running Neo4j's store
@@ -43,13 +45,68 @@ MMLongBench-Doc and DocBench, published on the site.
       open one graph at once (Community is a single writer) -- so the shared folder may hold a
       snapshot (`.dump` or import bundle) that one member publishes and others open read-only,
       with the live graph staying local.
-- [ ] **Mail services as a source.** Connect Gmail, Outlook/Microsoft 365 and other mail
-      (IMAP), so a mailbox or a label/folder is read like a folder of documents: each message,
-      with its sender, recipients and date, and its attachments read as the documents they are,
-      linked to the message that carried them. To decide first: how a mailbox is signed in to
-      (each provider's OAuth, or the mail already on this machine); which messages are taken
-      (a label, a folder, a date range) and how new mail is picked up after the first build;
-      and that mail, like every other source, stays on this machine.
+      (Put off 2026-11-05.) Wanted: a workspace a team shares as in Figma or ChatGPT Team --
+      everyone asks the same graph and adds documents to it. Shape last discussed: only the
+      graph (a shared Neo4j: Aura, or a small server) and the crops (shared object storage)
+      leave the PCs, and each member's app still reads, renders, embeds and answers. Open: who
+      can preview or open an original that only its uploader holds, one embedder for the
+      team, and roles (Community and Aura Free have none, so a member who can reach the graph
+      can delete from it).
+- [ ] **Mail services as a source.** Part A is done: IMAP (presets, app password), counted and
+      asked before the first read, newest first, new mail read while the app runs, one mail
+      workspace per account, a message shown with its attachments. Part B: Gmail is done (2026-11-14:
+      Google sign-in in the browser, PKCE, `gmail.readonly`, read through the Gmail API into the
+      same store; tested against a fake Gmail only). Open: a first sign-in with a real account
+      (the owner's test user); where the project's Google client ships -- today
+      `GRAPHME_GOOGLE_CLIENT_ID`/`_SECRET` from `.env`, so the public build has none and offers
+      IMAP; Google's app verification past 100 users; Gmail's history API instead of listing every
+      id each check once mailboxes are large; Microsoft Graph, once its app is registered.
+      Refinements:
+      unpacking Outlook's TNEF (`winmail.dat`), and a time and cost estimate in the first-connect
+      question (today it shows counts and size only).
+      - A calendar invite (`.ics`) kept as text: today it is cited, not read.
+      - Outlook desktop's HTML quote header (`<div style="border-top…">` with From:/Sent:) is
+        not recognised as a quote.
+      - "Disconnect, keep workspace" removes the store, so the kept messages' originals no longer
+        open.
+      - A file nested in an attachment outlives its last message.
+      - Connecting counts the mailbox inside the request: no progress for a large mailbox.
+      - One mail workspace by default, with several mail sources picked to connect into it
+        (today each account makes a workspace of its own).
+- [ ] **A conversation, not one question at a time.** Ask takes a single question today (`/?q=`,
+      `/v1/ask`), and a follow-up ("and the one before it?", "make that a table") starts over
+      with no memory of what was asked or answered. Keep the turns of a conversation, so a
+      follow-up is read with the earlier questions, answers and the documents they cited. To
+      decide: how much history goes back to the model (a token budget, the oldest turns
+      summarised or dropped), where a conversation is kept (per workspace, on this machine), and
+      how the address and the found-documents folders show more than one question.
+- [ ] **Search only when the question needs the documents.** Every question today runs the
+      search and answers from what it found. Decide first, per turn, whether the documents are
+      needed: a question about them (a value, a procedure, a document number) searches the graph
+      as now; one that is not ("thanks", "translate your last answer", "what does MPa stand
+      for?", a rewrite of the answer just given) is answered by the model alone, with the
+      conversation as context, and says it did not search. To decide: who judges (one short model
+      call, or the answering call itself choosing a search tool, as an MCP client does), what is
+      shown when it chose not to search, and a way for the user to make it search anyway.
+- [ ] **Graph-Me-Maybe inside other apps.** A side panel in the app already open that lists the
+      documents related to the open mail (search only, no model call), answers a question with
+      sources, and inserts it into the reply or the document -- talking to the Graph-Me-Maybe on
+      `127.0.0.1`, so nothing leaves the PC. An Office add-in (Outlook, PowerPoint, Word, Excel;
+      task pane page on graphme.io) and a browser extension for Gmail, which also adds a "GMM"
+      toggle to the search box of Gmail and Outlook on the web. Outlook desktop's own search box
+      cannot be taken over by an add-in (a ribbon button opens the pane instead). Needs on the
+      server: pairing a client once in the app, its token in `keyed`, CORS for paired origins
+      only, the MCP workspace switch reused for every outside client. Open: Office on the Mac
+      (WKWebView and `http://127.0.0.1`), store accounts. Design:
+      `docs/superpowers/specs/2026-11-13-mail-add-ins-design.md`.
+- [ ] **Searching every workspace at once.** Direction (2026-11-13): Graph-Me-Maybe gathers mail,
+      cloud drives and this PC into graphs, one per workspace, kept apart, and serves them as a
+      private MCP server to the user's own agents (Claude Desktop, Claude Code, Cursor) -- later,
+      as a SaaS, the graphs in our cloud behind an MCP server we run. A search may span every
+      workspace or one. First way, nothing new on the server: the agent calls `search` once per
+      workspace (`workspace=`) and merges what comes back. Measure it first with three or four
+      workspaces, since a workspace not open may have to start its graph DB; a light per-workspace
+      search index (passages, vectors, words outside Neo4j) only if that proves too slow.
 - [ ] **A blog for the public site** (left for later; site plan in
       `docs/superpowers/specs/2026-10-29-public-site-design.md`). Candidates: why plain RAG
       breaks on spreadsheets and slides; how it works, from a rendered page to the graph; the
@@ -97,11 +154,16 @@ MMLongBench-Doc and DocBench, published on the site.
       synced: the folders it finds (`OneDrive-*`, `OneDrive-SharedLibraries-*`; on Windows the
       registry's mount points) and a build from them. Only invented folders have checked it.
 - [ ] Windows: giving a file back to the cloud after it is read is OneDrive's alone (`attrib +U
-      -P`); Google Drive and Box Drive there keep what is read in their own capped caches. Not
-      yet run on Windows at all.
+      -P`); Google Drive and Box Drive there keep what is read in their own capped caches. The
+      QA of 0.1.68 found a personal OneDrive and showed its folders and usage, but that PC's
+      OneDrive was signed out, so no file could be made online-only: run it on a PC with
+      OneDrive signed in and syncing.
 - [ ] Run each cloud drive end to end with a real account, not invented folders: Box (the desktop
-      folder and the API picker, built and previewed), Google Drive for desktop and OneDrive, each
-      with files kept online only -- read, given back, previewed again, downloaded.
+      folder and the API picker, built and previewed), Google Drive for desktop, OneDrive, and the
+      Other drives page's Dropbox, iCloud Drive and Synology Drive (added 2026-11-14; their
+      Windows folders are the clients' defaults, unchecked on an install), each with files kept
+      online only -- found, read, given back, previewed again, downloaded. The owner runs them
+      together later.
 - [ ] (Later) ONLYOFFICE as a source. It has no desktop client that syncs files to a folder, so
       it cannot be read like Box Drive, Google Drive or OneDrive, and DocSpace has no WebDAV
       server yet. Read DocSpace through its REST API with a personal access token (its address
@@ -111,12 +173,12 @@ MMLongBench-Doc and DocBench, published on the site.
 
 ## 1.6 · The background app and MCP on Windows
 
-- [ ] Check on a Windows PC what has run on macOS only since 0.1.57: the tray icon and its menu
-      (open the app, MCP on/off, start at login -- the `Run` value -- and quit completely); the
-      notice when the window is first closed (a message box of its own); opening the app again
-      from the Start menu after the window was closed; the installer ending the running app
-      through `server.json` (`taskkill /T`) before it installs; and `open_document` opening a
-      file in Excel or Word.
+- [x] (Closed 2026-11-05, kept as a record) Windows: the tray menu, the first-close notice,
+      opening again from the Start menu, a start at login, the installer ending the running app
+      (and one from before 0.1.57), Open original in Excel, Word and a PDF app, `open_document`
+      from an MCP client, and the page following MCP and workspace changes made outside it.
+      Checked on Windows 10 22H2 x64 against 0.1.68, the fixes in 0.1.69. OneDrive is left
+      under 1.5.
 
 ## 2 · Breaking down tables
 
@@ -177,9 +239,11 @@ no picture. If one is needed, draw a fresh one then.
       (`build_placed_scope`, pictures and charts placed by their DrawingML extent, text and
       tables by their cells). If a misjudged part turns up, the correction belongs in the
       figure pass or in binding, not in a format-specific exception.
-- [ ] Move the viewer's pinned versions forward once upstream merges
-      yukiyokotani/office-open-xml-viewer#1983 (smoothed-line axis) and #1984 (combo on a
-      hidden secondary category axis): `UPSTREAM`'s `commit` and `npm_version`. Then drop
+- [ ] Move the viewer's pinned versions forward (today 0.86.1) once upstream ships the
+      smoothed-line axis and the combo on a hidden secondary category axis: our #1983 and #1984
+      were merged together as #1991 into the `v0.89` branch on 2026-10-30, for the next 0.89.x
+      patch release after 0.89.7 and then `main`. Update `UPSTREAM`'s `commit` and
+      `npm_version`, then drop
       `chart_axes.py`, `picture_anchors.py` (fixed upstream in `d7f60b865`) and dist patch
       `0003`, and check every other patch still applies and is still needed.
 
@@ -222,6 +286,9 @@ Kept for later; nothing here is scheduled.
 
 - Do not call a provider without approval.
 - Do not print, copy or commit `.env`, provider API keys or their metadata.
+- Every change is made here and reaches Graph-Me-Maybe only through `tools/publish/export.py`.
+  A fix committed there by hand is overwritten by the next export (0.1.69's Windows fixes were,
+  until brought back here).
 - A fake in the test profile is not live verification.
 - When only documents change, run only the markdown and link checks and `git diff --check`.
   Run Ruff, mypy and the tests only when source is changed with them.

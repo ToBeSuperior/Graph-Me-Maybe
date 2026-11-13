@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { api, call, isBuilding } from '../../api/client';
 import { Button, Input } from '../../components/ui';
 import { useT } from '../../lib/i18n';
-import { graphReset, keys, useBuild, useCorpusMap, useWorkspaces } from '../../lib/queries';
+import { graphReset, keys, useBuild, useCorpusMap, useMailWorkspace, useWorkspaces } from '../../lib/queries';
 import { PageHeader } from './ManageLayout';
 
 export function DangerPage() {
@@ -18,6 +18,7 @@ export function DangerPage() {
   const { data: build } = useBuild();
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
+  const mail = useMailWorkspace();
   const word = t('resetWord');
   const total = map?.total ?? 0;
 
@@ -39,7 +40,9 @@ export function DangerPage() {
     <div>
       <PageHeader title={t('dangerZone')} description={t('dangerBody')} />
       <div className="max-w-2xl p-6">
-        <section className="rounded-xl border border-danger-line bg-panel">
+        {mail
+          ? <p className="rounded-xl border border-line bg-panel p-5 text-sm text-muted">{t('mailFollowsMailbox')}</p>
+          : <section className="rounded-xl border border-danger-line bg-panel">
           <div className="flex items-start gap-3 p-5">
             <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-danger-soft text-danger"><TriangleAlert className="size-4" /></div>
             <div className="min-w-0 flex-1">
@@ -59,7 +62,7 @@ export function DangerPage() {
             </Button>
           </div>
           {isBuilding(build) && <p className="px-5 pb-4 text-xs text-warn">{t('resetWhileBuilding')}</p>}
-        </section>
+        </section>}
         <DeleteWorkspace />
       </div>
     </div>

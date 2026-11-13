@@ -216,6 +216,7 @@ def build_server(client: httpx.Client) -> FastMCP:
             {"document_id": s["document_id"], "file": shown_name(s["file"]),
              "score": round(s["score"], 3),
              "passage_id": s["id"], "text": _cut(s["context"], PASSAGE_CHARS),
+             **({"origin": s["origin"]} if s.get("origin") else {}),
              "linked": [{"document_id": d["document_id"], "file": shown_name(d["file"]),
                          "hop": d["hop"],
                          "direction": d["direction"], "via": d["via"]}

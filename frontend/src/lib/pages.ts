@@ -16,9 +16,10 @@ export const pageNameAt = (pages: { index: number; name?: string | null }[], ind
 
 /** A document's pages, drawn by the server the first time they are asked for: which file
  * draws them, then its pages, asked again until they are there. */
-export function usePages(documentId: string) {
+export function usePages(documentId: string, enabled = true) {
   const where = useQuery({
     queryKey: keys.pagesOf(documentId),
+    enabled,  // a mail message has no pages: nothing is asked for
     queryFn: () => call(api.POST('/v1/documents/{document_id}/file', { params: { path: { document_id: documentId } } })),
     retry: false,
   });

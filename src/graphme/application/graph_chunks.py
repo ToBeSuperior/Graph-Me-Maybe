@@ -30,7 +30,7 @@ HEADING_TOKENS = 40
 """A section too big for one passage gives its own words to the headings above each piece --
 unless it says more than a heading does, and then they are read as part of the first."""
 PATH_LABEL_CHARS = 80
-CHUNK_RULE = f"outline/{CHUNK_TOKENS}/{HEADING_TOKENS}/lines/covers-all/words/captioned"
+CHUNK_RULE = f"outline/{CHUNK_TOKENS}/{HEADING_TOKENS}/lines/covers-all/words/captioned/quotes"
 """Names how passages are cut. Stored on each passage, so a document cut by another rule is
 cut again; change it whenever `chunks` would cut the same outline differently."""
 
@@ -46,12 +46,16 @@ class GraphUnit:
     attached: tuple[str, ...] = ()
     """Nodes read with it and not on their own -- a visual's captions: its passage covers
     them too."""
+    quote_of: str | None = None
+    """None for a unit's own words; for quoted history, the Message-ID it quotes ("" when
+    the message names none)."""
 
 
 @dataclass(frozen=True, slots=True)
 class Chunk:
     member_ids: tuple[str, ...]
     text: str
+    quote_of: str | None = None
 
 
 def chunks(title: str, units: Sequence[GraphUnit], *, budget: int = CHUNK_TOKENS) -> list[Chunk]:
@@ -86,6 +90,7 @@ def chunks(title: str, units: Sequence[GraphUnit], *, budget: int = CHUNK_TOKENS
                 if unit.text and not (unit.parent not in by_id and _page_number(unit.text))]
         covered = [*pending, *(i for unit in members for i in (unit.id, *unit.attached))]
         head = " > ".join(path)
+        quote_of = said[0].quote_of if said else None
         if not said:
             pending[:] = covered
             return
@@ -94,7 +99,7 @@ def chunks(title: str, units: Sequence[GraphUnit], *, budget: int = CHUNK_TOKENS
             pieces = _pieces(said[0].text, budget)
             out.extend(
                 Chunk(member_ids=tuple(covered) if index == 0 else (said[0].id,),
-                      text=f"{head}\n{piece}")
+                      text=f"{head}\n{piece}", quote_of=quote_of)
                 for index, piece in enumerate(pieces)
             )
         else:
@@ -102,6 +107,7 @@ def chunks(title: str, units: Sequence[GraphUnit], *, budget: int = CHUNK_TOKENS
                 Chunk(
                     member_ids=tuple(covered),
                     text="\n".join([head, *(unit.text for unit in said)]),
+                    quote_of=quote_of,
                 )
             )
 
@@ -109,7 +115,10 @@ def chunks(title: str, units: Sequence[GraphUnit], *, budget: int = CHUNK_TOKENS
         group, used = list(lead), sum(estimated_tokens(unit.text) for unit in lead)
         for child in children.get(parent, ()):
             if size(child) <= budget:
-                if group and used + size(child) > budget:
+                # Quoted history is a passage of its own: it is dropped from answers whole,
+                # once the message it quotes is in, and its words must not go with the reply's.
+                if group and (used + size(child) > budget
+                              or child.quote_of != group[0].quote_of):
                     emit(path, group)
                     group, used = [], 0
                 group += subtree(child)
@@ -128,7 +137,8 @@ def chunks(title: str, units: Sequence[GraphUnit], *, budget: int = CHUNK_TOKENS
     if pending and out:
         # What came after the last words is the last passage's.
         last = out[-1]
-        out[-1] = Chunk(member_ids=(*last.member_ids, *pending), text=last.text)
+        out[-1] = Chunk(member_ids=(*last.member_ids, *pending), text=last.text,
+                        quote_of=last.quote_of)
     elif pending:
         # Nothing said anything -- page numbers alone: one passage by the title covers it.
         out.append(Chunk(member_ids=tuple(pending), text=title))

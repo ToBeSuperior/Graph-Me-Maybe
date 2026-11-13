@@ -8,7 +8,7 @@ import { api, call, sent, type Samples } from '../../api/client';
 import { useT } from '../../lib/i18n';
 import { keys } from '../../lib/queries';
 
-const READABLE = /\.(xlsx|pptx|docx|pdf)$/i;
+const READABLE = /\.(xlsx|pptx|docx|pdf|eml)$/i;
 
 /** What a folder holds that is the user's and can be read: Office's lock files and anything
  * hidden are passed over. `path` is where the file sat in the folder. */

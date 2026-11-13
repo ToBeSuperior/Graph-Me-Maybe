@@ -47,7 +47,11 @@ from graphme.adapters.storage.answer_prompt import (
     asked_with_samples,
     language_samples,
 )
-from graphme.adapters.storage.hybrid_search import _OnceRetriever
+from graphme.adapters.storage.hybrid_search import (
+    _OnceRetriever,
+    documents_with_message_ids,
+    linked_without_answered_quotes,
+)
 from graphme.adapters.storage.neo4j_space import CHUNK_TEXT_INDEX, Neo4jGraphSpace, checked_name
 from graphme.adapters.storage.similar_documents import SimilarDocuments
 from graphme.adapters.strict_schema import strict_response_schema
@@ -238,6 +242,8 @@ class GraphSource:
     linked: list[LinkedDocument] = field(default_factory=list)
     modified: float | None = None
     """When its document's file was last changed (`Document.modified_at`)."""
+    origin: str | None = None
+    """The mail it came from, or the mail that carried its document (`mail_origin`)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -544,9 +550,15 @@ class GraphRag:
         records, _, _ = self._driver.execute_query(
             self._links_query(), ids=list(first),
             query_vector=retriever.embedder.embed_query(question),
+            database_=retriever.neo4j_database,
             routing_=neo4j.RoutingControl.READ,
         )
-        links = {record["document_id"]: relevant_links(record["linked"], self._floor)
+        quoted = {p["quote_of"] for record in records for doc in record["linked"]
+                  for p in doc["passages"] if p.get("quote_of")}
+        held = documents_with_message_ids(self._driver, sorted(quoted),
+                                          database=retriever.neo4j_database)
+        links = {record["document_id"]: linked_without_answered_quotes(
+                     relevant_links(record["linked"], self._floor), in_space=held)
                  for record in records}
         return [
             neo4j.Record({**dict(record),  # type: ignore[no-untyped-call]
@@ -704,8 +716,17 @@ class GraphRag:
         OPTIONAL MATCH (first:{CHUNK_LABEL} {{id: start.id + ':0'}})
         RETURN chunk.id AS id, score,
                start.id AS document_id, start.label AS file,
-               chunk.text AS text, chunk.members AS members,
+               chunk.text AS text, chunk.members AS members, chunk.quote_of AS quote_of,
                start.modified_at AS modified, first.text AS opening,
+               start.meta_mail_from AS mail_from, start.meta_mail_date AS mail_date,
+               start.meta_mail_subject AS mail_subject,
+               start.meta_mail_message_id AS mail_message_id,
+               COLLECT {{ MATCH (x:ExternalDocument)-[:SAME_AS]->(start)
+                          MATCH (m:Document {{id: x.document_id}})
+                          WHERE m.meta_mail_message_id IS NOT NULL
+                          WITH DISTINCT m ORDER BY m.meta_mail_sent_at DESC LIMIT {MAIL_CARRIERS}
+                          RETURN {{sender: m.meta_mail_from, date: m.meta_mail_date,
+                                  subject: m.meta_mail_subject}} }} AS carriers,
                COLLECT {{ MATCH (chunk)-[:COVERS]->(u) WHERE u.meta_page IS NOT NULL
                           RETURN DISTINCT u.meta_page ORDER BY u.meta_page }} AS pages
         """
@@ -751,7 +772,8 @@ class GraphRag:
             MATCH (c:{CHUNK_LABEL} {{document_id: reached.id}}) WHERE {vector} IS NOT NULL
             WITH c, vector.similarity.cosine({vector}, $query_vector) AS closeness
             ORDER BY closeness DESC
-            RETURN collect({{id: c.id, score: closeness, members: c.members, text: c.text}})[..2]
+            RETURN collect({{id: c.id, score: closeness, members: c.members, text: c.text,
+                            quote_of: c.quote_of}})[..2]
               AS passages
           }}
           RETURN collect({{document_id: reached.id, file: reached.label, hop: link.hop,
@@ -845,8 +867,27 @@ def _item(record: neo4j.Record) -> RetrieverResultItem:
             "members": record["members"],
             "linked": linked,
             "modified": record["modified"],
+            "origin": mail_origin(record),
         },
     )
+
+
+MAIL_CARRIERS = 3
+"""How many of the messages that carried a document are named beside its passages."""
+
+
+def mail_origin(record: Mapping[str, Any]) -> str | None:
+    """Where a passage's document came from, when it came by mail: the message itself, or the
+    messages that carried it (newest first, as the query returns them)."""
+    if record.get("mail_message_id"):
+        day = _day(record.get("mail_date") or "")
+        return (f"Mail from {record.get('mail_from') or '?'}{' on ' + day if day else ''}"
+                f", subject: {record.get('mail_subject') or ''}")
+    if carriers := record.get("carriers"):
+        return "Attached to: " + "; ".join(
+            f"{c['subject'] or ''} ({c['sender'] or '?'}"
+            f"{', ' + _day(c['date']) if c['date'] else ''})" for c in carriers)
+    return None
 
 
 def _document_line(record: Mapping[str, Any]) -> str:
@@ -867,6 +908,8 @@ def _document_line(record: Mapping[str, Any]) -> str:
         parts.append(f"page {first}" if first == last else f"pages {first}-{last}")
     if record.get("modified"):
         parts.append(f"Modified: {_day(record['modified'])}")
+    if origin := mail_origin(record):
+        parts.append(origin)
     return "[" + " | ".join(parts) + "]"
 
 
@@ -924,7 +967,9 @@ def _source(item: RetrieverResultItem) -> GraphSource:
         LinkedDocument(
             document_id=doc["document_id"], file=doc["file"], hop=doc["hop"], via=doc["via"],
             direction=doc["direction"], modified=doc["modified"],
-            passages=[LinkedPassage(**p) for p in doc["passages"][: LINKED_PASSAGES[doc["hop"]]]],
+            passages=[LinkedPassage(**{k: v for k, v in p.items() if k != "quote_of"})  # a quote's
+                      # marker has done its work (`linked_without_answered_quotes`)
+                      for p in doc["passages"][: LINKED_PASSAGES[doc["hop"]]]],
         )
         for doc in found.pop("linked", [])
     ]

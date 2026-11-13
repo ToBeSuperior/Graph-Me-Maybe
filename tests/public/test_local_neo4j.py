@@ -246,6 +246,36 @@ def test_stopped_it_takes_the_server_its_launcher_started(
     assert child.waited
 
 
+@pytest.mark.parametrize("platform", ["win32", "darwin"])
+def test_one_ended_already_is_not_stopped_by_its_number(
+    monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    # The system gives an ended process's number to the next one: `taskkill /PID … /T` on it
+    # would end whatever took the number -- another workspace's Neo4j among them.
+    ran: list[list[str]] = []
+    signalled: list[tuple[int, int]] = []
+    monkeypatch.setattr(local_neo4j.processes, "run", lambda args, **k: ran.append(args) or
+                        subprocess.CompletedProcess(args, 0, "", ""))
+    monkeypatch.setattr(local_neo4j.os, "killpg", lambda pid, sig: signalled.append((pid, sig)),
+                        raising=False)
+
+    local_neo4j.stop(_Child(ends=True), platform=platform)  # type: ignore[arg-type]
+
+    assert ran == [] and signalled == []
+
+
+def test_a_graph_whose_neo4j_ended_of_itself_is_said_to_have_and_forgotten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, other = Neo4jHome(tmp_path), Neo4jHome(tmp_path, tmp_path / "workspaces" / "w1")
+    ended, running = _Child(ends=True), _Child()
+    monkeypatch.setattr(local_neo4j, "_started", [(home, running), (other, ended)])
+
+    assert not local_neo4j.ended(tmp_path)
+    assert local_neo4j.ended(tmp_path / "workspaces" / "w1")
+    assert local_neo4j._started == [(home, running)]  # never stopped by its number later
+
+
 def test_what_this_process_started_is_stopped_and_forgotten(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

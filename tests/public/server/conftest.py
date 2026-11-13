@@ -37,6 +37,8 @@ class FakeSpace:
         """document id -> file name"""
         self.paths: dict[str, str] = {}
         """document id -> the file it was read from"""
+        self.carriers: dict[str, set[str]] = {}
+        """attachment document id -> ids of the mail messages that carry it"""
         self.hashes: set[str] = set()
         self.deleted: list[list[str]] = []
         self.relocated: list[tuple[str, str]] = []
@@ -52,9 +54,15 @@ class FakeSpace:
         self.put.append(extracted.document.id)
         self.held[extracted.document.id] = extracted.document.file_name
         self.paths[extracted.document.id] = str(extracted.document.source_path)
+        self.hashes.add(extracted.document.content_hash)
 
     def relocate(self, content_hash: str, source_path: str) -> None:
         self.relocated.append((content_hash, source_path))
+
+    def carried_only_by(self, message_ids: Any) -> set[str]:
+        """Same rule as the real space; `carriers` is attachment id -> the messages carrying it."""
+        gone = set(message_ids)
+        return {a for a, by in self.carriers.items() if by & gone and not by - gone}
 
     def read_from(self, source_path: str) -> set[str]:
         return {i for i, path in self.paths.items() if path == source_path and i in self.held}

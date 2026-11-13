@@ -184,6 +184,21 @@ class Neo4jGraphSpace:
         with self.driver.session() as session:
             session.execute_write(_forget, list(document_ids))
 
+    def carried_only_by(self, message_ids: Sequence[str]) -> set[str]:
+        """The attachment documents that these messages carry and no other message does: what
+        goes with them when they are deleted. An attachment is found as a message's mention
+        (`ExternalDocument`) that `SAME_AS` names it. Only a mail message -- a document with
+        `meta_mail_message_id` -- counts as a carrier: another document naming the same
+        attachment does not keep it, and a message named by another is not an attachment."""
+        records, _, _ = self.driver.execute_query(
+            "MATCH (x:ExternalDocument)-[:SAME_AS]->(a:Document) "
+            "WHERE x.document_id IN $ids AND a.meta_mail_message_id IS NULL "
+            "AND NOT EXISTS { MATCH (y:ExternalDocument)-[:SAME_AS]->(a) "
+            "MATCH (m:Document {id: y.document_id}) "
+            "WHERE NOT m.id IN $ids AND m.meta_mail_message_id IS NOT NULL } "
+            "RETURN DISTINCT a.id AS id", ids=list(message_ids))
+        return {record["id"] for record in records}
+
     def identities(self) -> tuple[DocumentIdentity, ...]:
         """Every document in the space, as it was written there when it was put in."""
         records, _, _ = self.driver.execute_query(
@@ -325,6 +340,7 @@ class Neo4jGraphSpace:
                 id=record["id"], parent=record["parent"], text=record["text"],
                 order=unit_order(record["order"]),
                 attached=tuple(record["attached"]),
+                quote_of=record["quote_of"],
             )
             for record in records
         ]
@@ -342,7 +358,7 @@ class Neo4jGraphSpace:
                 UNWIND $chunks AS chunk
                 CREATE (c:{CHUNK_LABEL} {{id: chunk.id, document_id: $document,
                                           text: chunk.text, members: chunk.members,
-                                          rule: $rule}})
+                                          quote_of: chunk.quote_of, rule: $rule}})
                 WITH c, chunk
                 UNWIND chunk.members AS member
                 MATCH (n:{NODE_LABEL} {{id: member}})
@@ -352,7 +368,7 @@ class Neo4jGraphSpace:
                 rule=rule,
                 chunks=[
                     {"id": f"{document_id}:{index}", "text": chunk.text,
-                     "members": list(chunk.member_ids)}
+                     "members": list(chunk.member_ids), "quote_of": chunk.quote_of}
                     for index, chunk in enumerate(chunks)
                 ],
             )
@@ -656,5 +672,6 @@ RETURN n.id AS id, parent, attached,
                           CASE WHEN size(captions) > 0
                                THEN trim(reduce(s = '', t IN captions | s + ' ' + t)) END,
                           CASE WHEN holds THEN n.label END, '') END AS text,
-       {READING_ORDER} AS order
+       {READING_ORDER} AS order,
+       CASE WHEN n.meta_mail_quoted THEN coalesce(n.meta_mail_quote_of, '') END AS quote_of
 """

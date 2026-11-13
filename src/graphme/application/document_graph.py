@@ -77,7 +77,12 @@ class DocumentGraphBuilder:
         on_page: PageListener | None = None,
         on_phase: PhaseListener | None = None,
     ) -> ExtractedDocument:
-        """Every step, in order."""
+        """Every step, in order. A message is read and nothing more: it has no pages to draw,
+        and no mail body is sent to a model while mail is read in. Its
+        attachments are cited from it, to be read as documents of their own."""
+        if document_format is DocumentFormat.EML:
+            return cite_embedded(self.extract(source, document_format), source
+                                 ).validate_canonical_semantic_graph()
         extracted = self.bind(self.extract(source, document_format), source)
         extracted = self.group_text(self.read_figures(extracted, source), source)
         extracted = self.read_outline(extracted, source, on_page=on_page)

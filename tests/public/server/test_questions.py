@@ -79,6 +79,21 @@ def test_a_search_finds_documents_with_no_answer_written(demo: Demo, client: Tes
     assert client.post("/v1/search", json={"question": ""}).status_code == 400
 
 
+def test_a_mail_source_says_which_mail_it_came_from(demo: Demo, client: TestClient) -> None:
+    origin = "from mail: Kim <kim@invented.test>, 견적, on 2026-10-12"
+
+    class MailRag(FakeRag):
+        def find(self, question: str, *, documents: int) -> list[GraphSource]:
+            return [GraphSource(id="m:0", score=0.9, document_id="m", file="m.eml",
+                                members=["n1"], context="견적", origin=origin)]
+
+    _asking(demo, MailRag())
+
+    [source] = client.post("/v1/search", json={"question": "견적"}).json()["sources"]
+
+    assert source["origin"] == origin
+
+
 def test_a_question_too_long_to_be_one_is_turned_away_before_any_model(
     demo: Demo, client: TestClient
 ) -> None:

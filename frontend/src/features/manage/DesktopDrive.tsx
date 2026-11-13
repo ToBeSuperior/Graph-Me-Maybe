@@ -119,6 +119,9 @@ const INSTALL = {
   box: 'https://www.box.com/resources/downloads',
   google: 'https://www.google.com/drive/download/',
   onedrive: 'https://www.microsoft.com/microsoft-365/onedrive/download',
+  dropbox: 'https://www.dropbox.com/install',
+  icloud: 'https://support.apple.com/icloud',
+  synology: 'https://www.synology.com/support/download',
 } as const;
 
 /** A cloud drive's desktop client on this machine -- Box Drive, Google Drive for desktop --

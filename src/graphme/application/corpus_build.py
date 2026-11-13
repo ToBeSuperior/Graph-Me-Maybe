@@ -69,6 +69,10 @@ class GraphSpace(Protocol):
         """Which of these file contents (SHA-256) the space already holds."""
         ...
 
+    def carried_only_by(self, message_ids: Sequence[str]) -> set[str]:
+        """The attachment documents these mail messages carry and no other message does."""
+        ...
+
     def read_from(self, source_path: str) -> set[str]:
         """The documents put from the file at `source_path`, whatever it held then."""
         ...

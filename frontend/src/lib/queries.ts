@@ -21,6 +21,7 @@ export const keys = {
   settings: ['settings'] as const,
   searchModels: ['searchModels'] as const,
   workspaces: ['workspaces'] as const,
+  mail: ['mail'] as const,
 };
 
 /** The graph changed: what is drawn from it is asked again. A question's search and answer are
@@ -136,4 +137,10 @@ export function useWorkspaceFollower() {
     workspaceOpened(client, seen.current, active);
     if (active) seen.current = active;
   }, [client, active]);
+}
+
+/** Whether the workspace open reads a mailbox only: no folder, drive or upload is offered in it. */
+export function useMailWorkspace() {
+  const { data } = useWorkspaces();
+  return data?.items?.find((i) => i.id === data.active)?.kind === 'mail';
 }

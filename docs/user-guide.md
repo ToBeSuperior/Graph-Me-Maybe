@@ -8,6 +8,7 @@ jumps to the question box from anywhere.
 - [Documents in Google Drive](#documents-in-google-drive)
 - [Documents in Box](#documents-in-box)
 - [Documents in OneDrive and SharePoint](#documents-in-onedrive-and-sharepoint)
+- [Documents in Dropbox, iCloud Drive and Synology Drive](#documents-in-dropbox-icloud-drive-and-synology-drive)
 - [Asking](#asking)
 - [Manage](#manage)
 - [Exporting the graph](#exporting-the-graph)
@@ -96,6 +97,47 @@ A SharePoint library shows up once it is synced: open it in SharePoint and choos
 **Add shortcut to My files**. Then connect, browse and **Build from OneDrive** as with the other
 drives. Without OneDrive, the page links to its download page. If your organization turns off
 syncing, SharePoint cannot be read this way.
+
+## Documents in Dropbox, iCloud Drive and Synology Drive
+
+**Manage › Other drives** finds the folder each one's desktop app syncs, connected, browsed and
+built from as with the drives above:
+
+- **Dropbox**: where Dropbox says in its `info.json` -- your Dropbox and a team's Dropbox beside
+  it -- else `~/Library/CloudStorage/Dropbox` on a Mac or `%USERPROFILE%\Dropbox`.
+- **iCloud Drive**: `~/Library/Mobile Documents/com~apple~CloudDocs` on a Mac, and on Windows
+  `%USERPROFILE%\iCloudDrive` with iCloud for Windows.
+- **Synology Drive** (a NAS's folders, with Synology Drive Client): `%USERPROFILE%\SynologyDrive`
+  on Windows, `~/Library/CloudStorage/SynologyDrive-<name>` or `~/SynologyDrive` on a Mac. A sync
+  folder moved elsewhere is not found: add it with **Add folder** instead.
+
+A drive not on this computer links to its download page.
+
+## Mail
+
+**Manage › Mail** connects a mailbox over IMAP: pick the service (NAVER WORKS, Naver, Daum, Zoho,
+Gmail; DaouOffice and Hiworks take your company's own server, and **Other** lets you type the
+server and port), your address and an **app password** (made in the mail service's security
+settings; it stays on this computer and is never shown again).
+
+**Gmail** connects with **Sign in with Google** instead: the browser opens Google's sign-in, you
+allow reading your mail (read only -- nothing is sent, moved or deleted), and the account shows
+up on the page. The sign-in is kept in your system's credential store; disconnecting revokes it at
+Google. Gmail's counting gives how many messages carry attachments, not their size. Until Google
+has verified the app, Google shows an "unverified app" screen first. Outlook sign-in in the
+browser is not here yet.
+
+Connecting counts the mailbox and reads nothing. The app then asks, with the number of messages
+and the oldest month, the attachments and their size: **Read all**, **Only the last N months**,
+or **Cancel**. Mail is read newest first, so recent mail can be asked about soon. What "only the
+last" left out is read later with **Read earlier mail**.
+
+While the app runs it checks each account every few minutes and reads new mail; a message
+deleted from the mailbox leaves the graph. Each account has a workspace of its own, named after
+the address. A mail workspace follows its mailbox alone: it takes no folder, drive or upload,
+and nothing in it is deleted or emptied from the app -- delete a message in the mail service and
+it leaves the graph at the next check. Disconnecting offers to delete that workspace. A message opens with its sender, recipients, date, body and the attachments it
+carried, which open as documents.
 
 ## Asking
 

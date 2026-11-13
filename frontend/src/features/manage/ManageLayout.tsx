@@ -1,9 +1,11 @@
 // Managing the graph: what is in it, how its documents are tied, getting it out, and emptying
 // it -- each a page of its own under one side menu, the dangerous one last and apart.
-import { Box, Cloud, Cloudy, Download, Files, KeyRound, Network, TriangleAlert } from 'lucide-react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { Cloud, Download, Files, KeyRound, Mail, Network, TriangleAlert } from 'lucide-react';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { DRIVE_PAGES } from './DrivesLayout';
 import { cn } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import { useMailWorkspace } from '../../lib/queries';
 import { BuildProgress } from '../upload/BuildProgress';
 import { BuildResult } from '../upload/BuildResult';
 import { AddFolderButton } from '../upload/FolderDrop';
@@ -14,6 +16,8 @@ const item = ({ isActive }: { isActive: boolean }) =>
 
 export function ManageLayout() {
   const t = useT();
+  const mail = useMailWorkspace();
+  const { pathname } = useLocation();
   return (
     <div className="grid h-full grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[232px_minmax(0,1fr)] md:grid-rows-1">
       <aside className="flex flex-col gap-3 border-b border-line bg-subtle/50 p-3 md:border-r md:border-b-0">
@@ -24,9 +28,12 @@ export function ManageLayout() {
           <NavLink to="/manage" end className={item}><Files className="size-4" />{t('library')}</NavLink>
           <NavLink to="/manage/map" className={item}><Network className="size-4" />{t('mapTitle')}</NavLink>
           <NavLink to="/manage/export" className={item}><Download className="size-4" />{t('exportTitle')}</NavLink>
-          <NavLink to="/manage/drive" className={item}><Cloud className="size-4" />{t('driveTitle')}</NavLink>
-          <NavLink to="/manage/onedrive" className={item}><Cloudy className="size-4" />{t('onedriveTitle')}</NavLink>
-          <NavLink to="/manage/box" className={item}><Box className="size-4" />{t('boxTitle')}</NavLink>
+          {!mail && (
+            <NavLink to="/manage/drive" className={() => item({ isActive: DRIVE_PAGES.includes(pathname) })}>
+              <Cloud className="size-4" />{t('drivesNav')}
+            </NavLink>
+          )}
+          <NavLink to="/manage/mail" className={item}><Mail className="size-4" />{t('mailTitle')}</NavLink>
           <NavLink to="/manage/settings" className={item}><KeyRound className="size-4" />{t('keysTitle')}</NavLink>
           <div className="hidden flex-1 md:block" />
           <NavLink to="/manage/danger" className={({ isActive }) => cn(item({ isActive }), 'md:mt-6', !isActive && 'text-danger-fg hover:text-danger-fg')}>

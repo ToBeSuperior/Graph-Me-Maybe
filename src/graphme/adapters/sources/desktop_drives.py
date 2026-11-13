@@ -11,6 +11,7 @@ a folder shows it, and nothing above the folder is.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from collections.abc import Callable, Iterable, Mapping
@@ -75,7 +76,11 @@ def onedrive_drive(home: Path, *, platform: str, environ: Mapping[str, str],
         top = sorted(p.name for p in cloud.glob("OneDrive-*") if p.is_dir()) \
             if cloud.is_dir() else []
         return Drive(cloud, tuple(top)) if top else None
-    places = [Path(m) for m in (mounts if mounts is not None else _onedrive_mounts(environ))]
+    return _spread([Path(m) for m in (mounts if mounts is not None else _onedrive_mounts(environ))])
+
+
+def _spread(places: list[Path]) -> Drive | None:
+    """Several folders of one drive (accounts, libraries) shown from the folder above them."""
     places = [p for p in places if p.is_dir()]
     if not places:
         return None
@@ -86,6 +91,52 @@ def onedrive_drive(home: Path, *, platform: str, environ: Mapping[str, str],
     if base in places:  # one place, or one inside another: shown from above it
         base = base.parent
     return Drive(base, tuple(sorted({p.relative_to(base).parts[0] for p in places})))
+
+
+def dropbox_drive(home: Path, *, platform: str, environ: Mapping[str, str]) -> Drive | None:
+    """Where Dropbox keeps the user's Dropbox, and a team's beside it; None when it is not here.
+    Dropbox writes where in `info.json` (`personal`, `business`); without one, where it
+    installs: `~/Library/CloudStorage/Dropbox*` on a Mac, `~/Dropbox` elsewhere."""
+    infos = [Path(environ[name]) / "Dropbox" / "info.json" for name in ("APPDATA", "LOCALAPPDATA")
+             if environ.get(name)] if platform == "win32" else [home / ".dropbox" / "info.json"]
+    places: list[Path] = []
+    for info in infos:
+        try:
+            said = json.loads(info.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        places += [Path(said[k]["path"]) for k in ("personal", "business")
+                   if isinstance(said.get(k), dict) and said[k].get("path")]
+    if places := [p for p in dict.fromkeys(places) if p.is_dir()]:
+        return Drive(places[0]) if len(places) == 1 else _spread(places)
+    cloud = home / "Library" / "CloudStorage"
+    found = sorted(cloud.glob("Dropbox*")) if platform != "win32" and cloud.is_dir() else []
+    found.append(home / "Dropbox")
+    return next((Drive(p) for p in found if p.is_dir()), None)
+
+
+def icloud_drive_root(home: Path, *, platform: str, environ: Mapping[str, str]) -> Path | None:
+    """Where iCloud Drive keeps the user's files; None when it is not here."""
+    if platform == "win32":
+        profile = environ.get("USERPROFILE")
+        found = [Path(profile) / "iCloudDrive"] if profile else []
+    else:
+        found = [home / "Library" / "Mobile Documents" / "com~apple~CloudDocs"]
+    return next((path for path in found if path.is_dir()), None)
+
+
+def synology_drive_root(home: Path, *, platform: str,
+                        environ: Mapping[str, str]) -> Path | None:
+    """Where Synology Drive Client syncs a NAS's folders; None when it is not here."""
+    # shortcut: the client's default folder only; read its own settings if users move it often
+    if platform == "win32":
+        profile = environ.get("USERPROFILE")
+        found = [Path(profile) / "SynologyDrive"] if profile else []
+    else:
+        cloud = home / "Library" / "CloudStorage"
+        found = sorted(cloud.glob("SynologyDrive-*")) if cloud.is_dir() else []
+        found.append(home / "SynologyDrive")
+    return next((path for path in found if path.is_dir()), None)
 
 
 def _onedrive_mounts(environ: Mapping[str, str]) -> list[str]:
@@ -115,7 +166,9 @@ def _whole(find: Callable[..., Path | None]) -> Callable[..., Drive | None]:
 
 
 DESKTOP_DRIVES: dict[str, Callable[..., Drive | None]] = {
-    "box": _whole(box_drive_root), "google": _whole(google_drive_root), "onedrive": onedrive_drive}
+    "box": _whole(box_drive_root), "google": _whole(google_drive_root), "onedrive": onedrive_drive,
+    "dropbox": dropbox_drive, "icloud": _whole(icloud_drive_root),
+    "synology": _whole(synology_drive_root)}
 """Each drive whose desktop client is read, by the name the app gives it."""
 
 

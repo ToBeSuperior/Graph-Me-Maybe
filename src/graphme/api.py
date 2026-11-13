@@ -5,6 +5,7 @@ Everything here is assembled from `runtime`, the same way the CLI and the demo b
 """
 from __future__ import annotations
 
+import contextlib
 import tempfile
 import warnings
 from collections.abc import Callable, Sequence
@@ -15,6 +16,7 @@ import httpx
 
 from graphme.adapters.export.neo4j_import import write_import_bundle
 from graphme.adapters.storage.graph_rag import GraphAnswer, GraphRag, GraphSource
+from graphme.adapters.storage.local_neo4j import ended
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
 from graphme.application.corpus_build import BuildReport, StepListener, forget_documents
 from graphme.application.ingest import documents_at, format_of
@@ -153,6 +155,7 @@ class GraphMe:
         return rows.documents
 
     def graph_space(self) -> Neo4jGraphSpace:
+        self._let_go_if_lost()
         if self._space is None:
             self._space = create_graph_space(self.settings)
         return self._space
@@ -160,10 +163,23 @@ class GraphMe:
     @property
     def opened_space(self) -> Neo4jGraphSpace | None:
         """The graph space if it is open already; None, and nothing is opened."""
+        self._let_go_if_lost()
         return self._space
+
+    def _let_go_if_lost(self) -> None:
+        """The app's own Neo4j under the open space ended of itself: the space (and what
+        answers over it) let go, to be opened again, rather than asked on a port nothing
+        answers on until the app restarts. `ended` says so once: it is acted on at once."""
+        local = self.settings.local_neo4j
+        if self._space is None or local is None or not ended(self.settings.local_graph or local):
+            return
+        space, self._space, self._rag = self._space, None, None
+        with contextlib.suppress(Exception):  # its server is gone: nothing to say goodbye to
+            space.close()
 
     def rag(self) -> GraphRag:
         """What embeds the space and answers questions over it, made on first use."""
+        self._let_go_if_lost()  # it holds the space whose Neo4j ended
         if self._rag is None:
             self._rag = create_graph_rag(self.settings, self.graph_space(), client=self._http())
         return self._rag

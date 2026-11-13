@@ -447,6 +447,22 @@ byte for byte the same each time (fixed zip and core-property times), so asking 
 them in the graph instead of reading them again. They are the demo's: the web app offers them
 only when `GET /v1/settings` says `samples`.
 
+### Mail
+
+A message is read as an `.eml` document (`extractors/mail.py`): extracted only -- headers become
+`mail_*` metadata, the body text units, nothing is drawn or sent to a model. A `MailStore`
+(`adapters/sources/mail_store.py`) keeps each account's messages beside its workspace's graph;
+`MailSync` (`server/mail_sync.py`, run by the server) fetches new mail every few minutes over IMAP
+(`adapters/sources/imap_mail.py`, `IMAP_PRESETS`) or the Gmail API (`gmail_mail.py`, the same
+`check`/`count`/`sync`, signed in by `google_sign_in.py` with PKCE; the refresh token stands where
+an IMAP password does) and holds it for a workspace not open. Each
+account has a mail workspace (`kind="mail"`) that follows its mailbox alone: folder, drive and
+upload builds, a document's delete and the graph's reset are refused with 409
+(`Demo.not_in_mail_workspace`); only `MailSync` adds and removes what is in it. Quoted history is dropped at question time, not at extraction, when the quoted message is in
+the graph. An attachment's carriers are `ExternalDocument` nodes joined by `SAME_AS` to the
+attachment's document. The web app's Mail page (`features/manage/MailPage.tsx`) and a message
+view (`MailMessage.tsx`) sit on those routes.
+
 ### The local Neo4j
 
 No Docker: Docker Desktop on Windows runs dozens of CLI plugins every twelve seconds while any

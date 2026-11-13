@@ -32,6 +32,9 @@ class _Graph:
     def forget_rag(self) -> None:
         pass
 
+    def delete(self, ids: Any) -> None:
+        self._space.delete_documents(ids)
+
     def close(self) -> None:
         self.closed = True
 
@@ -57,7 +60,8 @@ def test_a_home_starts_with_its_own_graph_as_the_one_workspace(home: Path) -> No
     said = Workspaces(home).listed()
 
     assert said == {"active": FIRST, "mcp_enabled": True, "mcp_changes": False,
-                    "items": [{"id": FIRST, "name": "Default", "mcp": False}]}
+                    "items": [{"id": FIRST, "name": "Default", "mcp": False,
+                               "kind": "documents", "account": None}]}
     assert Workspaces(home).graph(FIRST) is None  # the graph where it always was
 
 
@@ -169,7 +173,8 @@ def test_workspaces_are_listed_made_renamed_opened_and_deleted_over_http(
     assert opened["active"] == made["id"] and opened["available"] is True
     assert refused.status_code == 409  # the one open
     assert elsewhere.status_code == 403
-    assert deleted["items"] == [{"id": made["id"], "name": "Invented audits", "mcp": False}]
+    assert deleted["items"] == [{"id": made["id"], "name": "Invented audits", "mcp": False,
+                                "kind": "documents", "account": None}]
     assert client.post("/v1/workspaces", json={"name": ""}).status_code == 400
 
 

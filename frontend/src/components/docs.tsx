@@ -1,6 +1,6 @@
 // How a document and its ties look wherever they appear: its file icon by format, the hop it was
 // reached at (a number, not only a colour), and how it is tied to the one above it.
-import { ArrowLeft, ArrowRight, FileSpreadsheet, FileText, FileType2, Presentation, Waves } from 'lucide-react';
+import { ArrowLeft, ArrowRight, FileSpreadsheet, FileText, FileType2, Mail, Presentation, Waves } from 'lucide-react';
 import { cn, formatOf, shownName } from '../lib/format';
 import { useT } from '../lib/i18n';
 import type { Direction } from '../lib/hops';
@@ -10,6 +10,7 @@ const FORMAT = {
   xlsx: { Icon: FileSpreadsheet, color: 'text-[#1e8a4c]' },
   pptx: { Icon: Presentation, color: 'text-[#d24726]' },
   pdf: { Icon: FileType2, color: 'text-[#d63b3b]' },
+  eml: { Icon: Mail, color: 'text-[#7a5cc7]' },
 } as const;
 
 export function FileIcon({ file, className }: { file: string; className?: string }) {

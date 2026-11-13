@@ -5,6 +5,40 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.70] - 2026-11-14
+
+### Added
+
+- **Mail as a source.** Manage › Mail connects a mailbox over IMAP (NAVER WORKS, Naver, Daum,
+  Zoho, Gmail, or your company's server, with an app password), counts it and asks before
+  reading anything: all of it, or only the last months. Mail is read newest first into a
+  workspace of its own, new mail as it arrives while the app runs, and a message deleted from
+  the mailbox leaves the graph. A message is read as text -- headers, body, the quoted history
+  dropped once the message it quotes is in -- and its attachments are read once and cited with
+  the mail that carried them. A mail workspace follows its mailbox alone: nothing in it is
+  deleted or emptied from the app.
+- **Gmail by a Google sign-in**, read only, where the build carries the project's Google client
+  (`GRAPHME_GOOGLE_CLIENT_ID`/`_SECRET`); without one, Gmail connects over IMAP as before.
+- **Dropbox, iCloud Drive and Synology Drive**, read from the folders their desktop apps sync,
+  as Google Drive, OneDrive and Box are.
+
+### Changed
+
+- Every drive is under one **Drives** entry of the Manage menu, a tab each.
+- A found message shows its subject, and its preview is the message -- headers, body,
+  attachments -- not pages.
+
+### Fixed
+
+- Windows: the graph DB, Java and the search model are downloaded against the system's own
+  certificates; a fresh PC refused github.com's and the graph DB never started.
+- A graph whose graph DB ended under the app is started again on the next request instead of
+  failing until the app restarts, and a graph DB that has ended is never stopped by its process
+  number, which Windows may have handed to another process.
+- A mail laid out with tables (most notification and newsletter mail) is read as its paragraphs,
+  not one line; text it hides from its reader is not read; a line break in its HTML source is a
+  space, as a browser shows it.
+
 ## [0.1.69] - 2026-11-05
 
 ### Added

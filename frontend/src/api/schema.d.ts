@@ -284,6 +284,115 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mail/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Mail Accounts
+         * @description Every account connected; never a password.
+         */
+        get: operations["mail_accounts_v1_mail_accounts_get"];
+        put?: never;
+        /**
+         * Mail Connect
+         * @description The login checked, the mailbox counted -- nothing read yet -- and a workspace made
+         *     for it, named after the address. 400 with the server's words when it refuses.
+         */
+        post: operations["mail_connect_v1_mail_accounts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail/google/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mail Google Connect
+         * @description Sign in to Google in the browser to read Gmail, read-only; the account is kept, and
+         *     counted, when Google sends the browser back. 404 in a build without Google's client.
+         */
+        post: operations["mail_google_connect_v1_mail_google_connect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail/accounts/{account}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mail Read
+         * @description The mail from `since` on (all, when null) read into the account's workspace,
+         *     opened first: a job, newest first, followed and cancelled like any build.
+         */
+        post: operations["mail_read_v1_mail_accounts__account__read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail/accounts/{account}/earlier": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mail Earlier
+         * @description What `since` left out read too.
+         */
+        post: operations["mail_earlier_v1_mail_accounts__account__earlier_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail/accounts/{account}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Mail Disconnect
+         * @description The password and the messages kept forgotten. The account's workspace is deleted
+         *     when asked (409 while it is open, and nothing is forgotten then), else it stays as an
+         *     ordinary one.
+         */
+        delete: operations["mail_disconnect_v1_mail_accounts__account__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/drives/{kind}": {
         parameters: {
             query?: never;
@@ -429,7 +538,8 @@ export interface paths {
         /**
          * Delete Document
          * @description A document gone from the graph space, with every node, passage and link of its. Not
-         *     while a build is putting documents in and linking them.
+         *     while a build is putting documents in and linking them, nor in a mail workspace (its
+         *     mailbox says what it holds).
          */
         delete: operations["delete_document_v1_documents__document_id__delete"];
         options?: never;
@@ -570,7 +680,8 @@ export interface paths {
         /**
          * Reset
          * @description The graph space emptied, and what the server read let go with it: a folder put in
-         *     afterwards is read afresh. Only when confirmed, and not while a build runs.
+         *     afterwards is read afresh. Only when confirmed, not while a build runs, and not in a mail
+         *     workspace.
          */
         post: operations["reset_v1_graph_reset_post"];
         delete?: never;
@@ -1406,6 +1517,67 @@ export interface components {
             /** Text */
             text: string;
         };
+        /** MailAccount */
+        MailAccount: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @default imap
+             * @enum {string}
+             */
+            kind: "imap" | "gmail";
+            /** Host */
+            host: string;
+            /** Port */
+            port: number;
+            /** Address */
+            address: string;
+            /** Workspace */
+            workspace: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "counted" | "reading" | "current" | "error";
+            count?: components["schemas"]["MailCountState"] | null;
+            /** Read Since */
+            read_since?: string | null;
+            /** Last Checked */
+            last_checked?: string | null;
+            /** Error */
+            error?: string | null;
+        };
+        /** MailConnect */
+        MailConnect: {
+            /** Host */
+            host: string;
+            /**
+             * Port
+             * @default 993
+             */
+            port: number;
+            /** Address */
+            address: string;
+            /** Password */
+            password: string;
+        };
+        /** MailCountState */
+        MailCountState: {
+            /** Messages */
+            messages: number;
+            /** Attachments */
+            attachments: number;
+            /** Attachment Bytes */
+            attachment_bytes?: number | null;
+            /** Oldest */
+            oldest?: string | null;
+        };
+        /** MailRead */
+        MailRead: {
+            /** Since */
+            since?: string | null;
+        };
         /** MapDocument */
         MapDocument: {
             /** Id */
@@ -1620,6 +1792,8 @@ export interface components {
             linked?: components["schemas"]["LinkedDocument"][];
             /** Modified */
             modified?: number | null;
+            /** Origin */
+            origin?: string | null;
         };
         /** Uploaded */
         Uploaded: {
@@ -1652,6 +1826,14 @@ export interface components {
              * @default false
              */
             mcp: boolean;
+            /**
+             * Kind
+             * @default documents
+             * @enum {string}
+             */
+            kind: "documents" | "mail";
+            /** Account */
+            account?: string | null;
         };
         /** WorkspaceChange */
         WorkspaceChange: {
@@ -2155,12 +2337,184 @@ export interface operations {
             };
         };
     };
+    mail_accounts_v1_mail_accounts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailAccount"][];
+                };
+            };
+        };
+    };
+    mail_connect_v1_mail_accounts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailConnect"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailAccount"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mail_google_connect_v1_mail_google_connect_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoxConnect"];
+                };
+            };
+        };
+    };
+    mail_read_v1_mail_accounts__account__read_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailRead"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mail_earlier_v1_mail_accounts__account__earlier_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mail_disconnect_v1_mail_accounts__account__delete: {
+        parameters: {
+            query?: {
+                workspace?: "delete" | "keep";
+            };
+            header?: never;
+            path: {
+                account: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailAccount"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     desktop_drive_v1_drives__kind__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                kind: "box" | "google" | "onedrive";
+                kind: "box" | "google" | "onedrive" | "dropbox" | "icloud" | "synology";
             };
             cookie?: never;
         };
@@ -2191,7 +2545,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                kind: "box" | "google" | "onedrive";
+                kind: "box" | "google" | "onedrive" | "dropbox" | "icloud" | "synology";
             };
             cookie?: never;
         };
@@ -2222,7 +2576,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                kind: "box" | "google" | "onedrive";
+                kind: "box" | "google" | "onedrive" | "dropbox" | "icloud" | "synology";
             };
             cookie?: never;
         };
@@ -2253,7 +2607,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                kind: "box" | "google" | "onedrive";
+                kind: "box" | "google" | "onedrive" | "dropbox" | "icloud" | "synology";
             };
             cookie?: never;
         };
@@ -2286,7 +2640,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                kind: "box" | "google" | "onedrive";
+                kind: "box" | "google" | "onedrive" | "dropbox" | "icloud" | "synology";
             };
             cookie?: never;
         };

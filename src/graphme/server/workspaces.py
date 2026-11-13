@@ -48,10 +48,14 @@ class Workspaces:
             raise LookupError(f"no such workspace: {workspace}")
         return dict(found)
 
-    def create(self, name: str) -> dict[str, Any]:
+    def create(self, name: str, *, kind: str = "documents",
+               account: str | None = None) -> dict[str, Any]:
+        """A workspace made. `kind` "mail" is one a mail `account` is read into, and nothing
+        else is."""
         with self._lock:
             said = self._read()
-            item = {"id": uuid.uuid4().hex[:12], "name": self._fresh(said, name), "mcp": False}
+            item = {"id": uuid.uuid4().hex[:12], "name": self._fresh(said, name), "mcp": False,
+                    "kind": kind, "account": account}
             said["items"].append(item)
             self._write(said)
             return item
@@ -61,6 +65,15 @@ class Workspaces:
             said = self._read()
             item = self._find(said, workspace)
             item["name"] = self._fresh(said, name, workspace)
+            self._write(said)
+            return dict(item)
+
+    def release(self, workspace: str) -> dict[str, Any]:
+        """A mail workspace whose account was disconnected, kept: an ordinary one from now on."""
+        with self._lock:
+            said = self._read()
+            item = self._find(said, workspace)
+            item["kind"], item["account"] = "documents", None
             self._write(said)
             return dict(item)
 
@@ -120,12 +133,16 @@ class Workspaces:
                         "mcp_enabled": bool(said.get("mcp_enabled", True)),
                         "mcp_changes": bool(said.get("mcp_changes", False)),
                         "items": [{"id": str(i["id"]), "name": str(i["name"]),
-                                   "mcp": bool(i.get("mcp", False))}
+                                   "mcp": bool(i.get("mcp", False)),
+                                   # Written before mail was a source: documents.
+                                   "kind": str(i.get("kind") or "documents"),
+                                   "account": i.get("account")}
                                   for i in said["items"]]}
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             pass
         return {"active": FIRST, "mcp_enabled": True, "mcp_changes": False,
-                "items": [{"id": FIRST, "name": FIRST_NAME, "mcp": False}]}
+                "items": [{"id": FIRST, "name": FIRST_NAME, "mcp": False,
+                           "kind": "documents", "account": None}]}
 
     def _write(self, said: dict[str, Any]) -> None:
         self.home.mkdir(parents=True, exist_ok=True)

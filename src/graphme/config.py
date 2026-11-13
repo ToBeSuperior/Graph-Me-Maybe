@@ -27,7 +27,7 @@ LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 """This machine's names. `[::1]` is how a Host header writes the IPv6 one."""
 
 _SECRET_CONFIG_KEYS = {"api_key", "embedding_key", "neo4j_password", "server_key",
-                       "box_client_secret"}
+                       "box_client_secret", "google_client_secret"}
 ENV_FIELDS = {
     "GRAPHME_PROFILE": "profile",
     "GRAPHME_DATA_DIR": "data_dir",
@@ -57,6 +57,8 @@ ENV_FIELDS = {
     "GRAPHME_PREVIEW_CACHE_MB": "preview_cache_mb",
     "GRAPHME_BOX_CLIENT_ID": "box_client_id",
     "GRAPHME_BOX_CLIENT_SECRET": "box_client_secret",
+    "GRAPHME_GOOGLE_CLIENT_ID": "google_client_id",
+    "GRAPHME_GOOGLE_CLIENT_SECRET": "google_client_secret",
 }
 _FLOAT_FIELDS = {"render_timeout_seconds", "relevance_floor", "hybrid_dense_weight"}
 _INT_FIELDS = {
@@ -194,11 +196,14 @@ class Settings(BaseModel):
     neo4j_password: str | None = Field(default=None, repr=False)
     """Only for a Neo4j run with a password; the one started here needs none."""
     server_key: str | None = Field(default=None, repr=False)
+    """GRAPHME_API_KEY: what `graphme serve` asks every `/v1` request for. Unset, it asks for
+    nothing, and serves this machine only."""
     box_client_id: str | None = None
     """The user's own Box app (OAuth 2.0, user authentication) that reads what they pick."""
     box_client_secret: str | None = Field(default=None, repr=False)
-    """GRAPHME_API_KEY: what `graphme serve` asks every `/v1` request for. Unset, it asks for
-    nothing, and serves this machine only."""
+    google_client_id: str | None = None
+    """The project's Google OAuth client (Desktop app) that signs in to read Gmail."""
+    google_client_secret: str | None = Field(default=None, repr=False)
     neo4j_heap: str = Field(default="1g", pattern=r"^[1-9][0-9]*[kmg]$")
     preview_cache_mb: int = Field(default=500, ge=0)
     """How much the pages drawn for a reader may take on disk, kept to be shown again with no

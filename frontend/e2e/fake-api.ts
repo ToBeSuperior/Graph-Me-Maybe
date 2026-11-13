@@ -2,10 +2,13 @@
 // invented documents, so the checks need no server, graph DB or model.
 import type { Page, Route } from '@playwright/test';
 
-interface Fake { found: { box: boolean; google: boolean; onedrive: boolean }; workspaces: { active: string; mcp_enabled: boolean; mcp_changes: boolean; items: { id: string; name: string; mcp: boolean }[] }; opened: string[]; originals: string[]; deletedWorkspaces: string[]; connected: { box: boolean; google: boolean; onedrive: boolean }; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; uploaded: string[]; built: string[][]; starting: number }
+type Kind = 'box' | 'google' | 'onedrive' | 'dropbox' | 'icloud' | 'synology';
+
+interface Fake { found: Record<Kind, boolean>; workspaces: { active: string; mcp_enabled: boolean; mcp_changes: boolean; items: { id: string; name: string; mcp: boolean }[] }; opened: string[]; originals: string[]; deletedWorkspaces: string[]; connected: Record<Kind, boolean>; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; uploaded: string[]; built: string[][]; starting: number; mail: { accounts: Record<string, unknown>[]; connected: Record<string, unknown>[]; read: unknown[]; earlier: number; left: string[] } }
+
 
 /** A job as `GET /v1/jobs` lists it, newest first. */
-type FakeJob = Record<string, unknown> & { id: string; kind: string; state: string };
+type FakeJob =Record<string, unknown> & { id: string; kind: string; state: string };
 
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
@@ -30,9 +33,9 @@ const BUILD_STARTED = { id: 'bx', kind: 'build', state: 'reading', done: 0, tota
   known: 0, carried: 0, links: 0, skipped: 0, embedded: 0, error: null };
 
 export async function fakeApi(page: Page,
-  { box = true, boxDrive = true, googleDrive = true, oneDrive = true, workspaces = true, empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[],
+  { box = true, boxDrive = true, googleDrive = true, oneDrive = true, dropbox = true, workspaces = true, empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[],
     progress = null as Record<string, unknown> | null, elapsed = null as number | null, starting = 0,
-    problems = null as string[] | null } = {}): Promise<Fake> {
+    problems = null as string[] | null, mailWorkspace = false, mailRefused = '', mailDoc = false } = {}): Promise<Fake> {
   const fake: Fake = {
     searchModels: [
       { name: 'general', model: 'harrier-oss-v1-0.6b', size: 639448320, installed: false, chosen: true,
@@ -40,10 +43,12 @@ export async function fakeApi(page: Page,
       { name: 'korean', model: 'KURE-v1', size: 437779008, installed: true, chosen: false, fetching: null, error: null },
     ],
     workspaces: { active: 'default', mcp_enabled: true, mcp_changes: false, items: [{ id: 'default', name: 'Default', mcp: false }, { id: 'w2', name: 'Invented audits', mcp: false }] },
-    found: { box: boxDrive, google: googleDrive, onedrive: oneDrive }, opened: [], originals: [], deletedWorkspaces: [],
-    connected: { box: false, google: false, onedrive: false }, boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
+    found: { box: boxDrive, google: googleDrive, onedrive: oneDrive, dropbox: dropbox, icloud: false, synology: false }, opened: [], originals: [], deletedWorkspaces: [],
+    connected: { box: false, google: false, onedrive: false, dropbox: false, icloud: false, synology: false }, boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
     installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0,
-    uploaded: [], built: [], starting };
+    uploaded: [], built: [], starting, mail: { accounts: [], connected: [], read: [], earlier: 0, left: [] } };
+  if (mailWorkspace) fake.workspaces.items.push({ id: 'm1', name: 'kim@invented.test', mcp: false, kind: 'mail', account: 'a1' } as never);
+  if (mailWorkspace) fake.workspaces.active = 'm1';
   const json = (route: Route, body: unknown, status = 200) =>
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/v1/**', async (route) => {
@@ -86,12 +91,12 @@ export async function fakeApi(page: Page,
       }
     }
     // A cloud drive's desktop client on this machine: Box Drive, Google Drive for desktop.
-    const usage = path.match(/^\/v1\/drives\/(box|google|onedrive)\/usage$/);
+    const usage = path.match(/^\/v1\/drives\/(box|google|onedrive|dropbox|icloud|synology)\/usage$/);
     if (usage) return json(route, { bytes: 991_900_000, files: 102 });
-    const desk = path.match(/^\/v1\/drives\/(box|google|onedrive)(\/connect|\/folders)?$/);
+    const desk = path.match(/^\/v1\/drives\/(box|google|onedrive|dropbox|icloud|synology)(\/connect|\/folders)?$/);
     if (desk) {
-      const kind = desk[1] as 'box' | 'google' | 'onedrive';
-      const top = { box: 'Box-Box', google: 'GoogleDrive-me@invented.test', onedrive: 'CloudStorage' }[kind];
+      const kind = desk[1] as Kind;
+      const top = { box: 'Box-Box', google: 'GoogleDrive-me@invented.test', onedrive: 'CloudStorage', dropbox: 'Dropbox', icloud: 'iCloud Drive', synology: 'SynologyDrive' }[kind];
       const found = fake.found[kind];
       if (desk[2] === '/connect') fake.connected[kind] = true;
       else if (!desk[2] && method === 'DELETE') fake.connected[kind] = false;
@@ -109,6 +114,46 @@ export async function fakeApi(page: Page,
           { id: 'Quality/Audit.docx', type: 'file', name: 'Audit.docx', picked: false, readable: true, size: 64000, modified: 1767225600 }] },
       };
       return json(route, listed[at]);
+    }
+    // Mail accounts: connecting counts the mailbox and reads nothing; the reader is then asked.
+    if (path === '/v1/mail/accounts' && method === 'GET') return json(route, fake.mail.accounts);
+    // A Google sign-in: the browser finishes it, and the account is on the server at the next ask.
+    if (path === '/v1/mail/google/connect' && method === 'POST') {
+      fake.mail.accounts.push({ id: 'g1', kind: 'gmail', host: 'gmail.googleapis.com', port: 443, address: 'kim@invented.test',
+        workspace: 'm1', state: 'counted', count: { messages: 3200, attachments: 410, attachment_bytes: null, oldest: '2021-04-02' },
+        read_since: null, last_checked: null, error: null });
+      return json(route, { url: 'https://accounts.google.com/o/oauth2/v2/auth?invented' });
+    }
+    if (path === '/v1/mail/accounts' && method === 'POST') {
+      if (mailRefused) return json(route, { detail: mailRefused }, 400);
+      const body = route.request().postDataJSON();
+      fake.mail.connected.push(body);
+      fake.mail.accounts.push({ id: 'a1', kind: 'imap', host: body.host, port: body.port, address: body.address, workspace: 'm1',
+        state: 'counted', count: { messages: 1240, attachments: 96, attachment_bytes: 38_000_000, oldest: '2021-03-04' } });
+      return json(route, fake.mail.accounts[0]);
+    }
+    const mailRead = path.match(/^\/v1\/mail\/accounts\/([^/]+)\/(read|earlier)$/);
+    if (mailRead) {
+      if (mailRead[2] === 'read') {
+        const { since } = route.request().postDataJSON();
+        fake.mail.read.push(since);
+        Object.assign(fake.mail.accounts[0], { state: 'current', read_since: since });
+      } else fake.mail.earlier += 1;
+      return json(route, { ...BUILD_STARTED, source: 'mail' }, 202);
+    }
+    const mailAccount = path.match(/^\/v1\/mail\/accounts\/([^/]+)$/);
+    if (mailAccount && method === 'DELETE') {
+      fake.mail.left.push(`${mailAccount[1]}:${url.searchParams.get('workspace')}`);
+      fake.mail.accounts = [];
+      return json(route, []);
+    }
+    if (path === '/v1/documents/msg/graph') {
+      return json(route, { nodes: [
+        { id: 'msg', labels: ['DocNode', 'Document'], properties: { label: 'invoice.eml', meta_mail_message_id: '<1@invented.test>',
+          meta_mail_from: 'Lee <lee@invented.test>', meta_mail_to: ['kim@invented.test'], meta_mail_date: '2026-01-05T09:00:00+09:00',
+          meta_mail_subject: 'Invented valve order' } },
+        { id: 'b1', labels: ['DocNode', 'TextChunk'], properties: { label: 'b1', text: 'Please confirm the invented order.', meta_body_index: 0 } }],
+        relationships: [], chunks: [], pages: {}, crops: [] });
     }
     if (path === '/v1/jobs/build' && method === 'POST') {
       // A drive's build names paths; an upload's, the files it uploaded.
@@ -162,7 +207,8 @@ export async function fakeApi(page: Page,
     }
     if (path === '/v1/graph/map') {
       return json(route, empty || fake.reset ? { documents: [], total: 0, links: [], similar: [] }
-        : { documents: docs, total: docs.length, links: [{ from: 'proc', to: 'spec', count: 1, matched_by: ['number'] }], similar: [] });
+        : { documents: mailDoc ? [...docs, { id: 'msg', label: 'invoice.eml', title: null, mentions: 1, modified_at: 1767225600 }] : docs, total: docs.length,
+            links: [{ from: 'proc', to: 'spec', count: 1, matched_by: ['number'] }, ...(mailDoc ? [{ from: 'msg', to: 'spec', count: 1, matched_by: ['embedded'] }, { from: 'msg', to: 'proc', count: 1, matched_by: ['number'] }] : [])], similar: [] });
     }
     if (path === '/v1/jobs') return json(route, jobs);
     if (path === '/v1/files' && method === 'POST') {
@@ -185,7 +231,10 @@ export async function fakeApi(page: Page,
       fake.asked.push(route.request().postDataJSON().question);
       fake.topK.push(route.request().postDataJSON().documents);
       if (slow) await new Promise((r) => setTimeout(r, slow));
-      return json(route, { sources });
+      // A message found first, its name carrying the digest that tells two of one subject apart.
+      const message = { id: 'msg:0', score: 0.95, document_id: 'msg', file: 'Invented valve order.emb0a1b2c3d.eml',
+        members: ['b1'], modified: 1767225600, context: 'Invented valve order\nPlease find the order attached.', linked: [] };
+      return json(route, { sources: mailDoc ? [message, ...sources] : sources });
     }
     if (path === '/v1/ask') {
       fake.answered += 1;

@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { api, call } from '../../api/client';
 import { Button, Dialog, DialogContent, DialogTrigger } from '../../components/ui';
 import { useT } from '../../lib/i18n';
-import { graphChanged } from '../../lib/queries';
+import { graphChanged, useMailWorkspace } from '../../lib/queries';
 
 export function DeleteDocument({ id, name, onDeleted, compact = false }: {
   id: string; name: string; onDeleted?: () => void; compact?: boolean;
@@ -18,6 +18,7 @@ export function DeleteDocument({ id, name, onDeleted, compact = false }: {
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const mail = useMailWorkspace();
   const remove = async () => {
     setBusy(true);
     try {
@@ -32,6 +33,7 @@ export function DeleteDocument({ id, name, onDeleted, compact = false }: {
       setBusy(false);
     }
   };
+  if (mail) return null;  // a mail workspace holds what its mailbox holds
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>

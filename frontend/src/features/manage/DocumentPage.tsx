@@ -20,6 +20,7 @@ import { keys, useBuild } from '../../lib/queries';
 import { pageName, pageNameAt, usePages } from '../../lib/pages';
 import { PagesPending, PageTabs } from '../../components/PageTabs';
 import { DeleteDocument } from './DeleteDocument';
+import { isMessage, MailMessage } from './MailMessage';
 import { OpenOriginal } from './OpenOriginal';
 
 const WORKING = ['rendering', 'grouping', 'reading', 'captioning', 'referencing'];
@@ -35,17 +36,25 @@ function SpaceDocument({ id }: { id: string }) {
     queryKey: keys.document(id),
     queryFn: () => call(api.GET('/v1/documents/{document_id}/graph', { params: { path: { document_id: id } } })),
   });
-  const pages = usePages(id);
   const name = outline.data?.nodes.find((n) => kindOf(n) === 'Document')?.properties.label as string | undefined;
   if ((outline.error as { status?: number } | null)?.status === 404 || (outline.data && !outline.data.nodes.length)) return <NotFound />;
+  const actions = name && <>
+    <OpenOriginal id={id} />
+    <DeleteDocument id={id} name={name} onDeleted={() => navigate('/manage')} />
+  </>;
+  // A message has no pages to draw: it is shown as its headers, body and attachments.
+  if (outline.data && isMessage(outline.data)) return <MailMessage id={id} name={name ?? id} graph={outline.data} actions={actions} />;
+  return <PagedDocument id={id} name={name} graph={outline.data} graphError={outline.error as Error | null} actions={actions} />;
+}
+
+function PagedDocument({ id, name, graph, graphError, actions }: {
+  id: string; name?: string; graph?: DocumentGraph; graphError: Error | null; actions: React.ReactNode;
+}) {
+  const pages = usePages(id);
   return (
-    <DocumentView name={name ?? id} graph={outline.data} graphError={outline.error as Error | null}
+    <DocumentView name={name ?? id} graph={graph} graphError={graphError}
       demoDoc={pages.doc} sheets={pages.sheets} pagesOfNodes={pages.pagesOfNodes} crops={pages.crops}
-      pagesError={pages.error as Error | null}
-      actions={name && <>
-        <OpenOriginal id={id} />
-        <DeleteDocument id={id} name={name} onDeleted={() => navigate('/manage')} />
-      </>} />
+      pagesError={pages.error as Error | null} actions={actions} />
   );
 }
 

@@ -13,6 +13,7 @@ SUFFIX_FORMATS = {
     ".pptx": DocumentFormat.PPTX,
     ".docx": DocumentFormat.DOCX,
     ".pdf": DocumentFormat.PDF,
+    ".eml": DocumentFormat.EML,
 }
 """The files read here, by extension."""
 
@@ -87,7 +88,7 @@ def documents_in(
     if late:
         time.sleep(REST_SECONDS)
         walk(late, None)
-    return sorted(found)
+    return sorted(found, key=lambda p: p.parts)  # Windows' paths compare ignoring case
 
 
 def _listed(folder: Path, strained: list[bool]) -> list[os.DirEntry[str]]:

@@ -26,6 +26,7 @@ import secrets
 import shutil
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import tarfile
@@ -39,6 +40,8 @@ from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+
+import truststore
 
 from graphme import processes
 
@@ -123,13 +126,20 @@ def _asked(url: str) -> urllib.request.Request:
     return urllib.request.Request(url, headers={"User-Agent": "graph-me-maybe"})
 
 
+def _trusted() -> ssl.SSLContext:
+    # The system's own trust store: Python's copy of it lacked a root Windows had not fetched
+    # yet, and Java's download from github.com failed its certificate check on a fresh PC.
+    return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
+
 def _fetch(url: str, target: Path) -> None:
-    with urllib.request.urlopen(_asked(url), timeout=60) as answer, target.open("wb") as out:  # noqa: S310
+    with (urllib.request.urlopen(_asked(url), timeout=60, context=_trusted()) as answer,  # noqa: S310
+          target.open("wb") as out):
         shutil.copyfileobj(answer, out, 1 << 20)
 
 
 def _read(url: str) -> bytes:
-    with urllib.request.urlopen(_asked(url), timeout=60) as answer:  # noqa: S310 -- fixed hosts
+    with urllib.request.urlopen(_asked(url), timeout=60, context=_trusted()) as answer:  # noqa: S310
         data: bytes = answer.read()
         return data
 
@@ -382,6 +392,10 @@ def watch(group: int, *, platform: str = sys.platform) -> None:
 
 def stop(child: subprocess.Popen[bytes], *, platform: str = sys.platform) -> None:
     """The Neo4j started as `child` stopped, with the server its launcher started."""
+    if child.poll() is not None:
+        # Ended already: its number may be another process's now, and `taskkill /T` (or a
+        # process group's signal) would end that one -- another workspace's Neo4j among them.
+        return
     try:
         if platform == "win32":
             # The launcher starts the server as a child of its own: the tree goes. (Neo4j
@@ -416,6 +430,15 @@ def stop_started() -> None:
         home, child = _started.pop()
         stop(child)
         (home.data / "run" / "graphme.json").unlink(missing_ok=True)
+
+
+def ended(graph: Path) -> bool:
+    """Whether the Neo4j this process started over the graph in `graph` has ended of itself --
+    killed, or crashed. It is forgotten then, so the graph's next opening starts another."""
+    gone = [(h, c) for h, c in _started if h.graph_root == graph and c.poll() is not None]
+    for each in gone:
+        _started.remove(each)
+    return bool(gone)
 
 
 def stop_graph(graph: Path) -> None:

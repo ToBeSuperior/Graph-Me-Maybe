@@ -3,6 +3,7 @@ cannot be read or a bug is answered with."""
 from __future__ import annotations
 
 import stat
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -52,7 +53,7 @@ def test_saved_settings_go_into_env_and_are_taken_up_at_once(page: Any) -> None:
     text = env.read_text()
     assert text.startswith("# kept\n") and "GRAPHME_MODEL=new-model\n" in text
     assert f"{EMBED_KEY}=sk-proj-abcdefgh1234\n" in text and KEY not in text
-    assert stat.S_IMODE(env.stat().st_mode) == 0o600
+    assert sys.platform == "win32" or stat.S_IMODE(env.stat().st_mode) == 0o600  # ACL there
     assert demo.settings.embedding_key == "sk-proj-abcdefgh1234"
     assert demo.settings.model == "new-model" and demo.graph.settings is demo.settings
     shown = client.get("/v1/settings")

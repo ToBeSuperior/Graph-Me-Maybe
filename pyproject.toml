@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph-me-maybe"
-version = "0.1.69"
+version = "0.1.70"
 description = "Graph-Me-Maybe: local-first multimodal graph RAG over documents"
 readme = "README.md"
 license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
@@ -34,6 +34,7 @@ dependencies = [
   "lxml>=5,<7",
   "mcp>=1.20,<2",
   "pystray>=0.19.5,<0.20 ; sys_platform == 'darwin' or sys_platform == 'win32'",
+  "truststore>=0.10,<1",
 ]
 
 [project.optional-dependencies]
@@ -62,6 +63,9 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.mypy]
 python_version = "3.11"
+# As CI checks it: each OS's stubs lack the other's (signal.killpg, ctypes.windll), so a check
+# on Windows or macOS flagged code its own platform guard already keeps from running there.
+platform = "linux"
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["src", "tools"]  # the tools import the package; a renamed field breaks them too

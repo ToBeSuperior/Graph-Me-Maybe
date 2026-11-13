@@ -54,6 +54,35 @@ with one search's part and lost to passages middling in both. It is the same wha
 asked for, so asking for fewer documents takes the front of the same ranking."""
 
 
+def without_answered_quotes(found: Sequence[Any], *, in_space: set[str]) -> list[Any]:
+    """`found` less the passages quoting a message that is itself in the space (`in_space`:
+    Message-IDs): its own passages say it, and a reply is often read before what it quotes,
+    so this is settled when a question is asked, not when the reply is read. A quote whose
+    message is not in the space stays, or its words would be lost."""
+    return [each for each in found if each.get("quote_of") not in in_space]
+
+
+def linked_without_answered_quotes(linked: Sequence[dict[str, Any]], *, in_space: set[str]
+                                   ) -> list[dict[str, Any]]:
+    """Linked documents less their passages that quote a message in the space; a document
+    with none left is not brought along."""
+    kept = [{**doc, "passages": without_answered_quotes(doc["passages"], in_space=in_space)}
+            for doc in linked]
+    return [doc for doc in kept if doc["passages"]]
+
+
+def documents_with_message_ids(driver: neo4j.Driver, ids: Sequence[str], *,
+                               database: str | None = None) -> set[str]:
+    """Those of the Message-IDs `ids` that a document in the space carries."""
+    if not ids:
+        return set()
+    rows, _, _ = driver.execute_query(
+        "MATCH (d:Document) WHERE d.meta_mail_message_id IN $ids "
+        "RETURN d.meta_mail_message_id AS id", {"ids": list(ids)},
+        database_=database, routing_=neo4j.RoutingControl.READ)
+    return {row["id"] for row in rows}
+
+
 class _OnceRetriever(HybridCypherRetriever):
     """Neo4j's two indexes -- vector (ANN) and fulltext (BM25) -- searched by our own query
     (`fused`), the rankings fused by weighted reciprocal rank fusion rather than the library's
@@ -105,7 +134,11 @@ class _OnceRetriever(HybridCypherRetriever):
             database_=self.neo4j_database,
             routing_=neo4j.RoutingControl.READ,
         )
-        return sorted(records, key=lambda record: record["score"], reverse=True)
+        held = documents_with_message_ids(
+            self.driver, sorted({r["quote_of"] for r in records if r["quote_of"]}),
+            database=self.neo4j_database)
+        return sorted(without_answered_quotes(records, in_space=held),
+                      key=lambda record: record["score"], reverse=True)
 
 
     def _holds_any(self, named: list[str]) -> bool:

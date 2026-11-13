@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated, Any, TypeVar
+from typing import Annotated, Any, Literal, TypeVar
 from urllib.parse import quote
 
 from fastapi import (
@@ -57,6 +57,7 @@ from graphme.application.visual_crops import (
     read_node_crop,
 )
 from graphme.config import Settings, load_settings
+from graphme.domain.enums import DocumentFormat
 from graphme.runtime import create_browser_renderer
 from graphme.server import models as api
 from graphme.server.jobs import (
@@ -159,7 +160,9 @@ def create_app(
     own (the demo's samples), put under `/v1` behind the same key."""
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        demo.start_mail_sync()
         yield
+        demo.stop_mail_sync()
         # uvicorn raises the signal it was stopped by again once it has shut down, so no exit
         # handler runs: the search model servers started here are stopped now.
         runtime.stop_local_models()
@@ -201,6 +204,24 @@ def create_app(
             return _closing_page(f"Box was not connected: {refusal}")
         return _closing_page("Box is connected. You can close this tab, go back to "
                              "Graph-Me-Maybe and pick the folders to read.")
+
+    @app.get("/v1/mail/google/callback", response_class=HTMLResponse, include_in_schema=False)
+    def google_callback(request: Request, state: str = "", code: str | None = None,
+                        error: str | None = None) -> str:
+        """Where Google sends the browser back -- outside the key, as Box's: the sign-in's
+        state, started by this process, is what proves it. The account is counted here."""
+        if not from_here(request):
+            raise HTTPException(403, "only this machine's browser may finish a sign-in")
+        google = demo.google_sign_in()
+        try:
+            if google is None:
+                raise LookupError("Gmail sign-in is not set up in this build")
+            added = demo.mail_accounts().add_gmail(
+                google.finish(state=state, code=code, error=error))
+        except (LookupError, ValueError) as refusal:
+            return _closing_page(f"Gmail was not connected: {refusal}")
+        return _closing_page(f"{added['address']} is connected. You can close this tab and go "
+                             "back to Graph-Me-Maybe: it asks how much mail to read.")
 
     @app.get("/health", response_model=api.Health)
     def health() -> dict[str, str]:
@@ -368,6 +389,62 @@ def create_app(
             demo.delete_workspace(workspace)
         return listedworkspace_registry()
 
+    # Mail accounts, each read into a workspace of its own ------------------------------------
+
+    @v1.get("/mail/accounts", response_model=list[api.MailAccount])
+    def mail_accounts() -> list[dict[str, Any]]:
+        """Every account connected; never a password."""
+        return demo.mail_accounts().listed() if demo.workspaces is not None else []
+
+    @v1.post("/mail/accounts", response_model=api.MailAccount)
+    def mail_connect(body: api.MailConnect, request: Request) -> dict[str, Any]:
+        """The login checked, the mailbox counted -- nothing read yet -- and a workspace made
+        for it, named after the address. 400 with the server's words when it refuses."""
+        changing(request)
+        with refused():
+            return demo.mail_accounts().add(body.host, body.port, body.address, body.password)
+
+    @v1.post("/mail/google/connect", response_model=api.BoxConnect)
+    def mail_google_connect(request: Request) -> dict[str, str]:
+        """Sign in to Google in the browser to read Gmail, read-only; the account is kept, and
+        counted, when Google sends the browser back. 404 in a build without Google's client."""
+        changing(request)
+        google = demo.google_sign_in()
+        if google is None:
+            raise HTTPException(404, "Gmail sign-in is not set up in this build -- connect "
+                                     "Gmail over IMAP with an app password instead")
+        url = google.start(f"{request.base_url}v1/mail/google/callback")
+        with contextlib.suppress(Exception):  # the page opens it when the server cannot
+            processes.open_in_browser(url)
+        return {"url": url}
+
+    @v1.post("/mail/accounts/{account}/read", status_code=202, response_model=api.BuildState)
+    def mail_read(account: str, body: api.MailRead, request: Request,
+                  response: Response) -> dict[str, Any]:
+        """The mail from `since` on (all, when null) read into the account's workspace,
+        opened first: a job, newest first, followed and cancelled like any build."""
+        changing(request)
+        with refused():
+            return started(demo.build_mail(account, body.since), response)
+
+    @v1.post("/mail/accounts/{account}/earlier", status_code=202, response_model=api.BuildState)
+    def mail_earlier(account: str, request: Request, response: Response) -> dict[str, Any]:
+        """What `since` left out read too."""
+        changing(request)
+        with refused():
+            return started(demo.build_mail(account, None), response)
+
+    @v1.delete("/mail/accounts/{account}", response_model=list[api.MailAccount])
+    def mail_disconnect(account: str, request: Request,
+                        workspace: Literal["delete", "keep"] = "keep") -> list[dict[str, Any]]:
+        """The password and the messages kept forgotten. The account's workspace is deleted
+        when asked (409 while it is open, and nothing is forgotten then), else it stays as an
+        ordinary one."""
+        changing(request)
+        with refused():
+            demo.disconnect_mail(account, workspace)
+            return demo.mail_accounts().listed()
+
     # A cloud drive's desktop client --------------------------------------------------------
 
     @v1.get("/drives/{kind}", response_model=api.DesktopDrive)
@@ -516,16 +593,13 @@ def create_app(
     @v1.delete("/documents/{document_id}", response_model=api.Deleted)
     def delete_document(document_id: str) -> dict[str, str]:
         """A document gone from the graph space, with every node, passage and link of its. Not
-        while a build is putting documents in and linking them."""
+        while a build is putting documents in and linking them, nor in a mail workspace (its
+        mailbox says what it holds)."""
+        demo.not_in_mail_workspace()
         unbuilt()
-        space = opened()
-        path = space.source_path(document_id)
+        opened()
         with refused():
-            demo.graph.delete([document_id])
-        demo.forget(document_id)
-        if path:
-            demo.forget_previews(path)  # its pages kept for readers
-        demo.sweep_behind()  # its crops
+            demo.delete_documents([document_id])
         return {"deleted": document_id}
 
     @v1.get("/documents/{document_id}/graph", response_model=api.DocumentGraph)
@@ -612,7 +686,9 @@ def create_app(
     @v1.post("/graph/reset", response_model=api.Reset)
     def reset(request: api.Confirm) -> dict[str, int]:
         """The graph space emptied, and what the server read let go with it: a folder put in
-        afterwards is read afresh. Only when confirmed, and not while a build runs."""
+        afterwards is read afresh. Only when confirmed, not while a build runs, and not in a mail
+        workspace."""
+        demo.not_in_mail_workspace()
         if not request.confirm:
             raise HTTPException(400, "confirm that the whole graph is to be deleted")
         unbuilt()
@@ -671,6 +747,7 @@ def create_app(
     ) -> dict[str, str]:
         """A file kept on the server -- nothing is read until a job asks. `modified` is the
         file's last change as the browser reads it, in milliseconds."""
+        demo.not_in_mail_workspace()
         if modified is not None and not (math.isfinite(modified) and 0 <= modified < 2**53):
             raise HTTPException(400, "the modified time is not valid")
         # ponytail: Starlette spools the whole part to a temp file before this runs, so the
@@ -739,6 +816,9 @@ def create_app(
     @v1.get("/files/{file_id}/pages/{index}/image")
     def image(file_id: str, index: int) -> Response:
         """The page while its document is read; drawn for the reader, now, after that."""
+        with refused():
+            if demo.session(file_id).format is DocumentFormat.EML:
+                raise LookupError("a message has no pages")
         session = ready(file_id)
         path = session.workspace / f"page-{page_of(session, index).index:02d}.png"
         if path.is_file():
@@ -910,6 +990,7 @@ def create_app(
         """Files uploaded, or a folder on the server's machine, read and built into the graph
         space, then embedded. A folder is read with the server's own rights: the key is what
         grants them."""
+        demo.not_in_mail_workspace()
         if request.folder or request.paths:
             given = [request.folder] if request.folder else request.paths
             wheres: list[Path] = []

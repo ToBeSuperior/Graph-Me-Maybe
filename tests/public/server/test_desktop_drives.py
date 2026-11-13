@@ -23,7 +23,7 @@ def _drive(tmp_path: Path) -> Path:
     return root
 
 
-@pytest.mark.parametrize("kind", ["box", "google", "onedrive"])
+@pytest.mark.parametrize("kind", ["box", "google", "onedrive", "dropbox", "icloud", "synology"])
 def test_a_drive_on_this_machine_is_found_connected_and_browsed(
     demo: Demo, tmp_path: Path, kind: str
 ) -> None:

@@ -3,6 +3,7 @@ app is generated from. A field added here is a field a client can read; one the 
 without saying so here is dropped on the way out."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -265,6 +266,8 @@ class Source(_Model):
     context: str
     linked: list[LinkedDocument] = Field(default_factory=list)
     modified: float | None = None
+    origin: str | None = None
+    """The mail it came from, or the mail that carried its document."""
 
 
 class Found(_Model):
@@ -370,7 +373,7 @@ class BoxFolder(_Model):
     """Its folders, then its documents; nothing else it holds."""
 
 
-DriveKind = Literal["box", "google", "onedrive"]
+DriveKind = Literal["box", "google", "onedrive", "dropbox", "icloud", "synology"]
 """A drive whose desktop client is read: Box Drive, Google Drive for desktop, OneDrive (with
 the SharePoint libraries it syncs)."""
 
@@ -442,6 +445,10 @@ class Workspace(_Model):
     name: str
     mcp: bool = False
     """Whether an MCP client may read it: off until switched on in the app."""
+    kind: Literal["documents", "mail"] = "documents"
+    """A mail workspace reads its account's mailbox only: no folder, drive or upload."""
+    account: str | None = None
+    """The mail account read into a mail workspace."""
 
 
 class Workspaces(_Model):
@@ -469,3 +476,40 @@ class McpSwitch(_Model):
     enabled: bool | None = None
     changes: bool | None = None
     """Whether a client may change things (delete, reset, settings), not only read."""
+
+
+class MailConnect(_Model):
+    host: str
+    port: int = 993
+    address: str
+    password: str
+    """Passed to the mail server and kept in the credential store; never answered."""
+
+
+class MailCountState(_Model):
+    messages: int
+    attachments: int
+    attachment_bytes: int | None = None
+    """None where the service tells no size without fetching each message (Gmail)."""
+    oldest: date | None = None
+
+
+class MailAccount(_Model):
+    id: str
+    kind: Literal["imap", "gmail"] = "imap"
+    host: str
+    port: int
+    address: str
+    workspace: str
+    """The workspace the account is read into: its own."""
+    state: Literal["counted", "reading", "current", "error"]
+    count: MailCountState | None = None
+    read_since: date | None = None
+    """Mail older than this is not read yet; None, all of it is."""
+    last_checked: str | None = None
+    error: str | None = None
+    """What the mail server said when it refused."""
+
+
+class MailRead(_Model):
+    since: date | None = None

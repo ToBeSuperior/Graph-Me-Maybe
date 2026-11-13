@@ -24,6 +24,8 @@ named by its title -- the one its properties give, or its first line.
 """
 from __future__ import annotations
 
+import email
+import email.policy
 import hashlib
 import io
 import logging
@@ -156,6 +158,8 @@ def carried_in(source: Path, *, keep: bool = True) -> list[Embedded]:
     try:
         if suffix == ".pdf":
             carried = _in_pdf(source, finish)
+        elif suffix == ".eml":
+            carried = _in_message(source, finish)
         elif suffix in SUFFIX_FORMATS:
             carried = _in_package(source, finish)
         else:
@@ -249,6 +253,25 @@ def _in_package(source: Path, finish: Callable[[Embedded], Embedded]) -> list[Em
                 taken[part] = each
                 cited.add((part, owner))
                 found.append(each)
+    return found
+
+
+def _in_message(source: Path, finish: Callable[[Embedded], Embedded]) -> list[Embedded]:
+    """A mail's attachments, each by its own file name. A part with no file name -- an inline
+    logo or signature picture, known by its Content-ID -- is not an attachment."""
+    message = email.message_from_bytes(source.read_bytes(), policy=email.policy.default)
+    found: list[Embedded] = []
+    for index, part in enumerate(message.walk()):
+        name = None if part.is_multipart() else part.get_filename()
+        if not name:
+            continue
+        content = part.get_payload(decode=True)
+        if not isinstance(content, bytes):
+            continue
+        if len(content) > MAX_EMBEDDED_BYTES:
+            found.append(finish(Embedded("", f"mime:{index}", name, b"", kept=False)))
+        else:
+            found.append(finish(Embedded("", f"mime:{index}", name, content)))
     return found
 
 

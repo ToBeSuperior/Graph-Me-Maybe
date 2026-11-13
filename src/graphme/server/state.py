@@ -23,6 +23,7 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,8 @@ from graphme.adapters.sources.box_account import ACCOUNT as BOX_ACCOUNT
 from graphme.adapters.sources.box_account import BoxAccount
 from graphme.adapters.sources.cloud_files import evict, local_usage, online_only
 from graphme.adapters.sources.desktop_drives import DESKTOP_DRIVES, Drive, listing
+from graphme.adapters.sources.google_sign_in import GoogleSignIn
+from graphme.adapters.sources.imap_mail import MailRefused
 from graphme.adapters.sources.sign_in import Client, vault
 from graphme.adapters.storage import local_neo4j
 from graphme.adapters.storage.assets import LocalAssetStore
@@ -97,6 +100,8 @@ from graphme.server.jobs import (
     Undrawn,
     _mark_failed,
 )
+from graphme.server.mail_accounts import MailAccounts
+from graphme.server.mail_sync import MailSync
 from graphme.server.search_models import SearchModels
 from graphme.server.workspaces import Workspaces
 
@@ -335,6 +340,10 @@ class Demo:
             # The same folder each start: an uploaded file the graph points to is still there.
             self.root = root
             self.root.mkdir(parents=True, exist_ok=True)
+        self._mail: MailAccounts | None = None
+        self._mail_sync: MailSync | None = None
+        self._mail_stop = threading.Event()
+        self._mail_thread: threading.Thread | None = None
         self.graph = GraphMe(settings)
         """The graph space and its questions: one Neo4j connection for every request. Opened
         under `opening_space`, the one thing about it not safe from two threads at once, and so is
@@ -382,6 +391,7 @@ class Demo:
         recorded about it."""
         self.sources.add(BOX_SCHEME, _Lazy(self._box_source, box_web_url))
         self._box: tuple[Client, BoxAccount] | None = None
+        self._google: GoogleSignIn | None = None
         """Where originals are read from: this machine, and a connected cloud drive."""
         if root is not None:
             _forget_kept_pages(self.root)
@@ -428,9 +438,106 @@ class Demo:
             raise Busy("workspaces are the app's own graph DB's -- this server uses another")
         return self.workspaces
 
-    def switch_workspace(self, workspace: str) -> None:
+    def mail_accounts(self) -> MailAccounts:
+        spaces = self.workspace_registry()
+        if self._mail is None:
+            self._mail = MailAccounts(spaces.home, spaces, google=self.google_sign_in(),
+                                      http=self.client)
+        return self._mail
+
+    def google_sign_in(self) -> GoogleSignIn | None:
+        """Signing in to read Gmail, through the project's Google client; None in a build
+        without one."""
+        client_id, secret = self.settings.google_client_id, self.settings.google_client_secret
+        if not client_id:
+            return None
+        with self.opening:
+            if self._google is None:
+                self._google = GoogleSignIn(Client(id=client_id, secret=secret), self.client)
+            return self._google
+
+    @property
+    def mail_sync(self) -> MailSync:
+        if self._mail_sync is None:
+            self._mail_sync = MailSync(self.mail_accounts(), self)
+        return self._mail_sync
+
+    def start_mail_sync(self) -> None:
+        """The agent that reads new mail, once per server; not for a server without workspaces."""
+        if self.workspaces is None or self._mail_thread is not None:
+            return
+        self._mail_stop = threading.Event()
+        self._mail_thread = threading.Thread(
+            target=self.mail_sync.run, args=(self._mail_stop,), daemon=True)
+        self._mail_thread.start()
+
+    def stop_mail_sync(self) -> None:
+        self._mail_stop.set()
+        self._mail_thread = None
+
+    def not_in_mail_workspace(self) -> None:
+        """Busy when the workspace open reads its mailbox only: no folder, drive or upload, and no
+        document deleted nor the graph emptied by hand -- the mailbox alone says what it holds."""
+        spaces = self.workspaces
+        if spaces is not None and spaces.item(spaces.active)["kind"] == "mail":
+            raise Busy("a mail workspace reads its own mailbox only")
+
+    def build_mail(self, account: str, since: date | None) -> CorpusBuild:
+        """`account`'s mailbox read into its workspace, opened first: the store brought level
+        with the mailbox from `since` on (newest first) as the build's first step, then the
+        messages built like any documents -- progress, cancel and the attachments they carry
+        as for a folder. Reading `since` again after a cancel picks up where it stopped."""
+        accounts = self.mail_accounts()
+        item = accounts.get(account)
+        # Not the agent's take on opening: this read builds what the store holds, and a
+        # build the agent started first would refuse it.
+        self.switch_workspace(item["workspace"], take_mail=False)
+        self._wait_for_embed()  # opening it embeds what it holds, behind: a second or two
+
+        def find(build: CorpusBuild) -> list[str]:
+            # Inside the job: a read refused because a build runs must not have changed the
+            # account that build is reading.
+            accounts.start_reading(account, since)
+            try:
+                result = accounts.sync(account, self.build_stop)
+            except MailRefused as error:
+                raise ValueError(str(error)) from None  # the build's error, as a folder's
+            # What the mailbox no longer holds leaves the graph as the agent's removals do:
+            # held, and deleted by its next pass (not inside this build).
+            self.mail_sync.hold(account, [], result.removed)
+            return [self.open_path(str(path))
+                    for path in sorted(accounts.messages(account).glob("*.eml"))]
+
+        return self.build_corpus([], item["address"], find=find)
+
+    def disconnect_mail(self, account: str, workspace: str) -> None:
+        """`account`'s password and messages forgotten, its workspace deleted (`workspace` is
+        "delete") or kept as an ordinary one. Busy while that workspace builds: the job reads
+        the store being removed. A workspace gone already is not a reason to keep the account."""
+        accounts = self.mail_accounts()
+        spaces = self.workspace_registry()
+        home = accounts.get(account)["workspace"]
+        if spaces.active == home and self.build.state in BUILDING:
+            raise Busy("the account is being read -- cancel that first")
+        if workspace == "delete":
+            with contextlib.suppress(LookupError):
+                self.delete_workspace(home)  # forgets the account too
+        with contextlib.suppress(LookupError):
+            accounts.forget(account)
+        if workspace == "keep":
+            with contextlib.suppress(LookupError):
+                spaces.release(home)
+
+    def _wait_for_embed(self) -> None:
+        waited = time.monotonic() + EMBED_WAIT_SECONDS
+        while (self.build.kind == "embed" and self.build.state in BUILDING
+               and time.monotonic() < waited):
+            time.sleep(0.1)
+
+    def switch_workspace(self, workspace: str, *, take_mail: bool = True) -> None:
         """`workspace`'s graph opened and the app moved onto it once it answers -- a few
-        seconds; the one left is closed and stopped behind, not waited for."""
+        seconds; the one left is closed and stopped behind, not waited for. A mail workspace's
+        held mail is taken behind unless not `take_mail`."""
         spaces = self.workspace_registry()
         spaces.item(workspace)
         if workspace == spaces.active:
@@ -440,10 +547,7 @@ class Demo:
         # two: waited out, not refused as though a build ran. An embedding is never stopped
         # half way, so a long one still refuses once EMBED_WAIT_SECONDS have gone.
         # ponytail: polled, an event on the job if a wait ever needs to be exact
-        waited = time.monotonic() + EMBED_WAIT_SECONDS
-        while (self.build.kind == "embed" and self.build.state in BUILDING
-               and time.monotonic() < waited):
-            time.sleep(0.1)
+        self._wait_for_embed()
         with self.building:
             busy = [s for s in self.sessions.values() if s.state not in (*STARTABLE, *FINISHED)]
             if self.build.state in BUILDING or self.export.state in EXPORTING or busy:
@@ -465,6 +569,8 @@ class Demo:
         going.start()
         self.search_models.embed_behind()  # a search model chosen while it was closed
         self.sweep_behind()
+        if take_mail and spaces.item(workspace)["account"] is not None:
+            self.mail_sync.opened(workspace)  # mail that came while it was closed
 
     def reader(self, workspace: str | None) -> GraphMe:
         """The graph to read `workspace` from: the open one's for None or the open one, else
@@ -518,6 +624,7 @@ class Demo:
     def delete_workspace(self, workspace: str) -> None:
         """`workspace` and its graph deleted; never the one open."""
         spaces = self.workspace_registry()
+        mail = spaces.item(workspace)["account"]
         self.stop_side(workspace)
         if self._letting_go is not None:
             self._letting_go[1].join()  # its Neo4j may be the one stopping
@@ -525,6 +632,9 @@ class Demo:
         if workspace != spaces.active:
             local_neo4j.stop_graph(graph or spaces.home)
         spaces.delete(workspace)
+        if mail is not None:  # a mail workspace takes its account's password and store with it
+            with contextlib.suppress(LookupError):
+                self.mail_accounts().forget(mail)
 
     def sweep_assets(self) -> tuple[int, int]:
         """The crops and pictures nothing names any more deleted from the open workspace's
@@ -800,6 +910,8 @@ class Demo:
         `preview_cache_mb` holds, so a page looked at before needs no file, and a cloud drive
         does not download it again to show it."""
         session = self.session(doc)
+        if session.format is DocumentFormat.EML:
+            raise LookupError("a message has no pages")
         key = (doc, index, session.stamp)
         with self.previewing:
             if key in self.previews:
@@ -942,7 +1054,7 @@ class Demo:
                     return
                 if not docs:
                     build.state = "error"
-                    build.error = "no readable document (xlsx, pptx, docx, pdf)"
+                    build.error = "no readable document (xlsx, pptx, docx, pdf, eml)"
                     return
             self._build_corpus(docs, put, embed)
         finally:
@@ -1021,6 +1133,7 @@ class Demo:
         the version Box states: one whose version was read before and whose content the
         space still holds is passed over without being fetched; the rest is fetched for the
         build and removed after it."""
+        self.not_in_mail_workspace()
         box = self._box_source()
         found, lost = box.documents(self.box_picked)
         kept = self._box_kept()
@@ -1080,6 +1193,7 @@ class Demo:
     def drive_folder(self, kind: str, relative: str) -> dict[str, Any]:
         """A folder of `kind`'s, a level at a time; LookupError when its client is not here,
         Busy until the user has said to read it."""
+        self.not_in_mail_workspace()
         drive = self.desktop_drive(kind)
         if drive is None:
             raise LookupError(f"{kind} drive is not on this machine")
@@ -1382,6 +1496,19 @@ class Demo:
             if not left:
                 return
 
+    def delete_documents(self, ids: list[str]) -> None:
+        """Documents gone from the graph space, and the server's own reading of each, the pages
+        kept for readers and the crops nothing names any more with them. KeyError: one is not
+        in the space (nothing is deleted)."""
+        space = self.space()
+        paths = {i: space.source_path(i) for i in ids}
+        self.graph.delete(ids)
+        for i in ids:
+            self.forget(i)
+            if path := paths[i]:
+                self.forget_previews(path)  # its pages kept for readers
+        self.sweep_behind()  # their crops
+
     def forget(self, document_id: str) -> None:
         """The server's own reading of a document deleted from the graph let go too: a document
         deleted is gone, not left behind as one read but outside the graph."""
@@ -1486,7 +1613,11 @@ class Demo:
     def _run(self, session: Session) -> None:
         session.started_at, session.ended_at = time.monotonic(), None
         try:
-            self._steps(session, self._prepare, self._read, self._enrich, self._drawn)
+            if session.format is DocumentFormat.EML:
+                # A message has no pages and no mail body goes to a model: extracted, nothing more.
+                self._steps(session, self._extract_message)
+            else:
+                self._steps(session, self._prepare, self._read, self._enrich, self._drawn)
         finally:
             session.ended_at = time.monotonic()
         self._lighten(session)
@@ -1604,6 +1735,12 @@ class Demo:
         """Where each node is drawn, written on the graph that goes into the space: a preview
         needs nothing else of this reading, and draws only the page looked at."""
         session.extracted = with_geometry(session.read(), session.pages, session.source)
+
+    def _extract_message(self, session: Session) -> None:
+        session.workspace.mkdir(parents=True, exist_ok=True)
+        session.store = LocalAssetStore(self.settings.asset_dir)
+        with self.sources.open_copy(session.origin or str(session.source)) as source:
+            session.extracted = self._builder(session).build(source, session.format)
 
     def _prepare(self, session: Session) -> None:
         session.workspace.mkdir(parents=True, exist_ok=True)

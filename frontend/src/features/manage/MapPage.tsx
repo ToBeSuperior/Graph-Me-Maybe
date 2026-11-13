@@ -17,7 +17,7 @@ import { FolderDrop } from '../upload/FolderDrop';
 import { PageHeader } from './ManageLayout';
 
 /** A document's colour on the map is its format's, as its icon is everywhere else. */
-const FORMAT_FILL: Record<string, string> = { docx: '#8DB4F0', xlsx: '#8DCC93', pptx: '#F4A58A', pdf: '#F08A8A' };
+const FORMAT_FILL: Record<string, string> = { docx: '#8DB4F0', xlsx: '#8DCC93', pptx: '#F4A58A', pdf: '#F08A8A', eml: '#B7A3E8' };
 const OTHER_FILL = '#F79767';
 
 export function MapPage() {
