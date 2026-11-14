@@ -11,6 +11,7 @@ import warnings
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import TracebackType
+from typing import Any
 
 import httpx
 
@@ -19,7 +20,7 @@ from graphme.adapters.storage.graph_rag import GraphAnswer, GraphRag, GraphSourc
 from graphme.adapters.storage.local_neo4j import ended
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
 from graphme.application.corpus_build import BuildReport, StepListener, forget_documents
-from graphme.application.ingest import documents_at, format_of
+from graphme.application.ingest import documents_at
 from graphme.config import Settings, load_settings
 from graphme.domain.models import ExtractedDocument
 from graphme.runtime import (
@@ -28,22 +29,36 @@ from graphme.runtime import (
     create_graph_rag,
     create_graph_space,
     create_neo4j_admin,
+    create_page_renderer,
+    read_document,
 )
 
 MODEL_WAIT = 600.0
 """Seconds one model call may take: a page read by the model is slow under load."""
 
 
-def read(path: str | Path, *, settings: Settings | None = None) -> ExtractedDocument:
+def _settings(settings: Settings | None, in_code: dict[str, Any]) -> Settings:
+    if settings is not None and in_code:
+        raise TypeError("pass settings=Settings(...) or keywords "
+                        f"({', '.join(sorted(in_code))}), not both")
+    return settings or load_settings(**in_code)
+
+
+def read(path: str | Path, *, settings: Settings | None = None, **in_code: Any
+         ) -> ExtractedDocument:
     """One document read as a corpus build reads it -- rendered, its outline and visuals read
     by the model -- without a graph space. Attachments inside it are not unpacked: each
-    becomes a document of its own only when a corpus is built (`GraphMe.add`)."""
+    becomes a document of its own only when a corpus is built (`GraphMe.add`).
+
+    Settings come from the environment and `.env`, any of `CODE_SETTINGS` given as a keyword
+    (`provider=`, `api_key=`, `model=`, ...) over them, or all of them as `settings=`."""
+    settings = _settings(settings, in_code)
     if Path(path).is_dir():
         raise ValueError(f"read takes one file, not a folder: {path}")
     [source] = documents_at(Path(path))
-    settings = settings or load_settings()
     with httpx.Client(timeout=MODEL_WAIT) as client:
-        return corpus_graph_builder(settings, client).build(source, format_of(source))
+        renderer = create_page_renderer(settings)
+        return read_document(corpus_graph_builder(settings, client, renderer), renderer, source)
 
 
 class GraphMe:
@@ -51,11 +66,11 @@ class GraphMe:
 
     One Neo4j connection and one HTTP client, opened when first needed and closed by
     `close()` or the end of a `with` block; used again after that, they open again. Not
-    safe to share between threads.
+    safe to share between threads. Settings as `read` takes them.
     """
 
-    def __init__(self, settings: Settings | None = None) -> None:
-        self.settings = settings or load_settings()
+    def __init__(self, settings: Settings | None = None, **in_code: Any) -> None:
+        self.settings = _settings(settings, in_code)
         self._space: Neo4jGraphSpace | None = None
         self._rag: GraphRag | None = None
         self._client: httpx.Client | None = None

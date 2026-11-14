@@ -13,7 +13,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 while IFS='=' read -r key value; do
   case "$key" in
-    upstream|commit|npm_package|npm_version) printf -v "$key" '%s' "$value" ;;
+    upstream|commit|npm_package|npm_version|hwp_package|hwp_version) printf -v "$key" '%s' "$value" ;;
   esac
 done < "$here/UPSTREAM"
 # Where the app looks for it: the argument, else GRAPHME_VIEWER_DIR from the environment or the
@@ -33,7 +33,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 echo "bundle -> $bundle"
-mkdir -p "$bundle/dist" "$bundle/xlsx"
+mkdir -p "$bundle/dist" "$bundle/xlsx" "$bundle/hwp"
 
 echo "fetching $npm_package@$npm_version (docx, pptx)"
 ( cd "$work" && npm pack "$npm_package@$npm_version" --silent >/dev/null && tar xzf ./*.tgz )
@@ -44,6 +44,14 @@ for patch in "$here"/dist-patches/*.patch; do
   ( cd "$work/package" && patch --quiet -p1 < "$patch" )
 done
 cp -R "$work/package/dist/." "$bundle/dist/"
+
+# HWP and HWPX: the published build as shipped, its WebAssembly prebuilt (no Rust needed). A
+# Hangul document is drawn with it and printed to the PDF it is read as (hwp_print.py).
+echo "fetching $hwp_package@$hwp_version (hwp, hwpx)"
+mkdir "$work/hwp"
+( cd "$work/hwp" && npm pack "$hwp_package@$hwp_version" --silent >/dev/null && tar xzf ./*.tgz )
+cp "$work/hwp/package/rhwp.js" "$work/hwp/package/rhwp_bg.wasm" "$work/hwp/package/LICENSE" \
+  "$work/hwp/package/notices/THIRD_PARTY_LICENSES.md" "$bundle/hwp/"
 
 if ! rustup target list --installed 2>/dev/null | grep -q wasm32-unknown-unknown; then
   echo "error: the patched xlsx parser needs the wasm32 target" >&2
@@ -66,6 +74,7 @@ echo
 echo "viewer bundle ready: $bundle"
 echo "  dist/   docx + pptx (npm $npm_version)"
 echo "  xlsx/   patched build of $commit"
+echo "  hwp/    hwp + hwpx (npm $hwp_package $hwp_version)"
 echo
 # Only a bundle placed by argument is somewhere the app would not look.
 if [[ -n "${1:-}" && "$bundle" != "${GRAPHME_VIEWER_DIR:-$HOME/.cache/graphme/ooxml-viewer}" ]]; then

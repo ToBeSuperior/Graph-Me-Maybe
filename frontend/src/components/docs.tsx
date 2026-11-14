@@ -11,6 +11,8 @@ const FORMAT = {
   pptx: { Icon: Presentation, color: 'text-[#d24726]' },
   pdf: { Icon: FileType2, color: 'text-[#d63b3b]' },
   eml: { Icon: Mail, color: 'text-[#7a5cc7]' },
+  hwp: { Icon: FileText, color: 'text-[#1b86c8]' },
+  hwpx: { Icon: FileText, color: 'text-[#1b86c8]' },
 } as const;
 
 export function FileIcon({ file, className }: { file: string; className?: string }) {

@@ -85,6 +85,22 @@ def test_an_outlook_html_block_is_quoted_to_its_end(tmp_path: Path) -> None:
     _check(_units(_reply(tmp_path, html=html)))
 
 
+def test_outlook_desktops_header_block_is_quoted_to_its_end(tmp_path: Path) -> None:
+    # Outlook for Windows writes no id on the block: a ruled div with From:/Sent: lines, in
+    # English or Korean, and the quoted message after it.
+    for header in ("<b>From:</b> Kim<br><b>Sent:</b> Monday<br><b>To:</b> Lee",
+                   "<b>보낸 사람:</b> 김<br><b>보낸 날짜:</b> 2026년 10월 12일<br>"
+                   "<b>받는 사람:</b> 이"):
+        html = (f"<p>{OWN}</p><div style='border:none;border-top:solid #E1E1E1 1.0pt'>"
+                f"<p>{header}</p></div><p>{QUOTED}</p>")
+        _check(_units(_reply(tmp_path, html=html)))
+
+
+def test_a_from_line_without_sent_in_html_is_own_text(tmp_path: Path) -> None:
+    units = _units(_reply(tmp_path, html="<p>From: the warehouse<br>it is shipped</p>"))
+    assert all(not quoted for _, quoted, _ in units)
+
+
 def test_a_quote_is_never_in_a_passage_with_own_text(tmp_path: Path) -> None:
     graph = MailExtractor().extract(_reply(tmp_path, f"{OWN}\n\nOn Mon, Kim wrote:\n> {QUOTED}"))
     units = [GraphUnit(id=n.id, parent=None, text=n.text or "", order=(i,),

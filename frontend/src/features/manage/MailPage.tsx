@@ -48,7 +48,7 @@ export function MailPage() {
       <div className="grid max-w-2xl gap-4 p-6 text-sm">
         {!accounts.data ? <Spinner /> : accounts.data.map((a) => <AccountCard key={a.id} account={a} />)}
         {accounts.data?.length === 0 && <p className="text-muted">{t('mailNone')}</p>}
-        <GoogleConnect signing={signing && (accounts.data?.length ?? 0) <= signing.had ? signing.url : null}
+        <SignInConnect signing={signing && (accounts.data?.length ?? 0) <= signing.had ? signing.url : null}
           onStarted={(url) => setSigning({ url, had: accounts.data?.length ?? 0 })} />
         <p className="text-muted">{t('mailImapHow')}</p>
         <ConnectForm />
@@ -57,23 +57,26 @@ export function MailPage() {
   );
 }
 
-/** Gmail by a Google sign-in in the browser: no app password. The server opens the browser;
- * the link is there when it could not. */
-function GoogleConnect({ signing, onStarted }: { signing: string | null; onStarted: (url: string) => void }) {
+/** Gmail by a Google sign-in, Outlook (personal or work) by a Microsoft one, in the browser: no
+ * app password. The server opens the browser; the link is there when it could not. */
+function SignInConnect({ signing, onStarted }: { signing: string | null; onStarted: (url: string) => void }) {
   const t = useT();
   const [said, setSaid] = useState<string | null>(null);
-  const start = async () => {
+  const start = async (path: '/v1/mail/google/connect' | '/v1/mail/microsoft/connect') => {
     setSaid(null);
     try {
-      onStarted((await call(api.POST('/v1/mail/google/connect'))).url);
+      onStarted((await call(api.POST(path))).url);
     } catch (error) {
       setSaid(error instanceof ApiError ? error.message : String(error));
     }
   };
   return (
-    <section className="grid gap-2 rounded-xl border border-line bg-panel p-4" aria-label="Gmail">
+    <section className="grid gap-2 rounded-xl border border-line bg-panel p-4" aria-label={t('mailSignIn')}>
       <p className="text-muted">{t('mailGoogleHow')}</p>
-      <div><Button variant="primary" onClick={() => void start()}>{t('mailGoogle')}</Button></div>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="primary" onClick={() => void start('/v1/mail/google/connect')}>{t('mailGoogle')}</Button>
+        <Button variant="primary" onClick={() => void start('/v1/mail/microsoft/connect')}>{t('mailMicrosoft')}</Button>
+      </div>
       {signing && (
         <p role="status" className="text-muted">{t('mailGoogleOpened')}{' '}
           <a href={signing} target="_blank" rel="noreferrer" className="underline">{t('driveOpenLink')}</a></p>

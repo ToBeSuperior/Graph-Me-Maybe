@@ -706,6 +706,14 @@ test('Gmail is connected by a Google sign-in and asked about like any mailbox', 
   await expect(page.getByRole('button', { name: 'Read all' })).toBeVisible();
 });
 
+test('Outlook, personal or work, is connected by a Microsoft sign-in', async ({ page }) => {
+  await english(page);
+  await fakeApi(page);
+  await page.goto('/manage/mail');
+  await page.getByRole('button', { name: 'Sign in with Microsoft' }).click();
+  await expect(page.getByTestId('mail-question')).toHaveText('870 messages since 2023-06 · 64 with attachments');
+});
+
 test('only the last months reads from that date and offers the earlier mail later', async ({ page }) => {
   await english(page);
   const fake = await fakeApi(page);

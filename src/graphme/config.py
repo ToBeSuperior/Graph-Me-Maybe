@@ -15,6 +15,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from graphme import model_endpoint
 from graphme.providers import DEFAULT_EMBEDDER
 
+MICROSOFT_CLIENT_ID = "a5097817-de94-4b4c-b26c-7f2e25e3264d"
+"""The project's Microsoft app registration (Graph-Me-Maybe): an identifier, not a secret."""
+
 _log = logging.getLogger(__name__)
 
 RELEVANCE_FLOORS = {"text-embedding-3-large": 0.2, "harrier-oss-v1-0.6b": 0.39, "KURE-v1": 0.46}
@@ -59,6 +62,7 @@ ENV_FIELDS = {
     "GRAPHME_BOX_CLIENT_SECRET": "box_client_secret",
     "GRAPHME_GOOGLE_CLIENT_ID": "google_client_id",
     "GRAPHME_GOOGLE_CLIENT_SECRET": "google_client_secret",
+    "GRAPHME_MICROSOFT_CLIENT_ID": "microsoft_client_id",
 }
 _FLOAT_FIELDS = {"render_timeout_seconds", "relevance_floor", "hybrid_dense_weight"}
 _INT_FIELDS = {
@@ -204,6 +208,9 @@ class Settings(BaseModel):
     google_client_id: str | None = None
     """The project's Google OAuth client (Desktop app) that signs in to read Gmail."""
     google_client_secret: str | None = Field(default=None, repr=False)
+    microsoft_client_id: str = MICROSOFT_CLIENT_ID
+    """The Microsoft app registration that signs in to read Outlook mail; the project's own
+    unless set (a public client: an identifier, no secret)."""
     neo4j_heap: str = Field(default="1g", pattern=r"^[1-9][0-9]*[kmg]$")
     preview_cache_mb: int = Field(default=500, ge=0)
     """How much the pages drawn for a reader may take on disk, kept to be shown again with no
@@ -311,7 +318,20 @@ def app_home(environ: Mapping[str, str] = os.environ, platform: str = sys.platfo
     return Path(data) / "graph-me-maybe"
 
 
-def load_settings(environ: dict[str, str] | None = None) -> Settings:
+CODE_SETTINGS = frozenset({
+    "provider", "api_key", "model", "base_url", "embedding_provider", "embedding_key",
+    "embedding_model", "neo4j_uri", "neo4j_user", "neo4j_password", "home",
+})
+"""What the library takes as keywords (`graphme.read`, `GraphMe`), over the environment."""
+
+
+def load_settings(environ: dict[str, str] | None = None, **in_code: Any) -> Settings:
+    """Settings from the environment and `.env` (the checkout's, else the app's), or from
+    `environ` alone; any of `CODE_SETTINGS` passed in code wins over both."""
+    if unknown := sorted(set(in_code) - CODE_SETTINGS):
+        raise TypeError(f"not a setting: {', '.join(unknown)} (one of "
+                        f"{', '.join(sorted(CODE_SETTINGS))})")
+    in_code = {name: value for name, value in in_code.items() if value is not None}
     base: Path | None = None
     if environ is None:
         # A checkout's `.env` is in the working folder; anywhere else a command uses the
@@ -328,6 +348,9 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         env.update(os.environ)
     else:
         env = dict(environ)
+    if "home" in in_code:
+        env["GRAPHME_HOME"] = str(in_code.pop("home"))
+    keys = {name: in_code.pop(name) for name in ("api_key", "embedding_key") if name in in_code}
     values: dict[str, Any] = {}
     if config_path := env.get("GRAPHME_CONFIG"):
         values.update(read_yaml(Path(config_path).expanduser()))
@@ -347,6 +370,7 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
             except ValueError as error:
                 raise ValueError(f"{env_name} must be a number") from error
         values[field_name] = value
+    values.update(in_code)
 
     # Each key is read only from the variable its provider's row names, and nowhere else:
     # another provider's key in the environment is never picked up.
@@ -356,6 +380,7 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         values["api_key"] = env[chat.key_env]
     if (row := model_endpoint.EMBEDDERS.get(embedder)) and env.get(row.key_env):
         values["embedding_key"] = env[row.key_env]
+    values.update(keys)
     if base is not None and base != Path.cwd() and "data_dir" not in values:
         values["data_dir"] = base / ".graphme"
     with contextlib.suppress(KeyError):  # no home directory named in this environment

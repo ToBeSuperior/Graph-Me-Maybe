@@ -114,6 +114,34 @@ def test_what_the_message_hides_from_its_reader_is_not_read(tmp_path: Path) -> N
     assert [t for _, t in _units(_write(tmp_path, message))] == ["Shown", "Also shown"]
 
 
+ICS = (
+    "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\n"
+    "SUMMARY:밸브 누설 시험 검토 회의\r\n"
+    "DTSTART;TZID=Korea Standard Time:20261012T090000\r\n"
+    "DTEND;TZID=Korea Standard Time:20261012T100000\r\n"
+    "LOCATION:2층 회의실\r\nORGANIZER;CN=Kim:mailto:kim@invented.test\r\n"
+    "DESCRIPTION:QP-210 시험 압력 1.1 MPa\\, 유지 시간 60초를 검토합\r\n 니다.\\n자료 첨부.\r\n"
+    "END:VEVENT\r\nEND:VCALENDAR\r\n")
+
+
+def test_a_calendar_invite_is_read_as_text_once(tmp_path: Path) -> None:
+    # Outlook sends an invite twice: as the message's calendar part and as invite.ics. What it
+    # says -- what, when, where, who, why -- is found like any body text, once.
+    message = EmailMessage()
+    message["Subject"] = "초대: 밸브 누설 시험 검토 회의"
+    message.set_content("회의에 초대합니다.")
+    message.add_alternative(ICS, subtype="calendar")
+    message.add_attachment(ICS.encode(), maintype="text", subtype="calendar",
+                           filename="invite.ics")
+
+    texts = [t for _, t in _units(_write(tmp_path, message))]
+
+    assert texts == ["회의에 초대합니다.", "Invitation: 밸브 누설 시험 검토 회의\n"
+                     "When: 2026-10-12 09:00 – 2026-10-12 10:00 (Korea Standard Time)\n"
+                     "Where: 2층 회의실\nOrganizer: Kim <kim@invented.test>\n"
+                     "QP-210 시험 압력 1.1 MPa, 유지 시간 60초를 검토합니다.\n자료 첨부."]
+
+
 def test_a_plain_only_message_is_read_as_paragraphs(tmp_path: Path) -> None:
     message = EmailMessage()
     message.set_content("first one\n\nsecond one")

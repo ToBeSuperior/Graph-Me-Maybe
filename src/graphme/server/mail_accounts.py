@@ -24,6 +24,8 @@ from graphme.adapters.sources.gmail_mail import GmailMailbox
 from graphme.adapters.sources.google_sign_in import GoogleSignIn
 from graphme.adapters.sources.imap_mail import ImapMailbox, MailCount, MailRefused, SyncResult
 from graphme.adapters.sources.mail_store import MailStore
+from graphme.adapters.sources.microsoft_sign_in import MicrosoftSignIn
+from graphme.adapters.sources.outlook_mail import OutlookMailbox
 from graphme.adapters.sources.sign_in import Vault, vault
 from graphme.server.workspaces import Workspaces
 
@@ -33,7 +35,8 @@ class MailAccounts:
         self, home: Path, workspaces: Workspaces,
         vault_for: Callable[[Path, str], Vault] = vault, *,
         connect: Callable[..., imaplib.IMAP4] = imaplib.IMAP4_SSL,
-        google: GoogleSignIn | None = None, http: httpx.Client | None = None,
+        google: GoogleSignIn | None = None, microsoft: MicrosoftSignIn | None = None,
+        http: httpx.Client | None = None,
     ) -> None:
         self._home = home
         self._file = home / "mail_accounts.json"
@@ -41,6 +44,7 @@ class MailAccounts:
         self._vault_for = vault_for
         self._connect = connect
         self._google = google
+        self._microsoft = microsoft
         self._http = http or httpx.Client()
         self._lock = threading.Lock()
 
@@ -92,15 +96,40 @@ class MailAccounts:
             self._write([*self._read(), item])
         return item
 
+    def add_outlook(self, refresh: str) -> dict[str, Any]:
+        """An Outlook account (personal or work) signed in to, counted and kept as `add_gmail`
+        keeps a Gmail one. Microsoft hands back a new refresh token with each refresh: the
+        latest is the one kept."""
+        latest = [refresh]
+        mailbox = self._outlook(lambda: latest[0], lambda fresh: latest.__setitem__(0, fresh))
+        try:
+            address = mailbox.address()
+            counted = mailbox.count()
+        except MailRefused as error:
+            raise ValueError(str(error)) from None
+        return self._keep({"kind": "outlook", "host": "graph.microsoft.com", "port": 443,
+                           "address": address}, latest[0], counted)
+
     def _gmail(self, refresh: str) -> GmailMailbox:
         if self._google is None:
             raise LookupError("Gmail sign-in is not set up in this build")
         google = self._google
         return GmailMailbox(self._http, lambda: google.access_token(refresh))
 
-    def _mailbox(self, item: dict[str, Any], secret: str) -> ImapMailbox | GmailMailbox:
+    def _outlook(self, refresh: Callable[[], str],
+                 keep: Callable[[str], None]) -> OutlookMailbox:
+        if self._microsoft is None:
+            raise LookupError("Outlook sign-in is not set up in this build")
+        microsoft = self._microsoft
+        return OutlookMailbox(self._http, lambda: microsoft.access_token(refresh(), keep=keep))
+
+    def _mailbox(self, item: dict[str, Any],
+                 secret: str) -> ImapMailbox | GmailMailbox | OutlookMailbox:
         if item.get("kind") == "gmail":
             return self._gmail(secret)
+        if item.get("kind") == "outlook":
+            kept = self._vault(item["id"])
+            return self._outlook(lambda: kept.get() or secret, kept.put)
         return ImapMailbox(item["host"], item["port"], item["address"], secret,
                            connect=self._connect)
 
@@ -150,15 +179,17 @@ class MailAccounts:
         assert graph is not None  # a mail workspace is never the home's own
         return graph / "mail" / "messages"
 
-    def forget(self, account: str) -> None:
+    def forget(self, account: str, *, keep_messages: bool = False) -> None:
         """The password and the messages kept are gone; the workspace is the caller's to keep
-        or delete."""
+        or delete. A workspace kept keeps its messages too (`keep_messages`): its graph opens
+        each message from its file."""
         item = self.get(account)
         secret = self._vault(account).get()
         if item.get("kind") == "gmail" and self._google is not None and secret:
             self._google.revoke(secret)  # the sign-in ends at Google too
         self._vault(account).clear()
-        shutil.rmtree(self.messages(account).parent, ignore_errors=True)
+        if not keep_messages:
+            shutil.rmtree(self.messages(account).parent, ignore_errors=True)
         with self._lock:
             self._write([a for a in self._read() if a["id"] != item["id"]])
 

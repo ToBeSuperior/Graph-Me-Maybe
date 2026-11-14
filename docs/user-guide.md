@@ -20,7 +20,7 @@ jumps to the question box from anywhere.
 On the **Ask** tab, drop a folder (or **Choose folder**), or press **Try sample documents**: ten
 invented documents of a fictional company — nineteen in the graph, counting the files embedded in
 them. Each document is uploaded, read, linked to the others and embedded for search; the bar at the
-top shows the progress. Files that are not xlsx, pptx, docx or pdf, hidden files and Office lock
+top shows the progress. Files that are not xlsx, pptx, docx, pdf, hwp or hwpx, hidden files and Office lock
 files (`~$…`) are skipped.
 
 Reading calls the model for every page. **Readings per page** (Manage › Keys and model) is 2 in the
@@ -124,8 +124,12 @@ settings; it stays on this computer and is never shown again).
 allow reading your mail (read only -- nothing is sent, moved or deleted), and the account shows
 up on the page. The sign-in is kept in your system's credential store; disconnecting revokes it at
 Google. Gmail's counting gives how many messages carry attachments, not their size. Until Google
-has verified the app, Google shows an "unverified app" screen first. Outlook sign-in in the
-browser is not here yet.
+has verified the app, Google shows an "unverified app" screen first.
+
+**Outlook** -- a personal account (Outlook.com, Hotmail) or a work or school one (Microsoft 365)
+-- connects with **Sign in with Microsoft** the same way: read only, kept in your credential
+store, and Junk Email, Deleted Items and drafts are not read. A company may need its IT admin to
+approve Graph-Me-Maybe once before its people can sign in; Microsoft says so on its sign-in page.
 
 Connecting counts the mailbox and reads nothing. The app then asks, with the number of messages
 and the oldest month, the attachments and their size: **Read all**, **Only the last N months**,

@@ -1,0 +1,72 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- A Hangul document drawn page by page as SVG by the bundled renderer (hwp/rhwp.js), each page
+     printed at its own size. The renderer draws every character as a <text> of its own and no
+     space between words: a space is written into each gap, or the PDF's words run together. -->
+<style>body { margin: 0 } .page { break-after: page } .page svg { display: block }</style>
+<body>
+<script type="module">
+import init, { HwpDocument } from './hwp/rhwp.js';
+
+const SVG = 'http://www.w3.org/2000/svg';
+const WORD_GAP = 0.2;  // of the font size: a gap past it between two characters is a space
+
+let context = null, lastFont = '';
+// The renderer measures text through the page; without this it cannot lay out a line.
+globalThis.measureTextWidth = (font, text) => {
+  context ??= document.createElement('canvas').getContext('2d');
+  if (font !== lastFont) { context.font = font; lastFont = font; }
+  return context.measureText(text).width;
+};
+
+function spaced(svg) {
+  let before = null, end = 0;
+  for (const text of [...svg.querySelectorAll('text')]) {
+    const x = parseFloat(text.getAttribute('x'));
+    const size = parseFloat(text.getAttribute('font-size')) || 10;
+    if (before && before.getAttribute('y') === text.getAttribute('y') && x - end > size * WORD_GAP) {
+      const space = document.createElementNS(SVG, 'text');
+      for (const name of ['y', 'font-family', 'font-size']) space.setAttribute(name, before.getAttribute(name));
+      space.setAttribute('x', end);
+      space.setAttribute('fill', 'transparent');
+      space.setAttribute('style', 'white-space: pre');
+      space.textContent = ' ';
+      text.before(space);
+    }
+    let width = 0;
+    try { width = text.getComputedTextLength(); } catch { /* not laid out: no gap measured */ }
+    before = text;
+    end = x + width;
+  }
+}
+
+try {
+  await init({ module_or_path: './hwp/rhwp_bg.wasm' });
+  const kind = new URLSearchParams(location.search).get('kind');
+  const bytes = new Uint8Array(await (await fetch(`./sample.${kind}`)).arrayBuffer());
+  const doc = new HwpDocument(bytes);
+  const sizes = new Map();
+  const rules = [];
+  for (let i = 0; i < doc.pageCount(); i++) {
+    const page = document.createElement('div');
+    page.className = 'page';
+    page.innerHTML = doc.renderPageSvg(i);
+    document.body.append(page);
+    const svg = page.querySelector('svg');
+    spaced(svg);
+    const size = `${svg.getAttribute('width')}px ${svg.getAttribute('height')}px`;
+    if (!sizes.has(size)) {
+      sizes.set(size, `s${sizes.size}`);
+      rules.push(`@page ${sizes.get(size)} { size: ${size}; margin: 0 }`);
+    }
+    page.style.page = sizes.get(size);  // a landscape page prints landscape
+  }
+  const style = document.createElement('style');
+  style.textContent = rules.join('\n');
+  document.head.append(style);
+  window.__pages = doc.pageCount();
+} catch (error) {
+  window.__error = String(error?.message ?? error);
+}
+window.__ready = true;
+</script>

@@ -17,6 +17,8 @@ def _unnamed_encodings(path: Path) -> list[str]:
             continue
         if node.func.attr not in ("read_text", "write_text"):
             continue
+        if [arg.id for arg in node.args[:1] if isinstance(arg, ast.Name)] == ["page"]:
+            continue  # pymupdf's TextWriter.write_text(page): drawn on a page, not a file
         if not any(keyword.arg == "encoding" for keyword in node.keywords):
             found.append(f"{path.relative_to(SOURCE)}:{node.lineno} {node.func.attr}")
     return found

@@ -33,6 +33,7 @@ from graphme import processes
 from graphme.adapters.export.neo4j_admin import LocalNeo4jAdmin
 from graphme.adapters.export.neo4j_import import write_import_bundle
 from graphme.adapters.rendering.browser_office import RenderedPage
+from graphme.adapters.rendering.hwp_print import HWP_SUFFIXES, as_original
 from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.rendering.visual_binding import pages_of, with_geometry
 from graphme.adapters.sources import Sources
@@ -46,6 +47,7 @@ from graphme.adapters.sources.cloud_files import evict, local_usage, online_only
 from graphme.adapters.sources.desktop_drives import DESKTOP_DRIVES, Drive, listing
 from graphme.adapters.sources.google_sign_in import GoogleSignIn
 from graphme.adapters.sources.imap_mail import MailRefused
+from graphme.adapters.sources.microsoft_sign_in import MicrosoftSignIn
 from graphme.adapters.sources.sign_in import Client, vault
 from graphme.adapters.storage import local_neo4j
 from graphme.adapters.storage.assets import LocalAssetStore
@@ -392,6 +394,7 @@ class Demo:
         self.sources.add(BOX_SCHEME, _Lazy(self._box_source, box_web_url))
         self._box: tuple[Client, BoxAccount] | None = None
         self._google: GoogleSignIn | None = None
+        self._microsoft: MicrosoftSignIn | None = None
         """Where originals are read from: this machine, and a connected cloud drive."""
         if root is not None:
             _forget_kept_pages(self.root)
@@ -442,8 +445,16 @@ class Demo:
         spaces = self.workspace_registry()
         if self._mail is None:
             self._mail = MailAccounts(spaces.home, spaces, google=self.google_sign_in(),
-                                      http=self.client)
+                                      microsoft=self.microsoft_sign_in(), http=self.client)
         return self._mail
+
+    def microsoft_sign_in(self) -> MicrosoftSignIn:
+        """Signing in to read Outlook mail, personal or work, through the project's Microsoft
+        app registration (or the one `GRAPHME_MICROSOFT_CLIENT_ID` names)."""
+        with self.opening:
+            if self._microsoft is None:
+                self._microsoft = MicrosoftSignIn(self.settings.microsoft_client_id, self.client)
+            return self._microsoft
 
     def google_sign_in(self) -> GoogleSignIn | None:
         """Signing in to read Gmail, through the project's Google client; None in a build
@@ -508,7 +519,7 @@ class Demo:
             return [self.open_path(str(path))
                     for path in sorted(accounts.messages(account).glob("*.eml"))]
 
-        return self.build_corpus([], item["address"], find=find)
+        return self.build_corpus([], item["address"], find=find, empty_done=True)
 
     def disconnect_mail(self, account: str, workspace: str) -> None:
         """`account`'s password and messages forgotten, its workspace deleted (`workspace` is
@@ -523,7 +534,7 @@ class Demo:
             with contextlib.suppress(LookupError):
                 self.delete_workspace(home)  # forgets the account too
         with contextlib.suppress(LookupError):
-            accounts.forget(account)
+            accounts.forget(account, keep_messages=workspace == "keep")
         if workspace == "keep":
             with contextlib.suppress(LookupError):
                 spaces.release(home)
@@ -1013,7 +1024,7 @@ class Demo:
 
     def build_corpus(
         self, docs: list[str], source: str, *, put: bool = True, embed: bool = True,
-        find: Callable[[CorpusBuild], list[str]] | None = None,
+        find: Callable[[CorpusBuild], list[str]] | None = None, empty_done: bool = False,
     ) -> CorpusBuild:
         """Read every document, put them all in the graph space, then join what they name and
         -- when `embed` and an embedding key is set -- embed their passages. Not `put`, the
@@ -1036,12 +1047,13 @@ class Demo:
                     with session.lock:
                         if session.state not in STARTABLE:
                             session.stop = self.build_stop
-        threading.Thread(target=self._build_then_let_go, args=(docs, put, embed, find),
-                         daemon=True).start()
+        threading.Thread(target=self._build_then_let_go,
+                         args=(docs, put, embed, find, empty_done), daemon=True).start()
         return self.build
 
     def _build_then_let_go(self, docs: list[str], put: bool, embed: bool,
-                           find: Callable[[CorpusBuild], list[str]] | None = None) -> None:
+                           find: Callable[[CorpusBuild], list[str]] | None = None,
+                           empty_done: bool = False) -> None:
         """The build, then the copies fetched from a cloud drive for it removed: the space
         records where each one is, and a reader is shown it from there."""
         build = self.build
@@ -1052,9 +1064,12 @@ class Demo:
                 except (ValueError, OSError) as error:
                     build.state, build.error = "error", f"cannot be read: {error}"
                     return
+                if not docs and empty_done:  # a mailbox with no mail yet: nothing to do
+                    build.state = "done"
+                    return
                 if not docs:
                     build.state = "error"
-                    build.error = "no readable document (xlsx, pptx, docx, pdf, eml)"
+                    build.error = "no readable document (xlsx, pptx, docx, pdf, hwp, hwpx, eml)"
                     return
             self._build_corpus(docs, put, embed)
         finally:
@@ -1379,9 +1394,13 @@ class Demo:
             if session.state != "done" or session.extracted is None:
                 raise RuntimeError(f"{Path(session.source).name}: {session.error}")
             self.putting.discard(handle.name)  # taken by the space now, not waiting for it
+            read = session.extracted
+            original = Path(self.catalog[handle.name])
+            if original.suffix.lower() in HWP_SUFFIXES and original.is_file():
+                read = as_original(read, original)  # the file given, not the print read
             if handle.name in self.origins:
-                return with_origin(session.extracted, *self.origins[handle.name])
-            return session.extracted
+                return with_origin(read, *self.origins[handle.name])
+            return read
 
         def step(name: BuildStep, done: int, total: int) -> None:
             build.state = STEP_STATES[name]
@@ -1747,15 +1766,18 @@ class Demo:
         # The crops go where the graph space's answers read them (`GraphRag._pictures`), not
         # under this reading's workspace: they outlive it, and they are named by content.
         session.store = LocalAssetStore(self.settings.asset_dir)
-        with self.sources.open_copy(session.origin or str(session.source)) as source:
+        with self.sources.open_copy(session.origin or str(session.source)) as copy:
+            # A Hangul document is read as the PDF it prints to, kept while it is read.
             with self.drawing:
                 try:
+                    source = self.renderer.printed(copy, session.workspace / "print")
                     session.pages = self.renderer.render(source, session.format)
                 except Exception as error:
                     raise Undrawn(UNDRAWN) from error
             builder = self._builder(session)
             # Give tables their crop and let each own the pictures it encloses.
             bound = builder.bind(builder.extract(source, session.format), source)
+        session.source = source  # what the reading's later steps read: the print, for HWP
         session.extracted = bound
         session.page_of = pages_of(bound, session.pages, session.format)
         # Shown while the document is read; gone once it is (`_lighten`).

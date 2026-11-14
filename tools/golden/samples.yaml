@@ -1,0 +1,85 @@
+# The expected graph of the invented samples (`python -m graphme.samples <folder>`), written down
+# from what each sample says. Every value here is invented. `tools/golden/evaluate.py` scores a
+# build of them against it, one measure at a time.
+#
+# units:     a unit whose text holds `text` (spaces ignored), of `type` and at `sheet`/`slide`
+#            when given -- the mapping and layout of the file.
+# under:     [parent, child]: the child's parent in the outline holds the parent's text -- the
+#            split and the relations.
+# apart:     texts that must not end up in one unit -- the split.
+# links:     [from file, to file]: the document cites the other by its number.
+# questions: the files that must be found, and the words the answer must hold.
+
+documents:
+  - file: "GS-100_Valve Part Basic Specification.docx"
+    units:
+      - {text: "GS-100 Valve Part Basic Specification"}
+      - {text: "The body is stainless steel STS316 and the ball is STS304."}
+      - {text: "The body bore tolerance is ±0.05 mm"}
+      - {text: "Roundness 0.02 mm", type: table}
+    under:
+      - ["2. Materials", "The body is stainless steel STS316"]
+      - ["3. Dimensional Tolerances", "The body bore tolerance is ±0.05 mm"]
+    apart:
+      - ["1. Scope", "This specification sets the part dimensions"]
+  - file: "GS-110_Leak Test Specification.docx"
+    units:
+      - {text: "The seat leak test pressure is 1.1 MPa"}
+      - {text: "The pressure hold time for each is 60 seconds or more."}
+    under:
+      - ["2. Test Pressure", "The seat leak test pressure is 1.1 MPa"]
+      - ["3. Acceptance Criteria", "A valve passes if there is no visible leakage"]
+    apart:
+      - ["2. Test Pressure", "3. Acceptance Criteria"]
+  - file: "QP-210_Leak Test Procedure.docx"
+    units:
+      - {text: "Raise the air pressure slowly to 1.1 MPa and hold it for 60 seconds."}
+    under:
+      - ["2. Test Sequence", "Fix the valve in the jig and close the ball."]
+      - ["3. Records", "Record the results in the Leak Test Record"]
+  - file: "WO-2026-031_Valve Assembly Work Order.docx"
+    units:
+      - {text: "Tighten the stem nut to 12 N·m."}
+      - {text: "Assembly Team 2", type: table}
+    under:
+      - ["2. Work Sequence", "Tighten the stem nut to 12 N·m."]
+  - file: "Leak Test Record.xlsx"
+    units:
+      - {text: "Leak Test Record (per QP-210)", sheet: "Test Record"}
+      - {text: "V50-0003", sheet: "Test Record"}
+  - file: "Leak Defect Improvement Report.pptx"
+    units:
+      - {text: "Findings", slide: 2}
+      - {text: "foreign matter got in when the seat packing was fitted", slide: 3}
+    under:
+      - ["Cause and Countermeasures", "foreign matter got in when the seat packing was fitted"]
+      - ["Findings", "Leak test failures occurred in the WO-2026-031 assembly batch"]
+
+links:
+  - ["GS-110_Leak Test Specification.docx", "GS-100_Valve Part Basic Specification.docx"]
+  - ["QP-210_Leak Test Procedure.docx", "GS-110_Leak Test Specification.docx"]
+  - ["QP-210_Leak Test Procedure.docx", "GS-100_Valve Part Basic Specification.docx"]
+  - ["WO-2026-031_Valve Assembly Work Order.docx", "QP-210_Leak Test Procedure.docx"]
+  - ["Leak Test Record.xlsx", "QP-210_Leak Test Procedure.docx"]
+  - ["Leak Defect Improvement Report.pptx", "WO-2026-031_Valve Assembly Work Order.docx"]
+  - ["Leak Defect Improvement Report.pptx", "QP-210_Leak Test Procedure.docx"]
+
+questions:
+  - question: "What is the seat leak test pressure?"
+    files: ["GS-110_Leak Test Specification.docx"]
+    answer: ["1.1 MPa"]
+  - question: "Which valve serial number failed the leak test?"
+    files: ["Leak Test Record.xlsx"]
+    answer: ["V50-0003"]
+  - question: "What torque is the stem nut tightened to?"
+    files: ["WO-2026-031_Valve Assembly Work Order.docx"]
+    answer: ["12"]
+  - question: "What material is the valve ball made of?"
+    files: ["GS-100_Valve Part Basic Specification.docx"]
+    answer: ["STS304"]
+  - question: "What caused the leak defects in the assembly batch?"
+    files: ["Leak Defect Improvement Report.pptx"]
+    answer: ["foreign matter"]
+  - question: "How large a pressure drop is acceptable in the leak test?"
+    files: ["GS-110_Leak Test Specification.docx"]
+    answer: ["0.01 MPa"]

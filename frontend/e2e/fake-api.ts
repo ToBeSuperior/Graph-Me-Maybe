@@ -118,6 +118,12 @@ export async function fakeApi(page: Page,
     // Mail accounts: connecting counts the mailbox and reads nothing; the reader is then asked.
     if (path === '/v1/mail/accounts' && method === 'GET') return json(route, fake.mail.accounts);
     // A Google sign-in: the browser finishes it, and the account is on the server at the next ask.
+    if (path === '/v1/mail/microsoft/connect' && method === 'POST') {
+      fake.mail.accounts.push({ id: 'o1', kind: 'outlook', host: 'graph.microsoft.com', port: 443, address: 'lee@invented.test',
+        workspace: 'm2', state: 'counted', count: { messages: 870, attachments: 64, attachment_bytes: null, oldest: '2023-06-01' },
+        read_since: null, last_checked: null, error: null });
+      return json(route, { url: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?invented' });
+    }
     if (path === '/v1/mail/google/connect' && method === 'POST') {
       fake.mail.accounts.push({ id: 'g1', kind: 'gmail', host: 'gmail.googleapis.com', port: 443, address: 'kim@invented.test',
         workspace: 'm1', state: 'counted', count: { messages: 3200, attachments: 410, attachment_bytes: null, oldest: '2021-04-02' },

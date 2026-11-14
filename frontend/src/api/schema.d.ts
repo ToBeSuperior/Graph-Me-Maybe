@@ -330,6 +330,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mail/microsoft/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mail Microsoft Connect
+         * @description Sign in to Microsoft in the browser to read Outlook mail, personal or work,
+         *     read-only; the account is kept, and counted, when Microsoft sends the browser back.
+         */
+        post: operations["mail_microsoft_connect_v1_mail_microsoft_connect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mail/accounts/{account}/read": {
         parameters: {
             query?: never;
@@ -1526,7 +1547,7 @@ export interface components {
              * @default imap
              * @enum {string}
              */
-            kind: "imap" | "gmail";
+            kind: "imap" | "gmail" | "outlook";
             /** Host */
             host: string;
             /** Port */
@@ -2391,6 +2412,26 @@ export interface operations {
         };
     };
     mail_google_connect_v1_mail_google_connect_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoxConnect"];
+                };
+            };
+        };
+    };
+    mail_microsoft_connect_v1_mail_microsoft_connect_post: {
         parameters: {
             query?: never;
             header?: never;

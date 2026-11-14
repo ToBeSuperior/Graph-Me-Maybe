@@ -455,7 +455,9 @@ A message is read as an `.eml` document (`extractors/mail.py`): extracted only -
 `MailSync` (`server/mail_sync.py`, run by the server) fetches new mail every few minutes over IMAP
 (`adapters/sources/imap_mail.py`, `IMAP_PRESETS`) or the Gmail API (`gmail_mail.py`, the same
 `check`/`count`/`sync`, signed in by `google_sign_in.py` with PKCE; the refresh token stands where
-an IMAP password does) and holds it for a workspace not open. Each
+an IMAP password does) or Microsoft Graph (`outlook_mail.py`, `microsoft_sign_in.py`: a public
+client, `common` authority for personal and work accounts, `http://localhost` redirect; each
+refresh hands back the next refresh token, kept at once) and holds it for a workspace not open. Each
 account has a mail workspace (`kind="mail"`) that follows its mailbox alone: folder, drive and
 upload builds, a document's delete and the graph's reset are refused with 409
 (`Demo.not_in_mail_workspace`); only `MailSync` adds and removes what is in it. Quoted history is dropped at question time, not at extraction, when the quoted message is in

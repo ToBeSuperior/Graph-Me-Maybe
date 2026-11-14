@@ -496,7 +496,7 @@ class MailCountState(_Model):
 
 class MailAccount(_Model):
     id: str
-    kind: Literal["imap", "gmail"] = "imap"
+    kind: Literal["imap", "gmail", "outlook"] = "imap"
     host: str
     port: int
     address: str

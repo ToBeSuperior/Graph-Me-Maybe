@@ -37,7 +37,15 @@ MMLongBench-Doc and DocBench, published on the site.
       3. The per-feature APIs of the item above.
       4. An API reference and example notebooks.
       Design for steps 1, 2 and 4 written (`docs/superpowers/specs/2026-11-05-pip-library-design.md`:
-      reading only, with no Neo4j or Java, and the whole pipeline); no implementation plan yet.
+      reading only, with no Neo4j or Java, and the whole pipeline). Done 2026-11-14: settings as
+      keywords (`graphme.read(path, provider=..., api_key=...)`, `GraphMe(...)`, `CODE_SETTINGS`),
+      `py.typed`, a test keeping `import graphme` free of the server, window and MCP packages, and
+      `graphme.passages(doc)` (`Passage`: the space's own cut of a document read alone, with
+      `file`, `format`, `headings`, `sheet`/`cells`, `slide`, `pages`). Left: the extras split
+      and the distribution renamed `graph-me-maybe` (the installers and the release workflow
+      install the wheel by name: change them together and run an install), fetching the viewer,
+      Neo4j and the models on first use (`graphme.setup()`), the LangChain loader, workspaces
+      from code, `docs/library.md` and the notebooks, and PyPI (the owner's pending publisher).
 - [ ] **A team workspace.** A workspace kept in a folder on a shared drive (Box, Google Drive,
       OneDrive/SharePoint), so a team opens the same graph. That folder is left out of what a
       build reads, whatever folder above it is chosen. To decide first: a running Neo4j's store
@@ -60,16 +68,22 @@ MMLongBench-Doc and DocBench, published on the site.
       (the owner's test user); where the project's Google client ships -- today
       `GRAPHME_GOOGLE_CLIENT_ID`/`_SECRET` from `.env`, so the public build has none and offers
       IMAP; Google's app verification past 100 users; Gmail's history API instead of listing every
-      id each check once mailboxes are large; Microsoft Graph, once its app is registered.
+      id each check once mailboxes are large. Outlook through Microsoft Graph is done
+      (2026-11-14: app registration "Graph-Me-Maybe", client id in `config.MICROSOFT_CLIENT_ID`,
+      any Entra tenant and personal accounts, `Mail.Read` + `offline_access`; tested against a
+      fake Graph, a real sign-in reached Microsoft's consent page). Open: a first read of a real
+      Outlook mailbox; publisher verification (an MPN id), without which a work account's users
+      cannot consent to a new multitenant app and need their admin; Graph's delta queries
+      instead of listing every id each check.
       Refinements:
       unpacking Outlook's TNEF (`winmail.dat`), and a time and cost estimate in the first-connect
       question (today it shows counts and size only).
-      - A calendar invite (`.ics`) kept as text: today it is cited, not read.
-      - Outlook desktop's HTML quote header (`<div style="border-top…">` with From:/Sent:) is
-        not recognised as a quote.
-      - "Disconnect, keep workspace" removes the store, so the kept messages' originals no longer
-        open.
-      - A file nested in an attachment outlives its last message.
+      - (Done 2026-11-14) A calendar invite is read as text; Outlook for Windows' From:/Sent:
+        header quotes what follows in an HTML body; "Disconnect, keep workspace" keeps the
+        messages; a mailbox with no mail reads to done.
+      - A file nested in an attachment outlives its last message. `carried_only_by` follows one
+        level (message to attachment); the next needs the `embedded` links of the attachments
+        going, and a test against a real Neo4j (none in `tests/public` today).
       - Connecting counts the mailbox inside the request: no progress for a large mailbox.
       - One mail workspace by default, with several mail sources picked to connect into it
         (today each account makes a workspace of its own).
@@ -107,6 +121,13 @@ MMLongBench-Doc and DocBench, published on the site.
       workspace (`workspace=`) and merges what comes back. Measure it first with three or four
       workspaces, since a workspace not open may have to start its graph DB; a light per-workspace
       search index (passages, vectors, words outside Neo4j) only if that proves too slow.
+      Measured 2026-11-14 (Windows, dev build, four workspaces of 0-19 documents, one question
+      asked of each in turn as an agent would): the open workspace answers in 0.3 s (5.5 s the
+      first time), every other one in 10-14 s -- its graph DB is started beside the open one, and
+      only one is kept there, so the next workspace asked stops it. All four took 35-47 s a
+      round. Too slow for an agent to ask every workspace each turn. Next, to decide: keep several
+      graph DBs running beside (each a Java process with its own heap) or the light search index
+      above, which needs no graph DB to search.
 - [ ] **A blog for the public site** (left for later; site plan in
       `docs/superpowers/specs/2026-10-29-public-site-design.md`). Candidates: why plain RAG
       breaks on spreadsheets and slides; how it works, from a rendered page to the graph; the
@@ -179,6 +200,12 @@ MMLongBench-Doc and DocBench, published on the site.
       from an MCP client, and the page following MCP and workspace changes made outside it.
       Checked on Windows 10 22H2 x64 against 0.1.68, the fixes in 0.1.69. OneDrive is left
       under 1.5.
+- [ ] Windows: an MCP client built on the Python MCP SDK runs its server in a job object that
+      kills everything in it when the client closes, so the app `graphme mcp` started there ends
+      with it (seen 2026-11-08). Claude Code, Claude Desktop and Cursor are Node and break away
+      from their jobs: not affected. A fix would start the agent outside the job (breaking away
+      needs the job to allow it, which the SDK's does not) -- e.g. through the scheduler or a
+      service; worth it only if a Python-based client matters.
 
 ## 2 · Breaking down tables
 
@@ -194,10 +221,25 @@ MMLongBench-Doc and DocBench, published on the site.
 ## 3 · Quality evaluation set
 
 - [ ] Build a small representative set with the expected source mapping, information units,
-      relations and evidence. `tests/public` already pins each format's rules on invented
-      files; what is missing is a set whose whole expected graph is written down.
-- [ ] Add a golden evaluation that measures mapping and layout fidelity, split and relation
-      quality, evidence recall, citation resolution and answer quality **separately**.
+      relations and evidence. Started 2026-11-14 on the invented samples
+      (`tools/golden/samples.yaml`: units and where they are, texts kept apart, children under
+      parents, the links by document number, six questions with their files and the words of
+      the answer). Left: documents the samples do not cover -- a PDF of its own, a scan, a
+      picture or chart, a table across pages, a Hangul document -- each made up for it.
+- [x] A golden evaluation measuring mapping and layout, split, relations, links, evidence
+      recall, citation and the answer **separately** (`tools/golden/evaluate.py <server>`: builds
+      the samples into a workspace of its own and prints each measure with its misses; the
+      scoring is pinned by `tests/public/test_golden_evaluate.py`). It calls the configured
+      model, so it is run by hand, not in CI. First run (dev build, 2026-11-14): every measure
+      whole except links. The misses are by rule, not by the model: the samples' numbers
+      (`GS-100`, `QP-210`) have three digits, under `MIN_NUMBER_DIGITS` (4, kept so `SHA-256`
+      and `COVID-19` name no document), so a name like "GS-100 Valve Part Basic Specification"
+      whose cue is only itself is dropped (`_written`), and a bare "per QP-210" is not a
+      number at all. To decide: whether a number that matches a document in the space should
+      count whatever its digits, or the samples should carry four-digit numbers.
+- [ ] TODO (held for the owner's call): the document number rule above -- a number matching a
+      document in the space whatever its digits, or four-digit numbers in the samples. Links stay
+      3/7 in the golden run until it is decided.
 - [ ] Write down the limits and the non-claims together. Do not use confidential material
       without data-handling approval.
 
@@ -245,7 +287,21 @@ no picture. If one is needed, draw a fresh one then.
       patch release after 0.89.7 and then `main`. Update `UPSTREAM`'s `commit` and
       `npm_version`, then drop
       `chart_axes.py`, `picture_anchors.py` (fixed upstream in `d7f60b865`) and dist patch
-      `0003`, and check every other patch still applies and is still needed.
+      `0003`, and check every other patch still applies and is still needed. (2026-11-14: tags
+      v0.89.8 to v0.89.11 all hold #1991's merge `bd1c008` and `d7f60b865`, so 0.89.8 or later
+      will do -- 0.89.11 is the newest. The build needs Rust and wasm-pack, which the Windows PC
+      does not have: run it on the Mac, then check every format's samples render as before.)
+- [ ] HWP and HWPX are read from rhwp's print (`hwp_print.py`, `@rhwp/core` 0.9.0 as published).
+      rhwp leaves some table cells empty and cuts a wide table on a landscape page at the
+      portrait width; its own text APIs do not show it (`getPageText` skips tables,
+      `getPageTextLayout` is what it drew, `getTextFileText` lacks the same cells). Since
+      2026-11-14 the file's own paragraphs (HWPX section XML, HWP `PARA_TEXT` records) are
+      checked against the print and those missing are set on pages after it (`keep_undrawn`):
+      read, but with no place on the page and outside the table they belong to. Left: a
+      paragraph holding a character the built-in Korean font lacks (`ㆍ`) is set but reads
+      back without it. Report the dropped
+      cells upstream with an invented reproduction, and check each rhwp release against such
+      pages (`UPSTREAM`'s `hwp_version`); the fewer it drops, the less goes after the print.
 
 ## 8 · Refinements (low priority)
 

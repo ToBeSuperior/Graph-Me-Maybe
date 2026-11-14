@@ -28,6 +28,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+The viewer bundle's `hwp/` is rhwp (https://github.com/edwardkim/rhwp, npm `@rhwp/core`),
+unmodified, used under the MIT License, Copyright (c) 2025-2026 Edward Kim. Its license and the
+notices of what it is built with are beside it in the bundle, as `hwp/LICENSE` and
+`hwp/THIRD_PARTY_LICENSES.md`.
+
 The Hangul font the table and chart previews are drawn in, `src/graphme/fonts/Pretendard-Regular.otf`,
 is Pretendard 1.3.9 (https://github.com/orioncactus/pretendard), unmodified, under the SIL Open
 Font License 1.1 (the full text is also in `src/graphme/fonts/Pretendard-OFL.txt`):

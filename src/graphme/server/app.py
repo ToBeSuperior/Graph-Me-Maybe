@@ -41,7 +41,6 @@ from graphme.adapters.chat import picture_type
 from graphme.adapters.export.neo4j import graph_records, records_cypher, to_cypher
 from graphme.adapters.export.neo4j_admin import AURA_URI
 from graphme.adapters.rendering.browser_office import RenderedPage
-from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.rendering.visual_binding import page_name, placed_units
 from graphme.adapters.sources.box import Picked as BoxPicked
 from graphme.adapters.storage.assets import LocalAssetStore
@@ -58,7 +57,7 @@ from graphme.application.visual_crops import (
 )
 from graphme.config import Settings, load_settings
 from graphme.domain.enums import DocumentFormat
-from graphme.runtime import create_browser_renderer
+from graphme.runtime import create_page_renderer
 from graphme.server import models as api
 from graphme.server.jobs import (
     BUILDING,
@@ -220,6 +219,22 @@ def create_app(
                 google.finish(state=state, code=code, error=error))
         except (LookupError, ValueError) as refusal:
             return _closing_page(f"Gmail was not connected: {refusal}")
+        return _closing_page(f"{added['address']} is connected. You can close this tab and go "
+                             "back to Graph-Me-Maybe: it asks how much mail to read.")
+
+    @app.get("/v1/mail/microsoft/callback", response_class=HTMLResponse, include_in_schema=False)
+    def microsoft_callback(request: Request, state: str = "", code: str | None = None,
+                           error: str | None = None,
+                           error_description: str | None = None) -> str:
+        """Where Microsoft sends the browser back, as Google's: the account is counted here."""
+        if not from_here(request):
+            raise HTTPException(403, "only this machine's browser may finish a sign-in")
+        try:
+            refresh = demo.microsoft_sign_in().finish(state=state, code=code, error=error,
+                                                      description=error_description)
+            added = demo.mail_accounts().add_outlook(refresh)
+        except (LookupError, ValueError) as refusal:
+            return _closing_page(f"Outlook was not connected: {refusal}")
         return _closing_page(f"{added['address']} is connected. You can close this tab and go "
                              "back to Graph-Me-Maybe: it asks how much mail to read.")
 
@@ -414,6 +429,18 @@ def create_app(
             raise HTTPException(404, "Gmail sign-in is not set up in this build -- connect "
                                      "Gmail over IMAP with an app password instead")
         url = google.start(f"{request.base_url}v1/mail/google/callback")
+        with contextlib.suppress(Exception):  # the page opens it when the server cannot
+            processes.open_in_browser(url)
+        return {"url": url}
+
+    @v1.post("/mail/microsoft/connect", response_model=api.BoxConnect)
+    def mail_microsoft_connect(request: Request) -> dict[str, str]:
+        """Sign in to Microsoft in the browser to read Outlook mail, personal or work,
+        read-only; the account is kept, and counted, when Microsoft sends the browser back."""
+        changing(request)
+        # `localhost`, not 127.0.0.1: the address Microsoft lets a desktop app use, any port.
+        url = demo.microsoft_sign_in().start(
+            f"http://localhost:{request.url.port}/v1/mail/microsoft/callback")
         with contextlib.suppress(Exception):  # the page opens it when the server cannot
             processes.open_in_browser(url)
         return {"url": url}
@@ -1121,13 +1148,15 @@ def make_demo(settings: Settings, *, scratch: bool = False) -> Demo:
     # ponytail: one folder for every server on this data_dir, no lock -- two running at once
     # share (and can overwrite) its uploads; a folder per process if that is wanted.
     root = None if scratch else settings.data_dir.resolve() / "server"
-    return Demo(settings, PageRenderer(browser=create_browser_renderer(settings)), root=root)
+    return Demo(settings, create_page_renderer(settings), root=root)
 
 
 def openapi() -> str:
     """The API's contract as JSON: what `npm run api` makes the web app's types from."""
     demo = make_demo(Settings(profile="test", embedding_provider="hash"), scratch=True)
-    return json.dumps(create_app(demo).openapi(), ensure_ascii=False, indent=1)
+    # ASCII: printed into whatever a shell writes (Windows' console code page), it still parses
+    # to the same contract.
+    return json.dumps(create_app(demo).openapi(), indent=1)
 
 
 def serve(settings: Settings, *, host: str, port: int, web: Path | None) -> None:

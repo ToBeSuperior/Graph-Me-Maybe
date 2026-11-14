@@ -13,10 +13,12 @@ from graphme.application.corpus_build import BuildReport
 from graphme.application.embedded_documents import shown_name
 from graphme.config import Settings, load_settings
 from graphme.domain.models import ExtractedDocument
+from graphme.passages import Passage, passages
 
-__version__ = "0.1.70"
+__version__ = "0.1.71"
 
 __all__ = [
     "BuildReport", "ExtractedDocument", "GraphAnswer", "GraphMe", "GraphNotEmbedded",
-    "GraphSource", "Settings", "__version__", "load_settings", "read", "shown_name",
+    "GraphSource", "Passage", "Settings", "__version__", "load_settings", "passages", "read",
+    "shown_name",
 ]

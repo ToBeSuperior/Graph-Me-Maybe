@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 import threading
 from contextlib import AbstractContextManager
 from pathlib import Path
@@ -19,6 +20,7 @@ from graphme.adapters.extractors.pdf import PDFExtractor
 from graphme.adapters.extractors.powerpoint import PowerPointExtractor
 from graphme.adapters.local_models import LocalModels
 from graphme.adapters.rendering.browser_office import BrowserOfficeRenderer
+from graphme.adapters.rendering.hwp_print import HWP_SUFFIXES, HwpPrinter, as_original
 from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.rendering.visual_binding import RenderedVisualBinder
 from graphme.adapters.storage.assets import LocalAssetStore
@@ -37,6 +39,7 @@ from graphme.application.page_enrichment import RenderedPageEnricher
 from graphme.application.progress import Progress
 from graphme.config import Settings, app_home, load_settings
 from graphme.domain.enums import DocumentFormat
+from graphme.domain.models import ExtractedDocument
 from graphme.ports.vision import VisionProvider
 
 _log = logging.getLogger(__name__)
@@ -134,6 +137,26 @@ def create_browser_renderer(settings: Settings) -> BrowserOfficeRenderer:
     )
 
 
+def create_page_renderer(settings: Settings) -> PageRenderer:
+    """Every format's pages: PDF rastered, OOXML through the browser bundle, a Hangul document
+    printed to PDF by the same bundle first."""
+    return PageRenderer(
+        browser=create_browser_renderer(settings),
+        printer=HwpPrinter(viewer_directory=settings.viewer_directory,
+                           chrome_executable=settings.chrome_executable,
+                           timeout_seconds=settings.render_timeout_seconds))
+
+
+def read_document(graph: DocumentGraphBuilder, renderer: PageRenderer, source: Path
+                  ) -> ExtractedDocument:
+    """One file into its graph; a Hangul document read from its print, recorded as itself."""
+    if source.suffix.lower() not in HWP_SUFFIXES:
+        return graph.build(source, format_of(source))
+    with tempfile.TemporaryDirectory(prefix="graphme-print-") as folder:
+        printed = renderer.printed(source, Path(folder))
+        return as_original(graph.build(printed, format_of(source)), source)
+
+
 def graph_parts(
     settings: Settings,
     *,
@@ -227,12 +250,13 @@ def create_graph_rag(
     )
 
 
-def corpus_graph_builder(settings: Settings, client: httpx.Client) -> DocumentGraphBuilder:
+def corpus_graph_builder(settings: Settings, client: httpx.Client,
+                         renderer: PageRenderer | None = None) -> DocumentGraphBuilder:
     """The graph builder every document of a corpus is read with: rendered, its outline and
     paragraphs read off the page, its visuals described."""
     return create_graph_builder(
         settings,
-        renderer=PageRenderer(browser=create_browser_renderer(settings)),
+        renderer=renderer or create_page_renderer(settings),
         vision=create_vision(settings, client),
         assets=LocalAssetStore(settings.asset_dir),
     )
@@ -256,13 +280,14 @@ def build_corpus_graph(
     """
     settings = settings or load_settings()
     documents = documents_at(path)
-    graph = corpus_graph_builder(settings, client)
+    renderer = create_page_renderer(settings)
+    graph = corpus_graph_builder(settings, client, renderer)
     own = space is None
     space = space if space is not None else create_graph_space(settings)
     try:
         return build_graph(
             unpack_embedded(documents, settings.data_dir / "embedded"),
-            process=lambda source: graph.build(source, format_of(source)),
+            process=lambda source: read_document(graph, renderer, source),
             space=space,
             on_step=on_step,
             again=again,

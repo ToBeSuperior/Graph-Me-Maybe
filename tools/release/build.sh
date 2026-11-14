@@ -18,7 +18,7 @@ viewer=$(mktemp -d)
 trap 'rm -rf "$viewer"' EXIT
 src/graphme/adapters/rendering/viewer/setup.sh "$viewer"
 cp THIRD_PARTY_NOTICES.md "$viewer/"
-(cd "$viewer" && zip -qr "$out/viewer.zip" dist xlsx THIRD_PARTY_NOTICES.md)
+(cd "$viewer" && zip -qr "$out/viewer.zip" dist xlsx hwp THIRD_PARTY_NOTICES.md)
 
 cd "$out"
 if command -v sha256sum >/dev/null 2>&1; then sum="sha256sum"; else sum="shasum -a 256"; fi

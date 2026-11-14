@@ -99,6 +99,26 @@ def test_reading_fetches_the_mail_into_the_accounts_workspace(
     assert gmail.get("/v1/mail/accounts").json()[0]["state"] == "current"
 
 
+def test_an_empty_mailbox_is_read_without_an_error(gmail: TestClient, google: _Google) -> None:
+    # A new account holds no mail yet: nothing to read is not a failure, as an empty folder is.
+    google.mail.clear()
+    account = _signed_in_empty(gmail)
+
+    job = gmail.post(f"/v1/mail/accounts/{account['id']}/read", json={"since": None}).json()
+
+    assert until(lambda: gmail.get(f"/v1/jobs/{job['id']}").json()["state"] != "reading")
+    ended = gmail.get(f"/v1/jobs/{job['id']}").json()
+    assert ended["state"] == "done" and ended["error"] is None and ended["documents"] == 0
+
+
+def _signed_in_empty(gmail: TestClient) -> dict[str, object]:
+    url = gmail.post("/v1/mail/google/connect").json()["url"]
+    state = parse_qs(urlsplit(url).query)["state"][0]
+    gmail.get("/v1/mail/google/callback", params={"state": state, "code": "invented"})
+    [account] = gmail.get("/v1/mail/accounts").json()
+    return dict(account)
+
+
 def test_disconnecting_revokes_the_sign_in_at_google(gmail: TestClient, google: _Google) -> None:
     account = _signed_in(gmail)
 

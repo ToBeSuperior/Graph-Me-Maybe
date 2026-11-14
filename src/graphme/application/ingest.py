@@ -14,6 +14,9 @@ SUFFIX_FORMATS = {
     ".docx": DocumentFormat.DOCX,
     ".pdf": DocumentFormat.PDF,
     ".eml": DocumentFormat.EML,
+    # Hangul documents are read as the PDF they print to (`adapters/rendering/hwp_print.py`).
+    ".hwp": DocumentFormat.PDF,
+    ".hwpx": DocumentFormat.PDF,
 }
 """The files read here, by extension."""
 

@@ -255,6 +255,10 @@ something painted behind it, not a table."""
 """A cell holding this much text is a region of the page, not a value."""
 
 
+MIN_PICTURE_POINTS = 0.5
+"""A picture occurrence narrower or shorter than this (in points) is not read as one."""
+
+
 class PDFExtractor:
     """Build an authoritative semantic graph directly from PDF native objects."""
 
@@ -656,7 +660,9 @@ class PDFExtractor:
         for occurrence, info in enumerate(image_infos):
             # Reported in the unturned page, like its text (`page_text`).
             bbox = self._bbox(pymupdf.Rect(info["bbox"]) * page.rotation_matrix)  # type: ignore[no-untyped-call]
-            if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+            # Narrower than a pixel is no picture of the page (a browser prints a rule as one):
+            # cut from the page it comes to no pixel at all.
+            if bbox[2] - bbox[0] < MIN_PICTURE_POINTS or bbox[3] - bbox[1] < MIN_PICTURE_POINTS:
                 continue
             content, mime_type, suffix = self._image_payload(page, info, bbox)
             asset_hash = (

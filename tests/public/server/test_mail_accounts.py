@@ -232,6 +232,24 @@ def test_disconnecting_forgets_the_password_and_offers_the_workspace(
     assert items[first["workspace"]]["kind"] == "documents"
 
 
+def test_a_workspace_kept_on_disconnecting_keeps_its_messages_to_open(
+    mail: TestClient, home: Path
+) -> None:
+    # Its graph names each message by its file: the files go with the account only when the
+    # workspace goes too, or a kept message's original no longer opens.
+    account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    mail.post(f"/v1/mail/accounts/{account['id']}/read", json={"since": None})
+    assert until(lambda: mail.get("/v1/jobs").json()[0]["state"] == "done")
+    mail.post("/v1/workspaces/default/open", headers={"origin": BASE})
+    messages = home / "workspaces" / account["workspace"] / "mail" / "messages"
+    held = sorted(p.name for p in messages.glob("*.eml"))
+
+    mail.delete(f"/v1/mail/accounts/{account['id']}?workspace=keep")
+
+    assert len(held) == 2 and sorted(p.name for p in messages.glob("*.eml")) == held
+    assert not (home / ".graphme" / "mail" / account["id"]).exists()  # the password is gone
+
+
 def test_workspaces_written_before_kind_read_as_documents(home: Path) -> None:
     home.mkdir()
     (home / "workspaces.json").write_text(json.dumps({

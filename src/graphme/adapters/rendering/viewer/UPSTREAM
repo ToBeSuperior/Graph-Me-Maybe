@@ -2,3 +2,5 @@ upstream=https://github.com/yukiyokotani/office-open-xml-viewer.git
 commit=dbfba2c3e6c3b06eaaeeea033604742c330c0463
 npm_package=@silurus/ooxml
 npm_version=0.86.1
+hwp_package=@rhwp/core
+hwp_version=0.9.0

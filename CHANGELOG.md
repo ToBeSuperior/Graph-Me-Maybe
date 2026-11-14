@@ -5,6 +5,34 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.71] - 2026-11-14
+
+### Added
+
+- **Outlook by a Microsoft sign-in**: a personal account (Outlook.com, Hotmail) or a work or
+  school one (Microsoft 365), read only through Microsoft Graph into a workspace of its own like
+  any mailbox. Junk Email, Deleted Items and drafts are not read.
+- A calendar invite in a mail is read as text: what, when, where, who.
+- **HWP and HWPX** (Hangul) documents are read: drawn by rhwp in the browser and printed to the
+  PDF they are read as, so their pages, outline, tables and previews are a PDF's. The viewer
+  bundle carries the renderer (`hwp/`); an install without it says so. The file's own
+  paragraphs are checked against the print, and any the renderer left out (an empty table
+  cell, a wide table cut at the page edge) are set on pages after it, so their words are read.
+- As a library: `graphme.read(path, provider=..., api_key=...)` and `GraphMe(...)` take their
+  settings in code, the package carries `py.typed`, and `import graphme` loads no server, window
+  or MCP package. `graphme.passages(document)` cuts a document read alone into the passages the
+  space would make, each with its file, format, headings, sheet and cells, slide or pages.
+- `tools/golden/evaluate.py <server>` scores a build of the invented samples against their
+  expected graph, each measure on its own: mapping, split, relations, links, evidence, citation
+  and the answer.
+
+### Fixed
+
+- Outlook for Windows' quoted message (its From:/Sent: header) is recognised in an HTML mail.
+- "Disconnect, keep workspace" keeps the mail, so a kept message still opens.
+- Reading a mailbox with no mail yet ends done instead of failing.
+- `npm run api` runs on Windows.
+
 ## [0.1.70] - 2026-11-14
 
 ### Added

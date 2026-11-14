@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
-    "api": "mkdir -p node_modules/.cache && (cd .. && uv run graphme serve --openapi) > node_modules/.cache/openapi.json && openapi-typescript node_modules/.cache/openapi.json -o src/api/schema.d.ts"
+    "api": "node -e \"require('fs').mkdirSync('node_modules/.cache',{recursive:true})\" && uv run --directory .. graphme serve --openapi > node_modules/.cache/openapi.json && openapi-typescript node_modules/.cache/openapi.json -o src/api/schema.d.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist-mono": "5.3.0",

@@ -271,6 +271,91 @@ def _plain_units(text: str) -> list[tuple[str, str, bool]]:
     return units
 
 
+_ICS_DATE = re.compile(r"^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})\d{2}(Z?))?$")
+
+
+def _ics_date(value: str, params: list[str]) -> str:
+    """`20261012T090000` as `2026-10-12 09:00` (UTC marked); a date alone as a date."""
+    found = _ICS_DATE.match(value.strip())
+    if found is None:
+        return value.strip()
+    year, month, day, hour, minute, utc = found.groups()
+    when = f"{year}-{month}-{day}" + (f" {hour}:{minute}" if hour else "")
+    return when + (" UTC" if utc else "")
+
+
+def _ics_text(value: str) -> str:
+    return (value.replace("\\n", "\n").replace("\\N", "\n").replace("\\,", ",")
+            .replace("\\;", ";").replace("\\\\", "\\")).strip()
+
+
+def invite_text(ics: str) -> str | None:
+    """What a calendar invite says -- what, when, where, who and its note -- as text; None for
+    a calendar with no event."""
+    fields: dict[str, tuple[list[str], str]] = {}
+    inside = False
+    for line in re.sub(r"\r?\n[ \t]", "", ics).splitlines():  # folded lines rejoined
+        if line.strip().upper() == "BEGIN:VEVENT":
+            inside = True
+        elif line.strip().upper() == "END:VEVENT":
+            break
+        elif inside and ":" in line:
+            head, value = line.split(":", 1)
+            name, *params = head.split(";")
+            fields.setdefault(name.upper(), (params, value))
+    if "SUMMARY" not in fields and "DTSTART" not in fields:
+        return None
+    lines: list[str] = []
+    if "SUMMARY" in fields:
+        lines.append(f"Invitation: {_ics_text(fields['SUMMARY'][1])}")
+    if "DTSTART" in fields:
+        params, start = fields["DTSTART"]
+        when = _ics_date(start, params)
+        if "DTEND" in fields:
+            when += f" – {_ics_date(fields['DTEND'][1], fields['DTEND'][0])}"
+        zone = next((p.split("=", 1)[1] for p in params if p.upper().startswith("TZID=")), None)
+        lines.append(f"When: {when}" + (f" ({zone})" if zone else ""))
+    if "LOCATION" in fields and _ics_text(fields["LOCATION"][1]):
+        lines.append(f"Where: {_ics_text(fields['LOCATION'][1])}")
+    if "ORGANIZER" in fields:
+        params, who = fields["ORGANIZER"]
+        shown = next((p.split("=", 1)[1].strip('"') for p in params
+                      if p.upper().startswith("CN=")), None)
+        address = re.sub(r"^mailto:", "", who.strip(), flags=re.IGNORECASE)
+        lines.append(f"Organizer: {f'{shown} <{address}>' if shown else address}")
+    if "DESCRIPTION" in fields and _ics_text(fields["DESCRIPTION"][1]):
+        lines.append(_ics_text(fields["DESCRIPTION"][1]))
+    return "\n".join(lines)
+
+
+def _invites(message: EmailMessage) -> list[tuple[str, str, bool]]:
+    """Every calendar invite the message carries, as text, each said once: Outlook sends the
+    same one as a calendar part and as `invite.ics`."""
+    found: list[str] = []
+    for part in message.walk():
+        if part.get_content_type() == "text/calendar":
+            # A calendar is UTF-8 unless it says otherwise (RFC 5545); an attached invite.ics
+            # often names no charset, and read as ASCII its words were lost.
+            payload = part.get_payload(decode=True)
+            raw = payload if isinstance(payload, bytes) else b""
+            text = invite_text(raw.decode(part.get_content_charset() or "utf-8", "replace"))
+            if text and text not in found:
+                found.append(text)
+    return [("text", text, False) for text in found]
+
+
+_FROM = re.compile(r"^(From|보낸 사람):", re.IGNORECASE)
+_SENT_LINE = re.compile(r"^(Sent|보낸 날짜):", re.IGNORECASE)
+
+
+def _header_block(text: str) -> bool:
+    """Whether a unit is a quoted message's header: a From: line with a Sent: line just
+    below it (a From: line alone is somebody's words)."""
+    lines = [each.strip() for each in text.split("\n")]
+    return any(_FROM.match(line) and any(_SENT_LINE.match(n) for n in lines[at + 1:at + 5])
+               for at, line in enumerate(lines))
+
+
 def mail_body(message: EmailMessage) -> list[tuple[str, str, bool]]:
     """The body as `(kind, text, quoted)` units: `text` paragraphs and `table` rows, the
     quoted history of earlier messages marked. Quoted paragraphs side by side are one unit."""
@@ -284,7 +369,12 @@ def mail_body(message: EmailMessage) -> list[tuple[str, str, bool]]:
     parser.feed(text)
     parser.close()
     units: list[tuple[str, str, bool]] = []
+    after = False
     for kind, each, quoted in parser.units:
+        # Outlook for Windows heads the quoted message with From:/Sent: lines and no mark of
+        # its own: from there on all is quoted, as in a plain body.
+        after = after or (kind == "text" and _header_block(each))
+        quoted = quoted or after
         if quoted and kind == "text" and units and units[-1][0] == "text" and units[-1][2]:
             units[-1] = ("text", f"{units[-1][1]}\n{each}", True)
         else:
@@ -350,7 +440,8 @@ class MailExtractor:
             text=f"document {source.name}")]
         edges: list[GraphEdge] = []
         quote = {"mail_quoted": True, "mail_quote_of": str(metadata.get("mail_in_reply_to", ""))}
-        for index, (kind, text, quoted) in enumerate(mail_body(message), start=1):
+        units = [*mail_body(message), *_invites(message)]
+        for index, (kind, text, quoted) in enumerate(units, start=1):
             label = f"body {kind} {index}"
             locator = SourceLocator(file_name=source.name, label=label,
                                     metadata={"body_index": index})

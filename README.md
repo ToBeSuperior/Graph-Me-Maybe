@@ -40,7 +40,7 @@ leave it, to the provider you choose.
 
 ## ✨ Features
 
-- **Four formats, one graph.** PDF, DOCX, PPTX and XLSX, including files embedded inside other files
+- **Every common format, one graph.** PDF, DOCX, PPTX, XLSX and Hangul (HWP, HWPX), including files embedded inside other files
   (a workbook in a deck, a PDF in a memo).
 - **Structure read off the page.** A vision-language model reads each rendered page and decides the
   outline — headings, sections, what a table or a figure belongs to — instead of trusting styles or
@@ -177,6 +177,7 @@ what failed on the way, is in [`docs/method.md`](docs/method.md).
 | DOCX | paragraphs, tables, pictures, embedded files | browser viewer (WASM) | headers, footers and comments are not extracted |
 | PPTX | slides, shapes, tables, charts, pictures, embedded files | browser viewer (WASM) | slides keep their order |
 | XLSX | sheets, tables, charts, pictures, formulas, embedded files | browser viewer (WASM) | formulas are linked, not recalculated |
+| HWP, HWPX | what the page shows, read as a PDF | rhwp (WASM) in the browser, printed to PDF | text rhwp leaves undrawn is read from the file and set on pages after the print, without its place on the page |
 
 ## ⚙️ Configuration
 
