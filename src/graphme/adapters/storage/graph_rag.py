@@ -25,9 +25,9 @@ import time
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import httpx
 import neo4j
@@ -52,8 +52,9 @@ from graphme.adapters.storage.hybrid_search import (
     documents_with_message_ids,
     linked_without_answered_quotes,
 )
-from graphme.adapters.storage.neo4j_space import CHUNK_TEXT_INDEX, Neo4jGraphSpace, checked_name
+from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, checked_name
 from graphme.adapters.storage.similar_documents import SimilarDocuments
+from graphme.adapters.storage.workspace_scope import DEFAULT_SCOPE, WorkspaceScope
 from graphme.adapters.strict_schema import strict_response_schema
 from graphme.application.corpus_links import document_numbers, documents_named
 from graphme.application.embedded_documents import shown_name
@@ -63,7 +64,8 @@ from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop
 from graphme.domain.text_match import estimated_tokens
 from graphme.ports.storage import AssetStore
 
-VECTOR_INDEX = "chunk_embedding"
+T = TypeVar("T")
+
 VECTOR_PROPERTY = "embedding"
 """Where each passage keeps its vector; `_model` and `_centroid` beside it."""
 
@@ -120,6 +122,45 @@ def collected(ranked: Sequence[Any], documents: int) -> list[Any]:
         if len(given) == documents and given[doc] == 1:
             break  # the passage that reached the last document is the walk's end
     return taken
+
+
+def across(found: Sequence[tuple[str, Sequence[T]]], *, rrf_k: int) -> list[tuple[str, T]]:
+    """Several workspaces' ranked lists as one, each named by its workspace: fused by
+    reciprocal rank, each workspace weighted the same -- a score comes from its workspace's own
+    indexes and cannot be compared with another's. A tie goes to the workspace given first."""
+    scored = [(1 / (rrf_k + rank + 1), workspace, one)
+              for workspace, ranked in found for rank, one in enumerate(ranked)]
+    # sorted is stable: equal scores keep the order the workspaces were given in
+    return [(workspace, one) for _, workspace, one in sorted(scored, key=lambda s: -s[0])]
+
+
+def find_across(found: Sequence[tuple[str, Sequence[GraphSource]]], documents: int, *,
+                rrf_k: int) -> list[GraphSource]:
+    """What each workspace's `find` found, fused (`across`) and walked to `documents`
+    documents as one search is (`collected`). Ids come from a file's content, so a document is
+    told apart by its workspace too."""
+    ranked = [{"id": (ws, s.id), "document_id": (ws, s.document_id), "source": s}
+              for ws, s in across(found, rrf_k=rrf_k)]
+    return [replace(p["source"], workspace=p["id"][0]) for p in collected(ranked, documents)]
+
+
+def ask_across(read: Sequence[tuple[str, GraphRag, Sequence[RetrieverResultItem]]],
+               question: str, documents: int, *, rrf_k: int) -> GraphAnswer:
+    """An answer from what each workspace's `read` gave, fused (`across`) and walked as one
+    question's passages are (`collected`, `filled`, `within_budget`): each workspace's pictures
+    read from its own scope, the answer written as one workspace's is (`answered`)."""
+    ranked = [{"id": (ws, m["id"]), "document_id": (ws, m["document_id"]), "ws": ws,
+               "item": RetrieverResultItem(content=item.content, metadata={**m, "workspace": ws})}
+              for ws, item in across([(ws, items) for ws, _, items in read], rrf_k=rrf_k)
+              for m in [dict(item.metadata or {})]]
+    walked = filled(ranked, collected(ranked, documents))
+    kept = walked[: len(within_budget([p["item"] for p in walked]))]
+    items = [p["item"] for p in kept]
+    pictures = [picture for ws, rag, _ in read
+                if (mine := [p["item"] for p in kept if p["ws"] == ws])
+                for picture in rag.pictures(mine)][:ANSWER_PICTURES]
+    return GraphAnswer(text=read[0][1].answered(question, items, pictures),
+                       sources=[_source(item) for item in items])
 
 
 def filled(ranked: Sequence[Any], taken: Sequence[Any]) -> list[Any]:
@@ -244,6 +285,8 @@ class GraphSource:
     """When its document's file was last changed (`Document.modified_at`)."""
     origin: str | None = None
     """The mail it came from, or the mail that carried its document (`mail_origin`)."""
+    workspace: str | None = None
+    """The workspace it was found in, once said (`find_across`, `ask_across`, the server)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,6 +296,9 @@ class GraphAnswer:
 
 
 class GraphRag:
+    _scope: WorkspaceScope = DEFAULT_SCOPE
+    """The workspace questions are asked of: its labels in every pattern, its own indexes."""
+
     def __init__(
         self,
         space: Neo4jGraphSpace,
@@ -262,15 +308,17 @@ class GraphRag:
         client: httpx.Client,
         model: str,
         dimensions: int,
-        index: str = VECTOR_INDEX,
+        index: str | None = None,
         vector_property: str = VECTOR_PROPERTY,
         relevance_floor: float,
         dense_weight: float,
         rrf_k: int,
         assets: AssetStore | None = None,
         wait: Callable[[float], None] = time.sleep,
+        scope: WorkspaceScope = DEFAULT_SCOPE,
     ) -> None:
         self._space = space
+        self._scope = scope
         self._wait = wait
         self._assets = assets
         """Where the crops a passage's pictures name are read from; none, and an answer is
@@ -288,8 +336,8 @@ class GraphRag:
         self._model = model
         self._dimensions = dimensions
         # Another index and property are a run of its own beside the space's (the tests).
-        self._index = checked_name(index)
-        self._text_index = CHUNK_TEXT_INDEX
+        self._index = checked_name(index or scope.vector_index)
+        self._text_index = scope.text_index
         self._floor = relevance_floor
         self._dense_weight = dense_weight
         self._rrf_k = rrf_k
@@ -297,8 +345,8 @@ class GraphRag:
         self._model_property = checked_name(f"{vector_property}_model")
         self._centroid = checked_name(f"{vector_property}_centroid")
         """On each document: the mean of its passages' vectors, what it is mostly about."""
-        self._similar = SimilarDocuments(space.driver, index=index,
-                                         vector_property=vector_property)
+        self._similar = SimilarDocuments(space.driver, index=self._index,
+                                         vector_property=vector_property, scope=scope)
         self._rag: _OnceRetriever | None = None
         """Made on the first question: building a retriever asks the database twice."""
         self.text_only = False
@@ -308,6 +356,10 @@ class GraphRag:
     @property
     def _driver(self) -> neo4j.Driver:
         return self._space.driver
+
+    def _query(self, query: str, **parameters: Any) -> Any:
+        """`execute_query`, held to the workspace (`WorkspaceScope.cypher`)."""
+        return self._driver.execute_query(self._scope.cypher(query), **parameters)
 
     def embed(
         self,
@@ -328,7 +380,7 @@ class GraphRag:
             self._samples = None
             self._split.clear()
         self._ensure_index()
-        records, _, _ = self._driver.execute_query(
+        records, _, _ = self._query(
             f"""
             MATCH (c:{CHUNK_LABEL})
             WHERE ($documents IS NULL OR c.document_id IN $documents)
@@ -343,7 +395,7 @@ class GraphRag:
         for start in range(0, len(rows), BATCH):
             batch = rows[start : start + BATCH]
             vectors = self._embedder.embed_texts([text for *_, text in batch])
-            self._driver.execute_query(
+            self._query(
                 f"""
                 UNWIND $rows AS row
                 MATCH (c:{CHUNK_LABEL} {{id: row.id}})
@@ -369,7 +421,7 @@ class GraphRag:
         centroid, for every document with a passage not rated by this rule -- embedding a
         passage takes its rating away. Read and written about RATE_PASSAGES passages at a
         time: a space's vectors are more than a machine holds."""
-        records, _, _ = self._driver.execute_query(
+        records, _, _ = self._query(
             f"""
             MATCH (c:{CHUNK_LABEL})
             WHERE ($documents IS NULL OR c.document_id IN $documents)
@@ -394,7 +446,7 @@ class GraphRag:
             self._rate_batch(batch)
 
     def _rate_batch(self, documents: list[str]) -> None:
-        records, _, _ = self._driver.execute_query(
+        records, _, _ = self._query(
             f"""
             MATCH (c:{CHUNK_LABEL}) WHERE c.document_id IN $documents
               AND c.`{self._vector}` IS NOT NULL
@@ -419,20 +471,20 @@ class GraphRag:
             # One transaction: rated passages and the centroid -- and the likeness that has to
             # be measured again from them -- go in together or not at all.
             tx.run(
-                f"""
+                self._scope.cypher(f"""
                 UNWIND $rows AS row
                 MATCH (c:{CHUNK_LABEL} {{id: row.id}})
                 SET c.importance = row.importance, c.importance_rule = $rule
-                """,
+                """),
                 rows=rated, rule=IMPORTANCE_RULE,
             )
             tx.run(
-                """
+                self._scope.cypher("""
                 UNWIND $rows AS row
                 MATCH (d:Document {id: row.document})
                 CALL db.create.setNodeVectorProperty(d, $property, row.centroid)
                 REMOVE d.similarity_rule
-                """,
+                """),
                 rows=centres, property=self._centroid,
             )
 
@@ -441,23 +493,31 @@ class GraphRag:
 
     def ask(self, question: str, *, documents: int) -> GraphAnswer:
         _checked(documents)
-        items = within_budget([_item(record) for record in
-                               _once(self._found(question, documents, read_on=True))])
-        if not items:
-            # Nothing near the question: no passage to answer from, and no model call for it.
-            return GraphAnswer(text=_nothing_found(question), sources=[])
-        prompt = _prompt(question, "\n".join(item.content for item in items))
+        items = within_budget(self.read(question, documents=documents))
         # A graph_chunk holding a table, a picture or a chart says it in words a model wrote
         # once; the picture goes too, so the answer reads it, not the description.
-        pictures = self._pictures(items)
+        pictures = self.pictures(items) if items else []
+        return GraphAnswer(text=self.answered(question, items, pictures),
+                           sources=[_source(item) for item in items])
+
+    def read(self, question: str, *, documents: int) -> list[RetrieverResultItem]:
+        """What an answer reads, best first, before `within_budget` cuts it."""
+        return [_item(record) for record in _once(self._found(question, documents, read_on=True))]
+
+    def answered(self, question: str, items: Sequence[RetrieverResultItem],
+                 pictures: Sequence[tuple[str, bytes]]) -> str:
+        """The answer written from `items` and the pictures they hold."""
+        if not items:
+            # Nothing near the question: no passage to answer from, and no model call for it.
+            return _nothing_found(question)
+        prompt = _prompt(question, "\n".join(item.content for item in items))
         content: list[dict[str, Any]] = [
             {"type": "text", "text": prompt + (PICTURES_FOLLOW if pictures else "")}]
         for label, png in pictures:
             content += [{"type": "text", "text": label}, image_part(png)]
-        text = self._complete(system=SYSTEM, content=content)
-        return GraphAnswer(text=text, sources=[_source(item) for item in items])
+        return self._complete(system=SYSTEM, content=content)
 
-    def _pictures(self, items: Sequence[RetrieverResultItem]) -> list[tuple[str, bytes]]:
+    def pictures(self, items: Sequence[RetrieverResultItem]) -> list[tuple[str, bytes]]:
         """The crops of the tables, pictures and charts the found passages hold, and the scans
         their words were read off, in the order the passages were found, each named by its
         file and label -- at most ANSWER_PICTURES of them."""
@@ -465,7 +525,7 @@ class GraphRag:
             return []
         members = list(dict.fromkeys(
             m for item in items for m in (item.metadata or {}).get("members", [])))
-        records, _, _ = self._space.driver.execute_query(
+        records, _, _ = self._query(
             _PICTURES, ids=members, key=f"meta_{CROP_ASSET_KEY}",
             routing_=neo4j.RoutingControl.READ,
         )
@@ -547,7 +607,7 @@ class GraphRag:
             return [neo4j.Record({**dict(record), "linked": []})  # type: ignore[no-untyped-call]
                     for record in found]
         assert retriever.embedder is not None
-        records, _, _ = self._driver.execute_query(
+        records, _, _ = self._query(
             self._links_query(), ids=list(first),
             query_vector=retriever.embedder.embed_query(question),
             database_=retriever.neo4j_database,
@@ -556,7 +616,7 @@ class GraphRag:
         quoted = {p["quote_of"] for record in records for doc in record["linked"]
                   for p in doc["passages"] if p.get("quote_of")}
         held = documents_with_message_ids(self._driver, sorted(quoted),
-                                          database=retriever.neo4j_database)
+                                          database=retriever.neo4j_database, scope=self._scope)
         links = {record["document_id"]: linked_without_answered_quotes(
                      relevant_links(record["linked"], self._floor), in_space=held)
                  for record in records}
@@ -622,7 +682,7 @@ class GraphRag:
             if self._samples is not None:
                 return self._samples
         try:
-            records, _, _ = self._driver.execute_query(
+            records, _, _ = self._query(
                 f"""
             MATCH (d:Document) WITH d LIMIT $documents
             CALL {{
@@ -665,16 +725,17 @@ class GraphRag:
         """The vector index at this model's size: one at another size is dropped and made
         again, since it would hold none of this model's vectors."""
         if self._index_size() not in (None, self._dimensions):
-            self._driver.execute_query(f"DROP INDEX `{self._index}`")
+            self._query(f"DROP INDEX `{self._index}`")
         create_vector_index(
-            self._driver, self._index, label=CHUNK_LABEL, embedding_property=self._vector,
+            self._driver, self._index, label=self._scope.chunk_label,
+            embedding_property=self._vector,
             dimensions=self._dimensions, similarity_fn="cosine",
         )
-        self._driver.execute_query("CALL db.awaitIndex($index)", index=self._index)
+        self._query("CALL db.awaitIndex($index)", index=self._index)
         self._rag = None
 
     def _index_size(self) -> int | None:
-        records, _, _ = self._driver.execute_query(
+        records, _, _ = self._query(
             "SHOW VECTOR INDEXES YIELD name, options WHERE name = $index "
             "RETURN options.indexConfig['vector.dimensions'] AS size",
             index=self._index,
@@ -687,7 +748,7 @@ class GraphRag:
                 raise GraphNotEmbedded(
                     "nothing in the graph space is embedded yet: run `graphme embed-graph`"
                 )
-            records, _, _ = self._driver.execute_query(
+            records, _, _ = self._query(
                 f"MATCH (c:{CHUNK_LABEL}) WHERE c.`{self._vector}` IS NOT NULL "
                 f"AND c.`{self._model_property}` <> $model RETURN c.id LIMIT 1",
                 model=self._model,
@@ -705,6 +766,7 @@ class GraphRag:
                 retrieval_query=self._retrieval_query(),
                 embedder=None if self.text_only else self._embedder,
                 text_only=self.text_only,
+                scope=self._scope,
             )
         return self._rag
 
@@ -735,6 +797,7 @@ class GraphRag:
         """The documents linked to each of `$ids`, hop by hop, each with its passages nearest
         the question (`$query_vector`)."""
         vector = f"c.`{self._vector}`"
+        linked = _links_of(self._scope)
         # The linked documents nearest the question as a whole, before any passage is read.
         nearest = f"""MATCH (linked:Document {{id: other}})
           WITH other, ways, coalesce(vector.similarity.cosine(
@@ -745,7 +808,7 @@ class GraphRag:
         MATCH (start:Document {{id: found}})
         CALL (start) {{
           WITH start AS doc
-          {_LINKED}
+          {linked}
           WITH other, direction WHERE other <> start.id
           WITH other, collect(direction) AS ways
           {nearest}
@@ -755,7 +818,7 @@ class GraphRag:
           UNWIND second AS step
           MATCH (doc:Document {{id: step.id}})
           CALL (doc, step, start, second) {{
-            {_LINKED}
+            {linked}
             WITH other, direction
             WHERE other <> start.id AND NOT other IN [s IN second | s.id]
             WITH other, collect(direction) AS ways
@@ -785,11 +848,14 @@ class GraphRag:
         """
 
 
-# DocNode: the label document_id is indexed under; without it every mention in the space is
-# read for each document a hop reaches.
-_LINKED = """CALL (doc) {
-            MATCH (e:DocNode:ExternalDocument {document_id: doc.id})-[:SAME_AS]->(n:Document)
-            USING INDEX e:DocNode(document_id)
+def _links_of(scope: WorkspaceScope) -> str:
+    """The documents linked to `doc`: those a page of it names, those naming it, and those
+    related to it by what they say."""
+    # The workspace's label is what document_id is indexed under; without it every mention in
+    # the space is read for each document a hop reaches.
+    return f"""CALL (doc) {{
+            MATCH (e:DocNode:ExternalDocument {{document_id: doc.id}})-[:SAME_AS]->(n:Document)
+            USING INDEX e:{scope.node_label}(document_id)
             RETURN n.id AS other, 'cites' AS direction
             UNION
             MATCH (x:ExternalDocument)-[:SAME_AS]->(doc)
@@ -797,9 +863,7 @@ _LINKED = """CALL (doc) {
             UNION
             MATCH (doc)-[:SIMILAR_TO]-(n:Document)
             RETURN n.id AS other, 'similar' AS direction
-          }"""
-"""The documents linked to `doc`: those a page of it names, those naming it, and those
-related to it by what they say."""
+          }}"""
 
 _WAY = ("CASE WHEN 'cites' IN ways THEN 'cites' WHEN 'cited_by' IN ways THEN 'cited_by' "
         "ELSE 'similar' END")

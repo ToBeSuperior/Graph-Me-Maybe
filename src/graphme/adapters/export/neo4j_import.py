@@ -29,7 +29,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from graphme.adapters.export.neo4j import SCHEMA
+from graphme.adapters.export.neo4j import CHUNK_LABEL
+from graphme.adapters.export.neo4j import schema as workspace_schema
+from graphme.adapters.storage.workspace_scope import DEFAULT_SCOPE, WorkspaceScope
 
 ARRAY_DELIMITER = ";"
 
@@ -49,6 +51,8 @@ class CorpusRows:
     indexes: Sequence[dict[str, Any]]
     documents: int
     """How many documents leave."""
+    scope: WorkspaceScope = DEFAULT_SCOPE
+    """The workspace they leave from: its label goes on every row, its schema with them."""
 
 
 class ColumnKind:
@@ -154,7 +158,8 @@ def write_import_bundle(rows: CorpusRows, folder: Path) -> list[Path]:
             out[labels].writerow(["id:ID", ":LABEL", *(f"{n}:{k}" for n, k in names)])
         for labels, node_id, properties in rows.nodes():
             _unchanged(labels, properties, typed, skip={"id"})
-            out[labels].writerow([node_id, labels, *(
+            own = rows.scope.chunk_label if labels == CHUNK_LABEL else rows.scope.node_label
+            out[labels].writerow([node_id, f"{labels}{ARRAY_DELIMITER}{own}", *(
                 _cell(properties.get(name), kind) for name, kind in typed[labels])])
     with ExitStack() as files:
         out = _writers(files, relationship_files)
@@ -169,7 +174,8 @@ def write_import_bundle(rows: CorpusRows, folder: Path) -> list[Path]:
     schema = folder / "schema.cypher"
     # LF on every system: these are read by POSIX tools, where Windows' CRLF made `set -e`
     # into `set -e\r` and every .dump made on Windows failed.
-    schema.write_text("\n".join(_schema(rows.indexes)) + "\n", encoding="utf-8", newline="\n")
+    schema.write_text("\n".join(_schema(rows.indexes, rows.scope)) + "\n", encoding="utf-8",
+                      newline="\n")
     command = folder / "import.sh"
     command.write_text(
         _command(list(node_files.values()), list(relationship_files.values())),
@@ -195,8 +201,9 @@ the links between documents, and the passages with their vectors.
 
 For Neo4j Aura, turn the folder into a `.dump` (`graphme export-corpus <file> --dump`) and
 load that with Aura's Import Database. Once the indexes are online, neo4j-graphrag's
-`HybridCypherRetriever` searches the `chunk_embedding` vector index and the `chunk_text`
-fulltext index.
+`HybridCypherRetriever` searches the vector and fulltext indexes `schema.cypher` makes,
+named after the workspace the graph left (`chunk_embedding_<workspace>`,
+`chunk_text_<workspace>`).
 """
 
 
@@ -220,8 +227,8 @@ def _typed(columns: dict[str, ColumnKind]) -> list[tuple[str, str]]:
     return [(name, columns[name].kind()) for name in sorted(columns)]
 
 
-def _schema(indexes: Sequence[dict[str, Any]]) -> list[str]:
-    lines = [f"{statement};" for statement in SCHEMA]
+def _schema(indexes: Sequence[dict[str, Any]], scope: WorkspaceScope) -> list[str]:
+    lines = [f"{statement};" for statement in workspace_schema(scope)]
     for index in indexes:
         target = f"FOR (c:{index['label']})"
         if index["kind"] == "VECTOR":

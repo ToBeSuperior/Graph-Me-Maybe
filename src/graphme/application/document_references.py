@@ -17,7 +17,7 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-from graphme.application.corpus_links import document_numbers, generic_name
+from graphme.application.corpus_links import document_numbers, generic_name, leading_number
 from graphme.application.page_units import (
     RenderedPageLike,
     asked_together,
@@ -214,7 +214,9 @@ def _written(reference: DocumentReference, text: str | None) -> bool:
     written there. Nor is a cue that is only the name again: a name mentioned in passing has
     no pointing words, and offering the name as its own cue says so. An address is the
     exception -- a URL is its own pointer -- and so is a document number: "XQ-2031-0042"
-    is what makes the name a document's. A unit with no text of its own, a picture, is
+    is what makes the name a document's, and so does a short one leading the name, as a file
+    is filed under it ("GS-100 Valve Spec"); whether a document is filed under it is the
+    space's question, when mentions are linked. A unit with no text of its own, a picture, is
     read from its crop and there is nothing to hold the answer to, so it is taken as given.
     """
     cue, name = folded(reference.cue), folded(reference.name)
@@ -224,7 +226,9 @@ def _written(reference: DocumentReference, text: str | None) -> bool:
     if len(cue) < MIN_CUE_CHARS:
         _log.info("reference %r dropped: its cue %r proves nothing", reference.name[:40], cue)
         return False
-    if reference.kind != "address" and cue in name and not document_numbers(reference.name):
+    if reference.kind != "address" and cue in name and not (
+        document_numbers(reference.name) or leading_number(reference.name)
+    ):
         _log.info("reference %r dropped: its cue is only its name", reference.name[:40])
         return False
     if not text:

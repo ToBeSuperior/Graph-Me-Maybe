@@ -10,6 +10,7 @@ from typing import Any
 import neo4j
 from neo4j_graphrag.retrievers import HybridCypherRetriever
 
+from graphme.adapters.storage.workspace_scope import DEFAULT_SCOPE, WorkspaceScope
 from graphme.application.corpus_links import document_numbers
 
 _LUCENE_SPECIAL = set('+-&|!(){}[]^"~*?:\\/')
@@ -72,13 +73,14 @@ def linked_without_answered_quotes(linked: Sequence[dict[str, Any]], *, in_space
 
 
 def documents_with_message_ids(driver: neo4j.Driver, ids: Sequence[str], *,
-                               database: str | None = None) -> set[str]:
-    """Those of the Message-IDs `ids` that a document in the space carries."""
+                               database: str | None = None,
+                               scope: WorkspaceScope = DEFAULT_SCOPE) -> set[str]:
+    """Those of the Message-IDs `ids` that a document in the workspace carries."""
     if not ids:
         return set()
     rows, _, _ = driver.execute_query(
-        "MATCH (d:Document) WHERE d.meta_mail_message_id IN $ids "
-        "RETURN d.meta_mail_message_id AS id", {"ids": list(ids)},
+        scope.cypher("MATCH (d:Document) WHERE d.meta_mail_message_id IN $ids "
+                     "RETURN d.meta_mail_message_id AS id"), {"ids": list(ids)},
         database_=database, routing_=neo4j.RoutingControl.READ)
     return {row["id"] for row in rows}
 
@@ -90,9 +92,14 @@ class _OnceRetriever(HybridCypherRetriever):
     and only passages something says are about the question (`_FUSED`). It keeps the library's
     retriever for its constructor, which checks the two indexes are there."""
 
+    scope: WorkspaceScope = DEFAULT_SCOPE
+    """The workspace searched: the indexes named are its own, and every pattern names it."""
+
     def __init__(self, driver: neo4j.Driver, *, floor: float, dense_weight: float, rrf_k: int,
-                 text_only: bool = False, **kwargs: Any) -> None:
+                 text_only: bool = False, scope: WorkspaceScope = DEFAULT_SCOPE,
+                 **kwargs: Any) -> None:
         super().__init__(driver, **kwargs)
+        self.scope = scope
         self.text_only = text_only
         """The fulltext index alone (`_FUSED_WORDS`): passages embedded with another search
         model, which a question embedded with this one cannot be compared with."""
@@ -129,14 +136,15 @@ class _OnceRetriever(HybridCypherRetriever):
             assert self.embedder is not None
             asked["query_vector"] = self.embedder.embed_query(question)
         records, _, _ = self.driver.execute_query(
-            (_FUSED_WORDS if self.text_only else _FUSED) + self.retrieval_query,
+            self.scope.cypher((_FUSED_WORDS if self.text_only else _FUSED)
+                              + self.retrieval_query),
             asked,
             database_=self.neo4j_database,
             routing_=neo4j.RoutingControl.READ,
         )
         held = documents_with_message_ids(
             self.driver, sorted({r["quote_of"] for r in records if r["quote_of"]}),
-            database=self.neo4j_database)
+            database=self.neo4j_database, scope=self.scope)
         return sorted(without_answered_quotes(records, in_space=held),
                       key=lambda record: record["score"], reverse=True)
 

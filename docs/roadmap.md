@@ -128,6 +128,13 @@ MMLongBench-Doc and DocBench, published on the site.
       round. Too slow for an agent to ask every workspace each turn. Next, to decide: keep several
       graph DBs running beside (each a Java process with its own heap) or the light search index
       above, which needs no graph DB to search.
+      Done 2026-11-15 the owner's way: every workspace a scope of the one Neo4j (own labels and
+      indexes), and `workspaces=[...]` on search, ask and MCP fuses each workspace's ranking by
+      reciprocal rank. Measured the same day (dev build, 0-19 documents a workspace): switching
+      0.4-0.5 s; a search 0.17 s over one workspace, 0.39 s over two, 0.57 s over three. Each
+      workspace adds about 0.2 s though they are asked side by side -- the question is likely
+      embedded once per workspace; embedding it once when they share a search model is next if
+      it matters.
 - [ ] **A blog for the public site** (left for later; site plan in
       `docs/superpowers/specs/2026-10-29-public-site-design.md`). Candidates: why plain RAG
       breaks on spreadsheets and slides; how it works, from a rendered page to the graph; the
@@ -209,6 +216,9 @@ MMLongBench-Doc and DocBench, published on the site.
 
 ## 2 · Breaking down tables
 
+TODO (owner, 2026-11-15): these are questions of method and need a fuller discussion before any
+of them is built; simpler items go first.
+
 - [ ] Decide whether to split a table into cell, row and column semantic units, and if so,
       set the rules. Today one table is one node. This item is on hold until the
       representative table meaning and the ownership rules are settled.
@@ -237,9 +247,13 @@ MMLongBench-Doc and DocBench, published on the site.
       whose cue is only itself is dropped (`_written`), and a bare "per QP-210" is not a
       number at all. To decide: whether a number that matches a document in the space should
       count whatever its digits, or the samples should carry four-digit numbers.
-- [ ] TODO (held for the owner's call): the document number rule above -- a number matching a
-      document in the space whatever its digits, or four-digit numbers in the samples. Links stay
-      3/7 in the golden run until it is decided.
+- [x] The document number rule above, decided 2026-11-15 (owner: a number matching a document in
+      the space counts whatever its digits): a number written alone, however short, names the
+      documents filed under it (their file name starts with it, `filed_number`); a name led by
+      one is kept with itself as its cue and judged as a name. Golden run from a fresh build
+      (2026-11-15): links 6/7, every other measure whole. The one left, the deck to the work
+      order, is "failures occurred in the WO-2026-031 assembly batch": a batch named by the
+      order's number, not the order cited -- whether the samples should expect that link is open.
 - [ ] Write down the limits and the non-claims together. Do not use confidential material
       without data-handling approval.
 

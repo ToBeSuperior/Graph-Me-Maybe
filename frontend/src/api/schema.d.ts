@@ -1710,6 +1710,8 @@ export interface components {
             top_k?: number | null;
             /** Workspace */
             workspace?: string | null;
+            /** Workspaces */
+            workspaces?: string[] | null;
         };
         /** ReadRequest */
         ReadRequest: {
@@ -1815,6 +1817,8 @@ export interface components {
             modified?: number | null;
             /** Origin */
             origin?: string | null;
+            /** Workspace */
+            workspace?: string | null;
         };
         /** Uploaded */
         Uploaded: {
@@ -1886,6 +1890,10 @@ export interface components {
             mcp_changes: boolean;
             /** Items */
             items?: components["schemas"]["Workspace"][];
+            /** Unmoved */
+            unmoved?: {
+                [key: string]: string;
+            };
         };
     };
     responses: never;

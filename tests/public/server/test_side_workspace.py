@@ -1,4 +1,5 @@
-"""A workspace not open, read beside the open one: its own Neo4j, one at a time, let go when idle.
+"""A workspace not open, read beside the open one: its scope over the open graph's connection,
+nothing started or stopped.
 
 What the app shows does not change; an MCP client reads another workspace through `?workspace=`.
 """
@@ -15,7 +16,7 @@ from graphme.adapters.storage.graph_rag import GraphNotEmbedded
 from graphme.server import create_app, state
 from graphme.server.state import Demo
 from graphme.server.workspaces import FIRST
-from tests.public.server.conftest import SETTINGS, FakeSpace, until
+from tests.public.server.conftest import SETTINGS, FakeSpace
 
 BASE = "http://127.0.0.1:8765"
 stopped: list[Path] = []
@@ -34,12 +35,16 @@ class _Rag:
 
 
 class _Graph:
-    def __init__(self, settings: Any) -> None:
+    def __init__(self, settings: Any, *, base: _Graph | None = None, took: bool = False) -> None:
         self.settings = settings
+        self.base, self.took = base, took
         self.opened_space = self._space = FakeSpace()
         self._space.documents = [{"id": "side-doc", "label": "Invented memo.docx"}]
         self._rag = _Rag()
         self.closed = False
+
+    def held_to(self, settings: Any, *, take: bool = False) -> _Graph:
+        return type(self)(settings, base=self, took=take)
 
     def graph_space(self) -> FakeSpace:
         return self._space
@@ -68,7 +73,7 @@ def demo_(home: Path, monkeypatch: pytest.MonkeyPatch) -> Demo:
                 root=home / "server")
 
 
-def test_another_workspace_is_read_beside_and_the_app_keeps_its_own(
+def test_another_workspace_is_read_over_the_open_graph_s_connection(
     demo_: Demo, home: Path
 ) -> None:
     made = demo_.workspaces.create("Invented project")  # type: ignore[union-attr]
@@ -77,41 +82,36 @@ def test_another_workspace_is_read_beside_and_the_app_keeps_its_own(
     assert demo_.reader(None) is open_one and demo_.reader(FIRST) is open_one
     side = demo_.reader(made["id"])
 
-    assert side is not open_one
-    assert side.settings.local_graph == home / "workspaces" / made["id"]
-    assert demo_.reader(made["id"]) is side  # kept while asked
+    assert side.base is open_one and not side.took  # type: ignore[attr-defined]
+    assert side.settings.workspace == made["id"]
+    assert side.settings.local_graph == home / "workspaces" / made["id"]  # its crops
+    assert demo_.reader(made["id"]) is side  # kept while the open graph is the same
     assert demo_.graph is open_one and demo_.workspaces.active == FIRST  # type: ignore[union-attr]
+    assert stopped == []
 
 
-def test_one_workspace_beside_at_a_time(demo_: Demo, home: Path) -> None:
+def test_several_workspaces_are_read_beside_at_once(demo_: Demo) -> None:
     first = demo_.workspaces.create("Invented one")  # type: ignore[union-attr]
     second = demo_.workspaces.create("Invented two")  # type: ignore[union-attr]
     one = demo_.reader(first["id"])
 
     two = demo_.reader(second["id"])
 
-    assert two is not one and one.closed  # type: ignore[attr-defined]
-    assert stopped == [home / "workspaces" / first["id"]]
+    assert two is not one and not one.closed  # type: ignore[attr-defined]
+    assert demo_.reader(first["id"]) is one
+    assert stopped == []
 
 
-def test_a_workspace_beside_is_let_go_when_nobody_asks(
-    demo_: Demo, home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(state, "SIDE_IDLE_SECONDS", 0.2)
-    made = demo_.workspaces.create("Invented project")  # type: ignore[union-attr]
-    side = demo_.reader(made["id"])
+def test_a_workspace_beside_follows_the_open_graph_after_a_switch(demo_: Demo) -> None:
+    first = demo_.workspaces.create("Invented one")  # type: ignore[union-attr]
+    second = demo_.workspaces.create("Invented two")  # type: ignore[union-attr]
+    side = demo_.reader(first["id"])
 
-    assert until(lambda: side.closed and stopped == [home / "workspaces" / made["id"]], 5)  # type: ignore[attr-defined]
+    demo_.switch_workspace(second["id"])
+    again = demo_.reader(first["id"])
 
-
-def test_opening_the_workspace_read_beside_lets_it_go_first(demo_: Demo) -> None:
-    made = demo_.workspaces.create("Invented project")  # type: ignore[union-attr]
-    side = demo_.reader(made["id"])
-
-    demo_.switch_workspace(made["id"])
-
-    assert side.closed  # type: ignore[attr-defined]
-    assert demo_.graph is not side and demo_.workspaces.active == made["id"]  # type: ignore[union-attr]
+    assert again is not side and again.base is demo_.graph  # type: ignore[attr-defined]
+    assert demo_.reader(second["id"]) is demo_.graph
 
 
 def test_reading_beside_over_http(demo_: Demo) -> None:

@@ -1,9 +1,11 @@
-"""The app's workspaces: graphs kept apart, each its own Neo4j graph folder, one open at a time.
+"""The app's workspaces: graphs kept apart in the home's one Neo4j, one open at a time.
 
-Neo4j Community opens one database of the user's at a time, so a workspace is a folder holding
-its own `neo4j-data/`, run by the home's one install; the first workspace is the home's own
-graph, where it always was. What is listed, and which is open, is `workspaces.json` in the home.
-Keys, the model, the search model and the drives connected are the machine's, shared by all.
+Neo4j Community serves one user database, so every workspace's graph is in it under the
+workspace's own labels and indexes (`WorkspaceScope`, `W_<id>`); a workspace's folder holds
+only its crops and its mail. The first workspace is the home's own (`default`). What is
+listed, and which is open, is `workspaces.json` in the home; which folders' graphs from before
+were moved into the one Neo4j, `moved.json`. Keys, the model, the search model and the drives
+connected are the machine's, shared by all.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ FIRST = "default"
 """The home's own graph: the workspace every graph made before workspaces is."""
 FIRST_NAME = "Default"
 NAME_LIMIT = 60
+OPEN_NOT_DELETED = "the workspace open now cannot be deleted -- open another first"
 
 
 class Workspaces:
@@ -39,7 +42,8 @@ class Workspaces:
         return str(self.listed()["active"])
 
     def graph(self, workspace: str) -> Path | None:
-        """The folder holding `workspace`'s graph; None for the home's own."""
+        """`workspace`'s folder -- its crops, its mail, and a graph from before every workspace
+        was in the one Neo4j (`neo4j-data/`); None for the home's own."""
         return None if workspace == FIRST else self.home / "workspaces" / workspace
 
     def item(self, workspace: str) -> dict[str, Any]:
@@ -113,17 +117,41 @@ class Workspaces:
             self._write(said)
 
     def delete(self, workspace: str) -> None:
-        """`workspace` and its graph deleted. The one open, or the last, cannot be."""
+        """`workspace` unlisted and its folder deleted -- its graph is taken out of the one
+        Neo4j first (`Demo.delete_workspace`). The one open cannot be. The home's own has no
+        folder: its crops are swept as unused."""
         with self._lock:
             said = self._read()
             self._find(said, workspace)
             if workspace == said["active"]:
-                raise Busy("the workspace open now cannot be deleted -- open another first")
+                raise Busy(OPEN_NOT_DELETED)
             said["items"] = [i for i in said["items"] if i["id"] != workspace]
             self._write(said)  # listed no more before its files go: never one half deleted
         graph = self.graph(workspace)
-        shutil.rmtree(graph if graph is not None else self.home / "neo4j-data",
-                      ignore_errors=True)
+        if graph is not None:
+            shutil.rmtree(graph, ignore_errors=True)
+
+    def moved(self) -> set[str]:
+        """The workspaces whose graph in their own folder was copied into the one Neo4j."""
+        with self._lock:
+            try:
+                return {str(i) for i in json.loads(
+                    (self.home / "moved.json").read_text(encoding="utf-8"))}
+            except (OSError, ValueError, TypeError):
+                return set()
+
+    def mark_moved(self, workspace: str) -> None:
+        said = sorted(self.moved() | {workspace})
+        with self._lock:
+            kept = self.home / "moved.tmp"
+            kept.write_text(json.dumps(said), encoding="utf-8")
+            kept.replace(self.home / "moved.json")
+
+    def refuse_open(self, workspace: str) -> None:
+        """Busy for the workspace open now; LookupError for one not listed."""
+        self.item(workspace)
+        if workspace == self.active:
+            raise Busy(OPEN_NOT_DELETED)
 
     def _read(self) -> dict[str, Any]:
         try:

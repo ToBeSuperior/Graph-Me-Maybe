@@ -3,11 +3,13 @@ from __future__ import annotations
 import logging
 import tempfile
 import threading
-from contextlib import AbstractContextManager
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Any
 
 import httpx
+import neo4j
 
 from graphme import model_endpoint
 from graphme.adapters.chat import Endpoint
@@ -25,9 +27,10 @@ from graphme.adapters.rendering.page_renderer import PageRenderer
 from graphme.adapters.rendering.visual_binding import RenderedVisualBinder
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import GraphRag
-from graphme.adapters.storage.local_neo4j import USER, ensure_local_neo4j, install
+from graphme.adapters.storage.local_neo4j import USER, ensure_local_neo4j, install, stop_graph
 from graphme.adapters.storage.local_neo4j import password as neo4j_password
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
+from graphme.adapters.storage.workspace_move import move_home_graph
 from graphme.adapters.vision.chat_completions import ChatCompletionsVLMAdapter
 from graphme.adapters.vision.hierarchy_scope import RenderedHierarchyScopeProvider
 from graphme.adapters.vision.text_grouping import RenderedUnitGrouper
@@ -213,15 +216,38 @@ def create_graph_builder(settings: Settings, **parts: Any) -> DocumentGraphBuild
 
 def create_graph_space(settings: Settings) -> Neo4jGraphSpace:
     """The one graph every document of a corpus is put in: the installed app's own Neo4j --
-    started, and fetched first if need be -- or the one GRAPHME_NEO4J_URI names."""
+    started, and fetched first if need be -- or the one GRAPHME_NEO4J_URI names; held to the
+    workspace `settings.workspace` names. Every workspace is in the home's one Neo4j."""
     if settings.local_neo4j is not None:
         uri = ensure_local_neo4j(settings.local_neo4j,
-                                 (settings.neo4j_heap, settings.neo4j_pagecache),
-                                 graph=settings.local_graph)
+                                 (settings.neo4j_heap, settings.neo4j_pagecache))
         settings = settings.model_copy(update={
             "neo4j_uri": uri, "neo4j_user": USER,
-            "neo4j_password": neo4j_password(settings.local_graph or settings.local_neo4j)})
-    return Neo4jGraphSpace.from_settings(settings)
+            "neo4j_password": neo4j_password(settings.local_neo4j)})
+    space = Neo4jGraphSpace.from_settings(settings)
+    # A graph from before workspaces is the default workspace's, before anything reads it.
+    move_home_graph(space.driver)
+    return space
+
+
+@contextmanager
+def workspace_folder_graph(settings: Settings, folder: Path) -> Iterator[neo4j.Driver]:
+    """The graph a workspace kept in its own folder before every workspace was in the home's
+    one Neo4j (`folder/neo4j-data`), started once to be read and stopped after."""
+    assert settings.local_neo4j is not None
+    try:
+        uri = ensure_local_neo4j(settings.local_neo4j,
+                                 (settings.neo4j_heap, settings.neo4j_pagecache), graph=folder)
+        secret = neo4j_password(folder)
+        driver = neo4j.GraphDatabase.driver(uri, auth=(USER, secret) if secret else None,
+                                            notifications_min_severity="OFF")
+        try:
+            driver.verify_connectivity()
+            yield driver
+        finally:
+            driver.close()
+    finally:
+        stop_graph(folder)
 
 
 def create_neo4j_admin(settings: Settings) -> LocalNeo4jAdmin:
@@ -247,6 +273,7 @@ def create_graph_rag(
         dense_weight=settings.hybrid_dense_weight,
         rrf_k=settings.rrf_k,
         assets=LocalAssetStore(settings.asset_dir),
+        scope=space.scope,
     )
 
 

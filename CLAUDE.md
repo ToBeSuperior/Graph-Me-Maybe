@@ -388,6 +388,11 @@ passage is fused only with evidence: cosine at least `GRAPHME_RELEVANCE_FLOOR`, 
 every word of the question or the number it names (`every_word`); none, and nothing is found. The embedding
 key is the embedder's own variable (`EMBEDDERS[...].key_env`); the answer comes from the same model endpoint as
 every other call. Prompts are English; the answer follows the question's language, and is English when the question shows none (only numbers or codes).
+A question naming several workspaces (`Question.workspaces`; `/v1/search`, `/v1/ask`, MCP
+`search`/`ask`) searches each through its own reader side by side, fuses the ranked lists by
+reciprocal rank with each workspace weighted the same (`across`; scores from different indexes
+are not compared), and walks the result to the documents asked for as one search does, a document
+told apart by its workspace (`find_across`, `ask_across`); every source names its `workspace`.
 
 Phase 1 ends at the export: `export-corpus` writes a `neo4j-admin database import` bundle
 (`adapters/export/neo4j_import.py`) -- typed CSV per label set and relationship type, the
@@ -482,12 +487,21 @@ atexit runs), a watcher process of its own (`local_neo4j.watch`, POSIX) stops it
 recorded is adopted only if `server.directories.data` is this home's (WSL's app answers on
 Windows' loopback too). The server never opens it in a page's request: `Demo.space(wait=)` opens
 it behind and answers `GraphStarting` (503, Retry-After), which the page keeps asking through.
-Workspaces (`server/workspaces.py`) are graphs kept apart: Community opens one user database at
-a time, so each is a folder holding its own `neo4j-data/` (`Settings.local_graph`), run by the
-home's one install; the home's own graph is the first. Switching (`Demo.switch_workspace`) starts
-the new one on another port, moves onto it once it answers, and stops the old one behind
-(`local_neo4j.stop_graph`) -- going back to a graph still stopping waits for it, since its Neo4j
-holds the folder until it has stopped.
+Workspaces (`server/workspaces.py`) are graphs kept apart inside the home's one Neo4j: Community
+serves one user database, so each workspace is a scope of it (`Settings.workspace`,
+`WorkspaceScope`: `W_<id>`/`C_<id>` labels and its own indexes; the home's own is `default`), and
+its folder (`Settings.local_graph`) holds only its crops and mail. Switching
+(`Demo.switch_workspace`) holds the open connection to the new scope (`GraphMe.held_to`,
+`take=True`) and a workspace read beside (`Demo.reader`) is its scope over the same connection --
+no Neo4j started or stopped. Deleting one deletes its nodes in batches and drops its constraints
+and indexes (`Neo4jGraphSpace.drop_workspace`), then its folder. Graphs from before are moved
+once (`adapters/storage/workspace_move.py`): the home's own, unlabelled, is relabelled
+`W_default`/`C_default` whenever a space is opened while the old global `doc_node_id` constraint
+is there (`move_home_graph`, which drops the old global schema last); a folder still holding
+`neo4j-data/` is started once at the server's first opening of the graph (no build running),
+copied in under its scope, counted, marked in `moved.json`, and left on disk for the owner to
+remove -- a failed move stays unmarked, is tried again next start and is said in
+`GET /v1/workspaces` (`unmoved`).
 A cloud drive's desktop app downloads a file kept online only when it is read, and keeps it
 (`adapters/sources/cloud_files.py`). A build therefore lets its documents in a few at a time --
 `reading_at_once` read and as many again waiting, each checked against the graph and searched
@@ -510,9 +524,12 @@ leave it), so a graph moved through one has no files to draw or download until t
 ### Neo4j shape
 
 `adapters/export/neo4j.py` is the one mapping to Neo4j, and the demo's graph view draws the
-same records it produces. Every node gets the shared label `DocNode` (the `id` uniqueness
-constraint lives there, so a relationship MATCH can use the index) plus its type as a second
-label; properties are scalars or scalar arrays only, nested values are JSON strings, nulls are
+same records it produces. Every node gets the shared label `DocNode` plus its type as a second
+label, and in Neo4j its workspace's label (`W_<id>`; a passage `C_<id>`), where the `id`
+uniqueness constraint lives -- ids are content-derived, so the same file in two workspaces has
+the same ids. Every statement the storage adapters send goes through
+`WorkspaceScope.cypher` (`adapters/storage/workspace_scope.py`), and the vector and fulltext
+indexes are the workspace's own (`chunk_embedding_<id>`, `chunk_text_<id>`); properties are scalars or scalar arrays only, nested values are JSON strings, nulls are
 omitted, and node metadata is prefixed `meta_` so it cannot shadow a core field.
 
 ### Providers

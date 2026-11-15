@@ -152,6 +152,8 @@ class DocumentIdentity:
     """Titles the file states of itself, matched only word for word."""
     names: frozenset[str] = field(init=False, compare=False)
     numbers: frozenset[str] = field(init=False, compare=False)
+    filed: str | None = field(init=False, compare=False)
+    """The number its file name starts with, however short (`filed_number`)."""
     title_letters: str | None = field(init=False, compare=False)
     digest: str | None = field(init=False, compare=False)
     exact: frozenset[str] = field(init=False, compare=False)
@@ -173,6 +175,7 @@ class DocumentIdentity:
         object.__setattr__(self, "names", frozenset(
             () if generic_name(stem) else _file_names(self.file_name) | _file_names(stem)))
         object.__setattr__(self, "numbers", document_numbers(stem))
+        object.__setattr__(self, "filed", filed_number(self.file_name))
         object.__setattr__(
             self, "title_letters", letters(self.title) if self.title is not None else None
         )
@@ -244,7 +247,7 @@ def link_mentions(
     return tuple(links)
 
 
-LINK_RULE = (f"pairwise/embedded,file_name,number,stated,subtitle,title/name{MIN_NAME_CHARS}"
+LINK_RULE = (f"pairwise/embedded,file_name,number,filed,stated,subtitle,title/name{MIN_NAME_CHARS}"
              f"/title{MIN_TITLE_CHARS}"
              f"-{TITLE_PREFIX_LETTERS}-{TITLE_OVERLAP}"
              f"/nfkc/hangul2/digits{MIN_NUMBER_DIGITS}-nodates/generic/numberbound")
@@ -267,6 +270,7 @@ class DocumentLookup:
         unique = {identity.document_id: identity for identity in identities}
         self._by_name: dict[str, set[str]] = {}
         self._by_number: dict[str, set[str]] = {}
+        self._by_filed: dict[str, set[str]] = {}
         self._by_digest: dict[str, set[str]] = {}
         self._by_stated: dict[str, set[str]] = {}
         self._by_subtitle: dict[str, set[str]] = {}
@@ -286,6 +290,8 @@ class DocumentLookup:
                 subtitled.setdefault(part, set()).add(document_id)
             for number in identity.numbers:
                 self._by_number.setdefault(number, set()).add(document_id)
+            if identity.filed is not None:
+                self._by_filed.setdefault(identity.filed, set()).add(document_id)
             title = identity.title_letters
             if title is None:
                 continue
@@ -329,6 +335,11 @@ class DocumentLookup:
         numbers = document_numbers(mention.name)
         yield "number", set().union(
             *(self._by_number.get(number, set()) for number in numbers)) - own
+        # A number written alone, however short ("per QP-210"), names what is filed under it;
+        # with words after it ("COVID-19 response plan") the name says more, judged as a name.
+        alone = leading_number(mention.name)
+        yield "filed", (self._by_filed.get(alone, set())
+                        if alone is not None and letters(alone) == written else set()) - own
         yield "stated", self._by_stated.get(written, set()) - own
         yield "subtitle", self._by_subtitle.get(written, set()) - own
         yield "title", {
@@ -422,17 +433,39 @@ def _held_at(shorter: str, longer: str, start: int) -> bool:
     ) and not (end < len(longer) and longer[end].isdigit() and shorter[-1].isdigit())
 
 
-def document_numbers(text: str) -> frozenset[str]:
-    """The document numbers written in `text`: words of letters and digits joined by hyphens,
-    long enough not to be a version (MIN_NUMBER_CHARS), with a number's digits
-    (MIN_NUMBER_DIGITS), and not a date. Any dash a page writes is a hyphen."""
+def _code_words(text: str) -> list[str]:
+    """The words of `text` shaped like a number, short or long, in order: letters and digits
+    joined by hyphens, with a digit, and not a date. Any dash a page writes is a hyphen."""
     words = (word.strip(".") for word in _WORDS.split(normalized(text).translate(_DASHES)))
-    return frozenset(
+    return [
         word.casefold()
         for word in words
-        if len(word) >= MIN_NUMBER_CHARS
-        and "-" in word
-        and sum(character.isdigit() for character in word) >= MIN_NUMBER_DIGITS
+        if "-" in word
+        and any(character.isdigit() for character in word)
         and all(character.isalnum() or character == "-" for character in word)
         and not _DATE.fullmatch(word)
+    ]
+
+
+def document_numbers(text: str) -> frozenset[str]:
+    """The document numbers written in `text`: number-shaped words (`_code_words`) long enough
+    not to be a version (MIN_NUMBER_CHARS) and with a number's digits (MIN_NUMBER_DIGITS) --
+    numbers whatever documents the space holds."""
+    return frozenset(
+        word for word in _code_words(text)
+        if len(word) >= MIN_NUMBER_CHARS
+        and sum(character.isdigit() for character in word) >= MIN_NUMBER_DIGITS
     )
+
+
+def filed_number(file_name: str) -> str | None:
+    """The number a file is filed under: the number-shaped word its name starts with
+    ("GS-100" of "GS-100_Valve Spec.docx"), however short."""
+    return leading_number(Path(file_name).stem)
+
+
+def leading_number(text: str) -> str | None:
+    """The number-shaped word `text` starts with, if it starts with one."""
+    first = _WORDS.split(normalized(text).strip(), maxsplit=1)[0]
+    found = _code_words(first)
+    return found[0] if found else None

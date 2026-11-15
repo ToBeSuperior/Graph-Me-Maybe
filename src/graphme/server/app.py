@@ -12,6 +12,7 @@ import shutil
 import sys
 import traceback
 from collections.abc import AsyncIterator, Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -44,7 +45,14 @@ from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.visual_binding import page_name, placed_units
 from graphme.adapters.sources.box import Picked as BoxPicked
 from graphme.adapters.storage.assets import LocalAssetStore
-from graphme.adapters.storage.graph_rag import MAX_DOCUMENTS, GraphNotEmbedded, GraphRag
+from graphme.adapters.storage.graph_rag import (
+    MAX_DOCUMENTS,
+    GraphNotEmbedded,
+    GraphRag,
+    GraphSource,
+    ask_across,
+    find_across,
+)
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, modified_at
 from graphme.api import GraphMe
 from graphme.application.embedded_documents import name_part
@@ -81,6 +89,7 @@ MAX_QUESTION_CHARS = 1000
 """The longest question asked: a page of text is not a question, and it is what is embedded."""
 
 T = TypeVar("T")
+U = TypeVar("U")
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 """An upload is read whole into memory before it is written; this keeps that bounded."""
@@ -343,7 +352,7 @@ def create_app(
     def listedworkspace_registry() -> dict[str, Any]:
         if demo.workspaces is None:
             return {"available": False}
-        return {"available": True, **demo.workspaces.listed()}
+        return {"available": True, **demo.workspaces.listed(), "unmoved": dict(demo.unmoved)}
 
     def changing(request: Request) -> None:
         if not from_here(request):
@@ -925,9 +934,13 @@ def create_app(
 
     # Questions ------------------------------------------------------------------------------
 
-    def asked(request: api.Question, run: Callable[[GraphRag, str, int], T]) -> tuple[T, bool]:
+    def asked(request: api.Question, run: Callable[[GraphRag, str, int], T],
+              across: Callable[[GraphRag, str, int], U],
+              fuse: Callable[[list[tuple[str, GraphRag, U]], str, int], T]) -> tuple[T, bool]:
         """A question and how many documents it asks for checked, then `run` on the graph
-        space's GraphRAG -- and whether it searched by words alone (`GraphRag.text_only`)."""
+        space's GraphRAG -- and whether it searched by words alone (`GraphRag.text_only`).
+        Several workspaces named: `across` on each one's GraphRAG side by side, and `fuse` of
+        what they gave."""
         question = request.question.strip()
         if not question:
             raise HTTPException(400, "the question is empty")
@@ -939,27 +952,50 @@ def create_app(
         documents = asked_for if asked_for is not None else demo.settings.retrieval_documents
         if not 1 <= documents <= MAX_DOCUMENTS:
             raise HTTPException(400, f"documents must be between 1 and {MAX_DOCUMENTS}")
-        side = beside(request.workspace)
+        several = list(dict.fromkeys(request.workspaces or []))
+        if len(several) < 2:  # one named is asked as `workspace` is
+            one = several[0] if several else request.workspace
+            rag, side = rag_of(one)
+            return guarded(lambda: tried(rag, side, lambda: run(rag, question, documents)))
+        rags = [(ws, *rag_of(ws)) for ws in several]
+
+        def fused() -> tuple[T, bool]:
+            with ThreadPoolExecutor(len(rags)) as pool:  # each workspace searched side by side
+                done = list(pool.map(lambda each: tried(
+                    each[1], each[2], lambda: across(each[1], question, documents)), rags))
+            found = [(ws, rag, got) for (ws, rag, _), (got, _) in zip(rags, done, strict=True)]
+            return fuse(found, question, documents), any(text_only for _, text_only in done)
+        return guarded(fused)
+
+    def rag_of(workspace: str | None) -> tuple[GraphRag, bool]:
+        """The GraphRAG a workspace is asked through, and whether it is one beside the open."""
+        side = beside(workspace)
         if side is None:
             opened()
         try:
             if side is None:
-                rag = demo.rag()
-            else:
-                with demo.siding:  # two first questions at once make one engine
-                    rag = side.rag()
+                return demo.rag(), False
+            with demo.siding:  # two first questions at once make one engine
+                return side.rag(), True
         except ValueError as error:  # a key or the graph DB not configured
             raise HTTPException(503, str(error)) from error
+
+    def tried(rag: GraphRag, side: bool, run: Callable[[], T]) -> tuple[T, bool]:
+        """`run`, and whether it searched by words alone."""
         try:
-            try:
-                return run(rag, question, documents), rag.text_only
-            except GraphNotEmbedded:
-                # A workspace beside is not embedded again here -- opening it does that -- so
-                # what another search model embedded is searched by its words.
-                if side is None or rag.text_only:
-                    raise
-                rag.text_only = True
-                return run(rag, question, documents), True
+            return run(), rag.text_only
+        except GraphNotEmbedded:
+            # A workspace beside is not embedded again here -- opening it does that -- so
+            # what another search model embedded is searched by its words.
+            if not side or rag.text_only:
+                raise
+            rag.text_only = True
+            return run(), True
+
+    def guarded(run: Callable[[], tuple[T, bool]]) -> tuple[T, bool]:
+        """What a question gave, a failure that is not the graph DB's said as a 502."""
+        try:
+            return run()
         except (GraphNotEmbedded, Neo4jError, ServiceUnavailable, SessionExpired):
             raise  # the graph DB's, not the model's: the handlers say them (409, 500)
         except Exception as error:  # noqa: BLE001 -- said to the caller, not a crash
@@ -973,16 +1009,27 @@ def create_app(
         """What a question finds -- the passages and the documents linked to theirs, hop by
         hop -- with no answer written."""
         found, text_only = asked(
-            request, lambda rag, question, n: rag.find(question, documents=n))
-        return {"sources": [asdict(source) for source in found], "text_only": text_only}
+            request, lambda rag, question, n: rag.find(question, documents=n),
+            lambda rag, question, n: rag.find(question, documents=n),
+            lambda each, _, n: find_across([(ws, got) for ws, _, got in each], n,
+                                           rrf_k=demo.settings.rrf_k))
+        return {"sources": named(request, found), "text_only": text_only}
 
     @v1.post("/ask", response_model=api.Answer)
     def ask(request: api.Question) -> dict[str, Any]:
         """A question answered from the graph space, with the passages it was answered from."""
         answer, text_only = asked(
-            request, lambda rag, question, n: rag.ask(question, documents=n))
-        return {"answer": answer.text, "sources": [asdict(source) for source in answer.sources],
+            request, lambda rag, question, n: rag.ask(question, documents=n),
+            lambda rag, question, n: rag.read(question, documents=n),
+            lambda each, question, n: ask_across(each, question, n, rrf_k=demo.settings.rrf_k))
+        return {"answer": answer.text, "sources": named(request, answer.sources),
                 "text_only": text_only}
+
+    def named(request: api.Question, sources: list[GraphSource]) -> list[dict[str, Any]]:
+        """The sources, each naming its workspace: one searched alone is the one asked."""
+        alone = (request.workspaces[0] if request.workspaces else request.workspace) or (
+            demo.workspaces.active if demo.workspaces is not None else None)
+        return [{**asdict(source), "workspace": source.workspace or alone} for source in sources]
 
     # Jobs -----------------------------------------------------------------------------------
 

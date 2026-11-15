@@ -1,5 +1,6 @@
-"""Workspaces: graphs kept apart, one open at a time, switched to without waiting for the one
-left to stop. No Neo4j: a workspace's graph is a fake space. Invented names only."""
+"""Workspaces: graphs kept apart in the home's one Neo4j, each its own scope; switching holds
+the same connection to another scope, nothing started or stopped. No Neo4j: a workspace's graph
+is a fake space. Invented names only."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,22 +10,28 @@ import pytest
 from fastapi.testclient import TestClient
 
 from graphme.adapters.storage import local_neo4j
+from graphme.adapters.storage.workspace_scope import DEFAULT_SCOPE, WorkspaceScope
 from graphme.server import create_app, state
-from graphme.server.jobs import BUILDING, Busy, CorpusBuild
+from graphme.server.jobs import Busy, CorpusBuild
 from graphme.server.state import Demo
 from graphme.server.workspaces import FIRST, Workspaces
-from tests.public.server.conftest import SETTINGS, FakeSpace, until
+from tests.public.server.conftest import SETTINGS, FakeSpace
 
 BASE = "http://127.0.0.1:8765"
 
 
 class _Graph:
-    """A workspace's graph as the server holds it, opened on a fake space."""
+    """A workspace's graph as the server holds it, opened on a fake space; `held_to` is
+    another workspace over its connection (`base`), handed over when `took`."""
 
-    def __init__(self, settings: Any) -> None:
+    def __init__(self, settings: Any, *, base: _Graph | None = None, took: bool = False) -> None:
         self.settings = settings
-        self.opened_space = self._space = FakeSpace()
+        self.base, self.took = base, took
+        self.opened_space = self._space = base._space if base is not None else FakeSpace()
         self.closed = False
+
+    def held_to(self, settings: Any, *, take: bool = False) -> _Graph:
+        return type(self)(settings, base=self, took=take)
 
     def graph_space(self) -> FakeSpace:
         return self._space
@@ -97,7 +104,7 @@ def test_the_open_workspace_cannot_be_deleted_and_another_goes_with_its_graph(
         spaces.delete(made["id"])
 
 
-def test_switching_opens_the_other_graph_and_lets_the_old_one_go_behind(
+def test_switching_holds_the_same_connection_to_the_other_workspace(
     workspace_demo: Demo, home: Path
 ) -> None:
     old = workspace_demo.graph
@@ -106,11 +113,13 @@ def test_switching_opens_the_other_graph_and_lets_the_old_one_go_behind(
 
     workspace_demo.switch_workspace(made["id"])
 
+    graph = workspace_demo.graph
+    assert graph.base is old and graph.took  # type: ignore[attr-defined]
+    assert workspace_demo.settings.workspace == made["id"] == graph.settings.workspace
+    # The folder keeps only its crops and mail; the graph is the home's one Neo4j.
     assert workspace_demo.settings.local_graph == home / "workspaces" / made["id"]
-    assert workspace_demo.graph is not old
-    assert workspace_demo.graph.settings.local_graph == home / "workspaces" / made["id"]
     assert "old" not in workspace_demo.jobs  # the last build was the other graph's
-    assert until(lambda: old.closed and stopped == [home])  # type: ignore[attr-defined]
+    assert not old.closed and stopped == []  # type: ignore[attr-defined]
     assert Workspaces(home).active == made["id"]
 
 
@@ -122,6 +131,31 @@ def test_a_start_opens_the_workspace_open_when_the_app_ended(home: Path) -> None
                  root=home / "server")
 
     assert again.settings.local_graph == home / "workspaces" / made["id"]
+    assert again.settings.workspace == made["id"]
+
+
+def test_a_workspace_id_names_its_labels(home: Path) -> None:
+    made = Workspaces(home).create("Invented project")
+
+    assert WorkspaceScope(made["id"]).node_label == f"W_{made['id']}"
+    assert WorkspaceScope(FIRST) == DEFAULT_SCOPE
+
+
+def test_deleting_a_workspace_takes_its_scope_out_of_the_graph_then_its_folder(
+    workspace_demo: Demo, home: Path
+) -> None:
+    made = workspace_demo.workspaces.create("Invented project")  # type: ignore[union-attr]
+    folder = home / "workspaces" / made["id"] / "assets"
+    folder.mkdir(parents=True)
+    space = workspace_demo.graph.graph_space()
+
+    with pytest.raises(Busy):
+        workspace_demo.delete_workspace(FIRST)  # the one open
+    assert space.dropped == []  # type: ignore[attr-defined]
+    workspace_demo.delete_workspace(made["id"])
+
+    assert space.dropped == [WorkspaceScope(made["id"])]  # type: ignore[attr-defined]
+    assert not folder.parent.exists() and stopped == []
 
 
 def test_no_switch_while_a_build_runs(workspace_demo: Demo) -> None:
@@ -175,6 +209,7 @@ def test_workspaces_are_listed_made_renamed_opened_and_deleted_over_http(
     assert elsewhere.status_code == 403
     assert deleted["items"] == [{"id": made["id"], "name": "Invented audits", "mcp": False,
                                 "kind": "documents", "account": None}]
+    assert workspace_demo.graph.graph_space().dropped == [DEFAULT_SCOPE]  # type: ignore[attr-defined]
     assert client.post("/v1/workspaces", json={"name": ""}).status_code == 400
 
 
@@ -185,32 +220,12 @@ def test_a_server_on_someone_s_own_neo4j_has_no_workspaces(demo: Demo) -> None:
     assert client.post("/v1/workspaces", json={"name": "Invented"}).status_code == 409
 
 
-def test_going_back_to_a_graph_still_stopping_waits_for_it_to_stop(
-    workspace_demo: Demo, home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # The Neo4j left keeps its graph's folder locked until it has stopped: one started over the
-    # same folder before then did not start.
-    import threading
+def test_deleting_the_home_s_own_workspace_keeps_the_one_graph_db(home: Path) -> None:
+    spaces = Workspaces(home)
+    made = spaces.create("Invented project")
+    spaces.activate(made["id"])
+    (home / "neo4j-data").mkdir(parents=True)
 
-    order: list[str] = []
-    stopping = threading.Event()
+    spaces.delete(FIRST)
 
-    def slow_stop(graph: Path) -> None:
-        stopping.wait(2)
-        order.append(f"stopped {graph.name}")
-
-    class _Ordered(_Graph):
-        def graph_space(self) -> FakeSpace:
-            order.append(f"opened {(self.settings.local_graph or home).name}")
-            return self._space
-
-    monkeypatch.setattr(local_neo4j, "stop_graph", slow_stop)
-    monkeypatch.setattr(state, "GraphMe", _Ordered)
-    made = workspace_demo.workspaces.create("Invented project")  # type: ignore[union-attr]
-    workspace_demo.switch_workspace(made["id"])
-    assert until(lambda: workspace_demo.build.state not in BUILDING)  # its passages checked
-    threading.Timer(0.2, stopping.set).start()
-
-    workspace_demo.switch_workspace(FIRST)
-
-    assert "stopped home" in order and order.index("stopped home") < order.index("opened home")
+    assert (home / "neo4j-data").is_dir()  # every workspace's graph is in it

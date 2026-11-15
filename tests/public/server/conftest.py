@@ -49,6 +49,13 @@ class FakeSpace:
         self.similar: list[dict[str, Any]] = []
         self.crops: set[str] = set()
         """The crop assets the space's nodes name."""
+        self.driver: Any = "the one Neo4j"
+        """What a workspace's graph is copied into (`copy_graph`)."""
+        self.dropped: list[Any] = []
+        """The workspace scopes taken out of the graph DB (`drop_workspace`)."""
+
+    def drop_workspace(self, scope: Any) -> None:
+        self.dropped.append(scope)
 
     def put_document(self, extracted: Any) -> None:
         self.put.append(extracted.document.id)

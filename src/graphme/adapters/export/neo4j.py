@@ -1,7 +1,8 @@
 """The graph in the shape Neo4j stores: labels, relationship types, scalar properties.
 
-Every node carries the shared label `DocNode`, which holds the uniqueness constraint on
-`id`, and its type as a second label (`text_chunk` -> `TextChunk`). An edge type is
+Every node carries the shared label `DocNode` and its type as a second label (`text_chunk`
+-> `TextChunk`); in Neo4j its workspace's label (`W_<id>`, `WorkspaceScope`) beside them
+holds the uniqueness constraint on `id`. An edge type is
 already a valid relationship type. Neo4j keeps only scalars and arrays of scalars, so
 nested values are JSON strings and nulls are left out -- setting a property to null
 deletes it. Node metadata becomes `meta_<key>`, so it can never shadow a core field.
@@ -22,29 +23,34 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from graphme.adapters.storage.workspace_scope import DEFAULT_SCOPE, WorkspaceScope
 from graphme.application.final_edges import final_edges
 from graphme.domain.models import ExtractedDocument, GraphEdge, GraphNode, SourceLocator
 
 NODE_LABEL = "DocNode"
 CHUNK_LABEL = "Chunk"
 """A passage a question is searched by: beside the graph, never a `DocNode` of it."""
-SCHEMA = (
-    f"CREATE CONSTRAINT doc_node_id IF NOT EXISTS FOR (n:{NODE_LABEL}) REQUIRE n.id IS UNIQUE",
-    # A document is replaced, deleted and cut by its id; without these every one of those
-    # reads every node in the space.
-    f"CREATE INDEX doc_node_document IF NOT EXISTS FOR (n:{NODE_LABEL}) ON (n.document_id)",
-    f"CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:{CHUNK_LABEL}) REQUIRE c.id IS UNIQUE",
-    f"CREATE INDEX chunk_document IF NOT EXISTS FOR (c:{CHUNK_LABEL}) ON (c.document_id)",
-    # A document reached by its id -- a link followed, a likeness written -- found by it, not
-    # by reading every document.
-    "CREATE INDEX document_id IF NOT EXISTS FOR (d:Document) ON (d.id)",
-    # A file already in the space is known by its content before it is read again.
-    "CREATE INDEX document_content IF NOT EXISTS FOR (d:Document) ON (d.content_hash)",
-    # What was read from a file before, found when the file is read again.
-    "CREATE INDEX document_source IF NOT EXISTS FOR (d:Document) ON (d.source_path)",
-)
-"""The constraints and indexes every graph space has, live or exported; the vector and fulltext
-indexes are added beside them at the size and analyzer they were made with."""
+
+
+def schema(scope: WorkspaceScope = DEFAULT_SCOPE) -> tuple[str, ...]:
+    """The constraints and indexes a workspace's graph has, live or exported, on its own labels
+    (`W_<id>` for its nodes, `C_<id>` for its passages) and under names of its own: ids come
+    from a file's content, so the same file in two workspaces has the same ids. The vector and
+    fulltext indexes are added beside them at the size and analyzer they were made with."""
+    nodes, passages, own = scope.node_label, scope.chunk_label, scope.workspace_id
+    return (
+        # The node's id is unique in its workspace; a document is reached by it through this.
+        f"CREATE CONSTRAINT doc_node_id_{own} IF NOT EXISTS FOR (n:{nodes}) REQUIRE n.id IS UNIQUE",
+        # A document is replaced, deleted and cut by its id; without these every one of those
+        # reads every node in the space.
+        f"CREATE INDEX doc_node_document_{own} IF NOT EXISTS FOR (n:{nodes}) ON (n.document_id)",
+        f"CREATE CONSTRAINT chunk_id_{own} IF NOT EXISTS FOR (c:{passages}) REQUIRE c.id IS UNIQUE",
+        f"CREATE INDEX chunk_document_{own} IF NOT EXISTS FOR (c:{passages}) ON (c.document_id)",
+        # A file already in the space is known by its content before it is read again.
+        f"CREATE INDEX document_content_{own} IF NOT EXISTS FOR (d:{nodes}) ON (d.content_hash)",
+        # What was read from a file before, found when the file is read again.
+        f"CREATE INDEX document_source_{own} IF NOT EXISTS FOR (d:{nodes}) ON (d.source_path)",
+    )
 
 
 def node_label(node_type: str) -> str:
@@ -160,14 +166,16 @@ parses every literal, and a space's vectors ran a 1 GB server out of memory. The
 through `neo4j_import` (Neo4j's bulk import) instead."""
 
 
-def records_cypher(records: dict[str, list[dict[str, Any]]], heading: str) -> str:
-    """A script for records in the exporter's shape: one document's, or the graph space's.
+def records_cypher(records: dict[str, list[dict[str, Any]]], heading: str, *,
+                   scope: WorkspaceScope = DEFAULT_SCOPE) -> str:
+    """A script for records in the exporter's shape: one document's, or the graph space's,
+    written into `scope`'s workspace.
 
     Rows of one kind go in one `UNWIND` statement, and every write MERGEs, so a script
     loaded twice leaves what loading it once did."""
     lines = [
         heading,
-        f"{SCHEMA[0]};",
+        f"{schema(scope)[0]};",
     ]
     by_labels: dict[str, list[str]] = {}
     for node in records["nodes"]:
@@ -178,7 +186,7 @@ def records_cypher(records: dict[str, list[dict[str, Any]]], heading: str) -> st
     for extra, rows in by_labels.items():
         lines += _unwind(
             rows,
-            f"MERGE (n:{NODE_LABEL} {{id: row.id}})"
+            scope.cypher(f"MERGE (n:{NODE_LABEL} {{id: row.id}})")
             + (f" SET n{extra}" if extra else "")
             + " SET n += row.properties;",
         )
@@ -192,8 +200,9 @@ def records_cypher(records: dict[str, list[dict[str, Any]]], heading: str) -> st
     for kind, rows in by_type.items():
         lines += _unwind(
             rows,
-            f"MATCH (a:{NODE_LABEL} {{id: row.start}}), (b:{NODE_LABEL} {{id: row.end}}) "
-            f"MERGE (a)-[r:{kind} {{id: row.id}}]->(b) SET r += row.properties;",
+            scope.cypher(f"MATCH (a:{NODE_LABEL} {{id: row.start}}), "
+                         f"(b:{NODE_LABEL} {{id: row.end}}) ")
+            + f"MERGE (a)-[r:{kind} {{id: row.id}}]->(b) SET r += row.properties;",
         )
     return "\n".join(lines) + "\n"
 

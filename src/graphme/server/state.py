@@ -49,10 +49,11 @@ from graphme.adapters.sources.google_sign_in import GoogleSignIn
 from graphme.adapters.sources.imap_mail import MailRefused
 from graphme.adapters.sources.microsoft_sign_in import MicrosoftSignIn
 from graphme.adapters.sources.sign_in import Client, vault
-from graphme.adapters.storage import local_neo4j
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import GraphRag
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
+from graphme.adapters.storage.workspace_move import copy_graph
+from graphme.adapters.storage.workspace_scope import WorkspaceScope
 from graphme.api import GraphMe
 from graphme.application.corpus_build import (
     BuildReport,
@@ -78,7 +79,12 @@ from graphme.domain.enums import FLOW_FORMATS, DocumentFormat, EdgeType
 from graphme.domain.ids import sha256_bytes
 from graphme.domain.models import ExtractedDocument, HierarchyDecision, HierarchyDerivation
 from graphme.ports.sources import SourceStore
-from graphme.runtime import create_graph_builder, create_neo4j_admin, create_vision
+from graphme.runtime import (
+    create_graph_builder,
+    create_neo4j_admin,
+    create_vision,
+    workspace_folder_graph,
+)
 from graphme.server.jobs import (
     BUILDING,
     CANCELLED,
@@ -133,9 +139,6 @@ PREVIEW_AROUND = 5
 reader turns the pages of what they opened, and a slide deck's page drawn alone starts a
 browser and reads the whole file each time."""
 EMBED_WAIT_SECONDS = 30.0
-SIDE_IDLE_SECONDS = 300.0
-"""A workspace read beside the open one (`Demo.reader`) is let go once nobody has asked it
-for this long: its Neo4j holds memory the app's own graph may want."""
 """How long a workspace switch waits for the embedding the open workspace started."""
 PREVIEW_HOLD_SECONDS = 300.0
 """How long a cloud drive's file downloaded to draw a page is kept after it was last looked at:
@@ -312,23 +315,20 @@ def _settle(again: Callable[[], None]) -> None:
             traceback.print_exc(file=sys.stderr)
 
 
-def _let_go(graph: GraphMe, root: Path) -> None:
-    """A workspace's graph left: its connection closed, then the Neo4j over it stopped."""
-    try:
-        graph.close()
-    finally:
-        local_neo4j.stop_graph(root)
+def _in_workspace(settings: Settings, spaces: Workspaces, workspace: str) -> Settings:
+    """`settings` for `workspace`: its scope in the one Neo4j, its folder for crops and mail."""
+    return settings.model_copy(
+        update={"workspace": workspace, "local_graph": spaces.graph(workspace)})
 
 
 class Demo:
     def __init__(
         self, settings: Settings, renderer: PageRenderer, root: Path | None = None
     ) -> None:
-        # The app's own Neo4j keeps a graph per workspace; the one open when the app ended opens.
+        # The app's own Neo4j keeps every workspace's graph; the one open when the app ended opens.
         self.workspaces = Workspaces(settings.local_neo4j) if settings.local_neo4j else None
         if self.workspaces is not None:
-            settings = settings.model_copy(
-                update={"local_graph": self.workspaces.graph(self.workspaces.active)})
+            settings = _in_workspace(settings, self.workspaces, self.workspaces.active)
         # The same settings build-graph reads: model, endpoint, readings. A demo that picked its
         # own defaults showed an outline the pipeline would not have produced.
         self.settings = settings
@@ -411,12 +411,15 @@ class Demo:
         self._opener: threading.Thread | None = None
         self._starting_opener = threading.Lock()
         self._open_failed: Exception | None = None
-        self._letting_go: tuple[Path, threading.Thread] | None = None
-        """The graph left last, and what is stopping its Neo4j."""
-        self._side: tuple[str, GraphMe] | None = None
-        """A workspace read beside the open one (`reader`), and its graph: one at a time."""
-        self._side_asked = 0.0
-        self.siding = threading.RLock()
+        self._sides: dict[str, tuple[object, GraphMe]] = {}
+        """Each workspace read beside the open one (`reader`): the open graph's space it was
+        held from, and its graph over that connection."""
+        self.siding = threading.Lock()
+        self._moves_tried = False
+        self._moving = False  # the graph is open but not all of it moved in yet
+        self.unmoved: dict[str, str] = {}
+        """Workspaces whose graph could not be moved from their folder into the one Neo4j at
+        this start, and why: still in their folder, tried again at the next start."""
 
     def reconfigure(self, settings: Settings) -> None:
         """New keys or model, taken up from the next reading and the next question. The graph
@@ -425,12 +428,14 @@ class Demo:
         it the next workspace opened looked for a Neo4j at the default address."""
         searched_with = self.settings.embedding_provider
         settings = settings.model_copy(update={
-            "local_graph": self.settings.local_graph, "local_neo4j": self.settings.local_neo4j,
-            "data_dir": self.settings.data_dir})
+            "local_graph": self.settings.local_graph, "workspace": self.settings.workspace,
+            "local_neo4j": self.settings.local_neo4j, "data_dir": self.settings.data_dir})
         self.settings = settings
         self.graph.settings = settings
         with self.opening_space:
             self.graph.forget_rag()
+        with self.siding:
+            self._sides.clear()  # made again with the new keys when next asked
         if settings.embedding_provider != searched_with:
             self.search_models.chosen_changed()
 
@@ -546,14 +551,13 @@ class Demo:
             time.sleep(0.1)
 
     def switch_workspace(self, workspace: str, *, take_mail: bool = True) -> None:
-        """`workspace`'s graph opened and the app moved onto it once it answers -- a few
-        seconds; the one left is closed and stopped behind, not waited for. A mail workspace's
-        held mail is taken behind unless not `take_mail`."""
+        """The app moved onto `workspace`: the open graph's connection held to its scope, no
+        Neo4j started or stopped. A mail workspace's held mail is taken behind unless not
+        `take_mail`."""
         spaces = self.workspace_registry()
         spaces.item(workspace)
         if workspace == spaces.active:
             return
-        self.stop_side(workspace)  # its Neo4j holds the folder
         # Opening a workspace embeds what it holds with the chosen search model, a second or
         # two: waited out, not refused as though a build ran. An embedding is never stopped
         # half way, so a long one still refuses once EMBED_WAIT_SECONDS have gone.
@@ -563,21 +567,13 @@ class Demo:
             busy = [s for s in self.sessions.values() if s.state not in (*STARTABLE, *FINISHED)]
             if self.build.state in BUILDING or self.export.state in EXPORTING or busy:
                 raise Busy("a build, a reading or an export is running -- switch once it ends")
-            settings = self.settings.model_copy(update={"local_graph": spaces.graph(workspace)})
-            leaving = self._letting_go
-            if leaving is not None and leaving[0] == (settings.local_graph or spaces.home):
-                # Back to the graph just left: its Neo4j holds the folder until it has stopped.
-                leaving[1].join()
-            fresh = GraphMe(settings)
-            fresh.graph_space()  # the new one answers before the old one is let go
+            settings = _in_workspace(self.settings, spaces, workspace)
             with self.opening_space:
-                old, self.graph, self.settings = self.graph, fresh, settings
+                self._opened_space()  # a graph not moved yet is moved before it is opened
+                self.graph = self.graph.held_to(settings, take=True)
+                self.settings = settings
                 self._forget_workspace()
             spaces.activate(workspace)
-        left = old.settings.local_graph or spaces.home
-        going = threading.Thread(target=_let_go, args=(old, left), daemon=True)
-        self._letting_go = (left, going)
-        going.start()
         self.search_models.embed_behind()  # a search model chosen while it was closed
         self.sweep_behind()
         if take_mail and spaces.item(workspace)["account"] is not None:
@@ -585,63 +581,31 @@ class Demo:
 
     def reader(self, workspace: str | None) -> GraphMe:
         """The graph to read `workspace` from: the open one's for None or the open one, else
-        one beside it -- its own Neo4j, opened here and kept while asked, the app's own left as
-        it is. Another workspace asked for lets the one beside go first. LookupError: none."""
+        its scope over the open graph's connection -- kept while that is the open graph's,
+        nothing started. LookupError: none."""
         spaces = self.workspaces
         if workspace is None or spaces is None or workspace == spaces.active:
             return self.graph
+        spaces.item(workspace)
+        with self.opening_space:  # the graph opened, or the switch under way finished
+            graph = self.graph
+            base = self._opened_space()
         with self.siding:
-            if self._side is not None and self._side[0] == workspace:
-                self._side_asked = time.monotonic()
-                return self._side[1]
-            spaces.item(workspace)
-            self.stop_side()
-            root = spaces.graph(workspace) or spaces.home
-            leaving = self._letting_go
-            if leaving is not None and leaving[0] == root:
-                leaving[1].join()  # just left: its Neo4j holds the folder until it has stopped
-            graph = GraphMe(self.settings.model_copy(
-                update={"local_graph": spaces.graph(workspace)}))
-            try:
-                graph.graph_space()
-            except BaseException:
-                _let_go(graph, root)
-                raise
-            self._side, self._side_asked = (workspace, graph), time.monotonic()
-        threading.Thread(target=self._idle_side, args=(graph,), daemon=True).start()
-        return graph
-
-    def stop_side(self, workspace: str | None = None) -> None:
-        """The workspace read beside the open one let go -- only if it is `workspace`, when
-        one is named."""
-        with self.siding:
-            if self._side is None or workspace not in (None, self._side[0]):
-                return
-            graph, self._side = self._side[1], None
-        _let_go(graph, graph.settings.local_graph or self.workspace_registry().home)
-
-    def _idle_side(self, graph: GraphMe) -> None:
-        # ponytail: idle is counted from the last ask, not the last answer; an ask past
-        # SIDE_IDLE_SECONDS would lose its graph -- count running asks if one ever does.
-        while True:
-            time.sleep(min(SIDE_IDLE_SECONDS, 5.0))
-            with self.siding:
-                if self._side is None or self._side[1] is not graph:
-                    return
-                if time.monotonic() - self._side_asked >= SIDE_IDLE_SECONDS:
-                    self.stop_side()
-                    return
+            side = self._sides.get(workspace)
+            if side is None or side[0] is not base:
+                side = base, graph.held_to(_in_workspace(self.settings, spaces, workspace))
+                self._sides[workspace] = side
+            return side[1]
 
     def delete_workspace(self, workspace: str) -> None:
-        """`workspace` and its graph deleted; never the one open."""
+        """`workspace` and its graph deleted -- its nodes, passages, constraints and indexes
+        taken out of the one Neo4j, then its folder; never the one open."""
         spaces = self.workspace_registry()
+        spaces.refuse_open(workspace)
         mail = spaces.item(workspace)["account"]
-        self.stop_side(workspace)
-        if self._letting_go is not None:
-            self._letting_go[1].join()  # its Neo4j may be the one stopping
-        graph = spaces.graph(workspace)
-        if workspace != spaces.active:
-            local_neo4j.stop_graph(graph or spaces.home)
+        with self.siding:
+            self._sides.pop(workspace, None)
+        self.space().drop_workspace(WorkspaceScope(workspace))
         spaces.delete(workspace)
         if mail is not None:  # a mail workspace takes its account's password and store with it
             with contextlib.suppress(LookupError):
@@ -729,8 +693,8 @@ class Demo:
         # The first use may start the local Neo4j; the page asks for the list and the map at once.
         if wait < 0:
             with self.opening_space:
-                return self.graph.graph_space()
-        if (opened := self.graph.opened_space) is not None:
+                return self._opened_space()
+        if (opened := self.graph.opened_space) is not None and not self._moving:
             return opened
         # Fetching and starting Neo4j takes minutes, so a page's request never does it: it is done
         # behind, and the request told to wait (503, Retry-After) while it goes on.
@@ -752,10 +716,52 @@ class Demo:
             raise GraphStarting(STARTING)
         return space
 
+    def _opened_space(self) -> Neo4jGraphSpace:
+        """The open graph's space, opened if need be; held under `opening_space`. The first
+        time, with no build running, the workspaces whose graph is still in their own folder
+        are moved into the one Neo4j first (`_move_workspaces`): a build, a switch or a page
+        asking meanwhile waits, or is told the graph is starting."""
+        space = self.graph.graph_space()
+        if not self._moves_tried and self.build.state not in BUILDING:
+            self._moves_tried, self._moving = True, True
+            try:
+                self._move_workspaces(space)
+            finally:
+                self._moving = False
+        return space
+
+    def _move_workspaces(self, space: Neo4jGraphSpace) -> None:
+        """Each workspace whose graph is in its own folder (`neo4j-data/`, from before every
+        workspace was in the one Neo4j) and not moved yet: that folder's Neo4j started once,
+        its graph copied in under the workspace's scope and counted, the workspace marked, the
+        Neo4j stopped. The folder is left as it is, for the owner to remove once checked. A
+        move that fails leaves the workspace unmarked -- tried again at the next start -- and
+        is said in `unmoved` (GET /v1/workspaces)."""
+        spaces = self.workspaces
+        if spaces is None:
+            return
+        moved = spaces.moved()
+        for item in spaces.listed()["items"]:
+            workspace, folder = item["id"], spaces.graph(item["id"])
+            if folder is None or workspace in moved or not (folder / "neo4j-data").is_dir():
+                continue
+            try:
+                with workspace_folder_graph(self.settings, folder) as source:
+                    counts = copy_graph(source, space.driver, WorkspaceScope(workspace))
+            except Exception as error:  # noqa: BLE001 -- its folder still holds it all
+                _log.exception("workspace %s was not moved into the one graph DB; its folder "
+                               "is kept and the move is tried again at the next start",
+                               workspace)
+                self.unmoved[workspace] = str(error) or type(error).__name__
+                continue
+            spaces.mark_moved(workspace)
+            self.unmoved.pop(workspace, None)
+            _log.info("moved workspace %s into the one graph DB: %s", workspace, counts)
+
     def _open_behind(self) -> None:
         try:
             with self.opening_space:
-                self.graph.graph_space()
+                self._opened_space()
             self.sweep_behind()  # what an earlier start left
         except Exception as error:  # noqa: BLE001 -- said to the next request
             self._open_failed = error

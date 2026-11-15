@@ -165,6 +165,12 @@ def build_server(client: httpx.Client) -> FastMCP:
                             "in Graph-Me-Maybe, Manage > Keys and model")
         return chosen["id"], chosen["id"] == listed["active"]
 
+    def asked_of(workspace: str | None, workspaces: list[str] | None) -> dict[str, Any]:
+        """Where a question goes: several workspaces by id, each one MCP may read, or one."""
+        if workspaces:
+            return {"workspaces": [allowed(each)[0] for each in workspaces]}
+        return {"workspace": allowed(workspace)[0]}
+
     def graph(document_id: str, workspace: str | None) -> _Outline:
         wid, _ = allowed(workspace)
         return _Outline(get(f"/v1/documents/{document_id}/graph", workspace=wid))
@@ -205,18 +211,21 @@ def build_server(client: httpx.Client) -> FastMCP:
              "open": i["id"] == listed.get("active")} for i in listed.get("items", [])]}
 
     @server.tool()
-    def search(question: str, top_k: int = 5, workspace: str | None = None) -> dict[str, Any]:
+    def search(question: str, top_k: int = 5, workspace: str | None = None,
+               workspaces: list[str] | None = None) -> dict[str, Any]:
         """Search the user's own documents: the passages that answer a question, best first,
         top_k documents' worth, each with the documents linked to its own (cites, cited_by,
         similar). Use it for any question their files could answer. No answer is written: read
-        the passages, then get_outline / read_node for more."""
-        wid, _ = allowed(workspace)
-        found = post("/v1/search", {"question": question, "documents": top_k, "workspace": wid})
+        the passages, then get_outline / read_node for more. `workspaces` searches several at
+        once, each passage naming its workspace."""
+        found = post("/v1/search", {"question": question, "documents": top_k,
+                                    **asked_of(workspace, workspaces)})
         return {"text_only": found.get("text_only", False), "sources": [
             {"document_id": s["document_id"], "file": shown_name(s["file"]),
              "score": round(s["score"], 3),
              "passage_id": s["id"], "text": _cut(s["context"], PASSAGE_CHARS),
              **({"origin": s["origin"]} if s.get("origin") else {}),
+             **({"workspace": s.get("workspace")} if workspaces else {}),
              "linked": [{"document_id": d["document_id"], "file": shown_name(d["file"]),
                          "hop": d["hop"],
                          "direction": d["direction"], "via": d["via"]}
@@ -224,14 +233,17 @@ def build_server(client: httpx.Client) -> FastMCP:
             for s in found["sources"]]}
 
     @server.tool()
-    def ask(question: str, top_k: int = 5, workspace: str | None = None) -> dict[str, Any]:
+    def ask(question: str, top_k: int = 5, workspace: str | None = None,
+            workspaces: list[str] | None = None) -> dict[str, Any]:
         """An answer written by the model set in Graph-Me-Maybe (it costs that model's calls),
-        with the passages it was written from."""
-        wid, _ = allowed(workspace)
-        answer = post("/v1/ask", {"question": question, "documents": top_k, "workspace": wid})
+        with the passages it was written from; `workspaces` asks several at once."""
+        answer = post("/v1/ask", {"question": question, "documents": top_k,
+                                  **asked_of(workspace, workspaces)})
         return {"answer": answer["answer"], "text_only": answer.get("text_only", False),
                 "sources": [{"document_id": s["document_id"], "file": shown_name(s["file"]),
-                             "passage_id": s["id"]} for s in answer["sources"]]}
+                             "passage_id": s["id"],
+                             **({"workspace": s.get("workspace")} if workspaces else {})}
+                            for s in answer["sources"]]}
 
     @server.tool()
     def list_documents(filter: str | None = None, limit: int = LIST_LIMIT,  # noqa: A002

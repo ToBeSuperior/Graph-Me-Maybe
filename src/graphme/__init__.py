@@ -15,7 +15,7 @@ from graphme.config import Settings, load_settings
 from graphme.domain.models import ExtractedDocument
 from graphme.passages import Passage, passages
 
-__version__ = "0.1.71"
+__version__ = "0.1.72"
 
 __all__ = [
     "BuildReport", "ExtractedDocument", "GraphAnswer", "GraphMe", "GraphNotEmbedded",

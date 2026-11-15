@@ -237,6 +237,9 @@ class Question(_Model):
     """The old name of `documents`, read as it."""
     workspace: str | None = None
     """The workspace asked, by id; the open one when not given."""
+    workspaces: list[str] | None = None
+    """Several workspaces asked at once, by id: each searched in its own graph, the results
+    fused by rank. None or empty: `workspace` alone."""
 
 
 class LinkedPassage(_Model):
@@ -268,6 +271,8 @@ class Source(_Model):
     modified: float | None = None
     origin: str | None = None
     """The mail it came from, or the mail that carried its document."""
+    workspace: str | None = None
+    """The workspace it was found in."""
 
 
 class Found(_Model):
@@ -461,6 +466,9 @@ class Workspaces(_Model):
     mcp_changes: bool = False
     """Whether MCP clients may change things -- delete, reset, settings -- not only read."""
     items: list[Workspace] = Field(default_factory=list)
+    unmoved: dict[str, str] = Field(default_factory=dict)
+    """Workspaces whose graph from before could not be moved from their folder into the one
+    graph DB at this start, and why: still in their folder, tried again at the next start."""
 
 
 class WorkspaceName(_Model):

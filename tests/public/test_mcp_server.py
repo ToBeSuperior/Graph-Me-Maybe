@@ -161,6 +161,21 @@ def test_a_search_is_the_app_s_search_its_passages_cut(v1: FakeV1) -> None:
                                  "direction": "cites", "via": "doc-1"}]
 
 
+def test_a_search_over_several_workspaces_names_each_by_id_and_refuses_one_not_on(
+    v1: FakeV1
+) -> None:
+    refused, text, _ = call(v1, "search", question="invented", top_k=2,
+                            workspaces=["Invented main", "Side notes"])
+    closed, said_closed, _ = call(v1, "ask", question="invented",
+                                  workspaces=["main", "Closed notes"])
+
+    assert not refused, text
+    assert ("POST", "http://127.0.0.1:1/v1/search",
+            {"question": "invented", "documents": 2, "workspaces": ["main", "w-side"]}) in v1.sent
+    assert closed and "Closed notes" in said_closed
+    assert not any("/v1/ask" in url for _, url, _ in v1.sent)
+
+
 def test_with_mcp_off_every_tool_is_refused(v1: FakeV1) -> None:
     v1.mcp_enabled = False
 

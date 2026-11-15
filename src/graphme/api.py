@@ -19,6 +19,7 @@ from graphme.adapters.export.neo4j_import import write_import_bundle
 from graphme.adapters.storage.graph_rag import GraphAnswer, GraphRag, GraphSource
 from graphme.adapters.storage.local_neo4j import ended
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
+from graphme.adapters.storage.workspace_scope import WorkspaceScope
 from graphme.application.corpus_build import BuildReport, StepListener, forget_documents
 from graphme.application.ingest import documents_at
 from graphme.config import Settings, load_settings
@@ -72,6 +73,9 @@ class GraphMe:
     def __init__(self, settings: Settings | None = None, **in_code: Any) -> None:
         self.settings = _settings(settings, in_code)
         self._space: Neo4jGraphSpace | None = None
+        self._borrowed = False
+        """The space's connection is another `GraphMe`'s (`held_to`): never closed here, and
+        whether its Neo4j ended is that one's to see."""
         self._rag: GraphRag | None = None
         self._client: httpx.Client | None = None
 
@@ -88,7 +92,7 @@ class GraphMe:
 
     def close(self) -> None:
         try:
-            if self._space is not None:
+            if self._space is not None and not self._borrowed:
                 self._space.close()
         finally:
             try:
@@ -172,8 +176,19 @@ class GraphMe:
     def graph_space(self) -> Neo4jGraphSpace:
         self._let_go_if_lost()
         if self._space is None:
-            self._space = create_graph_space(self.settings)
+            self._space, self._borrowed = create_graph_space(self.settings), False
         return self._space
+
+    def held_to(self, settings: Settings, *, take: bool = False) -> GraphMe:
+        """Another workspace (`settings.workspace`) over this graph's connection, opened first
+        if need be: no Neo4j started or stopped. It stays this one's unless `take`, which hands
+        it over -- this one then has no space, and opens its own if used again."""
+        other = GraphMe(settings)
+        other._space = self.graph_space().within(WorkspaceScope(settings.workspace))
+        other._borrowed = self._borrowed or not take
+        if take:
+            self._space, self._rag = None, None
+        return other
 
     @property
     def opened_space(self) -> Neo4jGraphSpace | None:
@@ -186,7 +201,7 @@ class GraphMe:
         answers over it) let go, to be opened again, rather than asked on a port nothing
         answers on until the app restarts. `ended` says so once: it is acted on at once."""
         local = self.settings.local_neo4j
-        if self._space is None or local is None or not ended(self.settings.local_graph or local):
+        if self._space is None or self._borrowed or local is None or not ended(local):
             return
         space, self._space, self._rag = self._space, None, None
         with contextlib.suppress(Exception):  # its server is gone: nothing to say goodbye to

@@ -23,9 +23,9 @@ from neo4j.exceptions import AuthError, ServiceUnavailable, SessionExpired
 from graphme.adapters.export.neo4j import (
     CHUNK_LABEL,
     NODE_LABEL,
-    SCHEMA,
     graph_records,
     relationship_record,
+    schema,
 )
 from graphme.adapters.export.neo4j_import import (
     ARRAY_DELIMITER,
@@ -33,6 +33,7 @@ from graphme.adapters.export.neo4j_import import (
     NodeRow,
     RelationshipRow,
 )
+from graphme.adapters.storage.workspace_scope import DEFAULT_SCOPE, WorkspaceScope
 from graphme.application.corpus_build import SpaceUnavailable, origin_of
 from graphme.application.corpus_links import DocumentIdentity, Mention, identity_of
 from graphme.application.file_titles import stated_titles
@@ -47,7 +48,6 @@ _NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 it is written into one."""
 
 
-CHUNK_TEXT_INDEX = "chunk_text"
 TEXT_ANALYZER = "cjk"
 """How the passages' words are cut for the fulltext index. Lucene's standard analyzer keeps a
 Korean word whole with its particle -- 압력은 is not 압력 -- so a question's words matched almost
@@ -59,6 +59,8 @@ RESET_BATCH = 200
 """Documents deleted in one transaction when the space is emptied."""
 LINK_BATCH = 5000
 """Mentions whose links are cleared and written again in one transaction."""
+DROP_BATCH = 5000
+"""Nodes of a deleted workspace deleted in one transaction."""
 
 
 def checked_name(name: str) -> str:
@@ -72,33 +74,43 @@ class PasswordWanted(RuntimeError):
 
 
 class Neo4jGraphSpace:
-    def __init__(self, driver: Driver) -> None:
+    """One workspace's graph (`scope`) in the one Neo4j: every statement it sends goes
+    through `_query` or `_run`, which name the workspace's labels in every node pattern."""
+
+    def __init__(self, driver: Driver, *, scope: WorkspaceScope = DEFAULT_SCOPE) -> None:
         self.driver = driver
         """Shared with what reads the space beside it (`graph_rag.py`), so one pool serves both."""
+        self.scope = scope
         recut = self._recut_text_index()
+        # The workspace's own constraints and indexes. The global ones an older graph has
+        # (`doc_node_id`, `chunk_id`, ...) are no longer made; moving a graph drops them.
         for statement in (
-            *SCHEMA,
+            *schema(scope),
             # Words a question names exactly -- a document number, a file name -- which a
             # vector alone does not rank: what Neo4j's hybrid retrievers search beside it.
-            f"CREATE FULLTEXT INDEX {CHUNK_TEXT_INDEX} IF NOT EXISTS "
-            f"FOR (c:{CHUNK_LABEL}) ON EACH [c.text] "
+            f"CREATE FULLTEXT INDEX {scope.text_index} IF NOT EXISTS "
+            f"FOR (c:{scope.chunk_label}) ON EACH [c.text] "
             f"OPTIONS {{indexConfig: {{`fulltext.analyzer`: '{TEXT_ANALYZER}'}}}}",
         ):
-            self.driver.execute_query(statement)
+            self._query(statement)
         if recut:  # filled again from every passage before the first question needs it
-            self.driver.execute_query("CALL db.awaitIndex($name, 600)", name=CHUNK_TEXT_INDEX)
+            self._query("CALL db.awaitIndex($name, 600)", name=scope.text_index)
+
+    def _query(self, query: str, **parameters: Any) -> Any:
+        """`execute_query`, held to this workspace (`WorkspaceScope.cypher`)."""
+        return self.driver.execute_query(self.scope.cypher(query), **parameters)
 
     def _recut_text_index(self) -> bool:
         """A fulltext index made with another analyzer dropped, so it is made again with
         TEXT_ANALYZER; Neo4j fills it from the passages already there. Two processes opening
         the space at once may both see it: dropped if it still exists."""
-        records, _, _ = self.driver.execute_query(
+        records, _, _ = self._query(
             "SHOW FULLTEXT INDEXES YIELD name, options WHERE name = $name "
             "RETURN options.indexConfig['fulltext.analyzer'] AS analyzer",
-            name=CHUNK_TEXT_INDEX,
+            name=self.scope.text_index,
         )
         if records and records[0]["analyzer"] != TEXT_ANALYZER:
-            self.driver.execute_query(f"DROP INDEX {CHUNK_TEXT_INDEX} IF EXISTS")
+            self._query(f"DROP INDEX {self.scope.text_index} IF EXISTS")
             return True
         return False
 
@@ -120,7 +132,27 @@ class Neo4jGraphSpace:
                 f"the Neo4j at {settings.neo4j_uri} does not take the password -- check "
                 "GRAPHME_NEO4J_PASSWORD in .env."
             ) from error
-        return cls(driver)
+        return cls(driver, scope=WorkspaceScope(settings.workspace))
+
+    def within(self, scope: WorkspaceScope) -> Neo4jGraphSpace:
+        """Another workspace's graph over this connection: nothing started, its schema made."""
+        return Neo4jGraphSpace(self.driver, scope=scope)
+
+    def drop_workspace(self, scope: WorkspaceScope) -> None:
+        """Every node and passage of `scope`'s workspace deleted, DROP_BATCH a transaction, then
+        its constraints and indexes dropped. Other workspaces' nodes, which may share its ids,
+        carry other labels and are left as they are."""
+        for label in (scope.chunk_label, scope.node_label):
+            while self.driver.execute_query(
+                f"MATCH (n:{label}) WITH n LIMIT $batch DETACH DELETE n RETURN count(*) AS gone",
+                batch=DROP_BATCH,
+            ).records[0]["gone"]:
+                pass
+        for statement in schema(scope):
+            kind, name = statement.split()[1:3]  # CREATE CONSTRAINT|INDEX <name> ...
+            self.driver.execute_query(f"DROP {kind} {name} IF EXISTS")
+        for index in (scope.text_index, scope.vector_index):
+            self.driver.execute_query(f"DROP INDEX {index} IF EXISTS")
 
     def close(self) -> None:
         self.driver.close()
@@ -136,10 +168,11 @@ class Neo4jGraphSpace:
         stated = list(stated_titles(source, source.suffix))
 
         def write(tx: ManagedTransaction) -> None:
-            _forget(tx, [extracted.document.id])
-            _write_nodes(tx, records["nodes"])
-            _write_relationships(tx, records["relationships"])
-            tx.run(
+            _forget(tx, self.scope, [extracted.document.id])
+            _write_nodes(tx, self.scope, records["nodes"])
+            _write_relationships(tx, self.scope, records["relationships"])
+            _run(
+                tx, self.scope,
                 "MATCH (d:Document {id: $document}) "
                 "SET d.source_path = $path, d.title = $title, d.stated_titles = $stated, "
                 "d.modified_at = $modified",
@@ -157,18 +190,18 @@ class Neo4jGraphSpace:
             raise SpaceUnavailable(str(error)) from error
 
     def read_from(self, source_path: str) -> set[str]:
-        records, _, _ = self.driver.execute_query(
+        records, _, _ = self._query(
             "MATCH (d:Document {source_path: $path}) RETURN d.id AS id", path=source_path)
         return {record["id"] for record in records}
 
     def relocate(self, content_hash: str, source_path: str) -> None:
-        self.driver.execute_query(
+        self._query(
             "MATCH (d:Document {content_hash: $hash}) SET d.source_path = $path",
             hash=content_hash, path=source_path)
 
     def source_path(self, document_id: str) -> str | None:
         """The file a document in the space was read from, as it was put there."""
-        records, _, _ = self.driver.execute_query(
+        records, _, _ = self._query(
             "MATCH (d:Document {id: $document}) RETURN d.source_path AS path",
             document=document_id,
         )
@@ -182,7 +215,7 @@ class Neo4jGraphSpace:
         embedding."""
 
         with self.driver.session() as session:
-            session.execute_write(_forget, list(document_ids))
+            session.execute_write(_forget, self.scope, list(document_ids))
 
     def carried_only_by(self, message_ids: Sequence[str]) -> set[str]:
         """The attachment documents that these messages carry and no other message does: what
@@ -190,7 +223,7 @@ class Neo4jGraphSpace:
         (`ExternalDocument`) that `SAME_AS` names it. Only a mail message -- a document with
         `meta_mail_message_id` -- counts as a carrier: another document naming the same
         attachment does not keep it, and a message named by another is not an attachment."""
-        records, _, _ = self.driver.execute_query(
+        records, _, _ = self._query(
             "MATCH (x:ExternalDocument)-[:SAME_AS]->(a:Document) "
             "WHERE x.document_id IN $ids AND a.meta_mail_message_id IS NULL "
             "AND NOT EXISTS { MATCH (y:ExternalDocument)-[:SAME_AS]->(a) "
@@ -201,7 +234,7 @@ class Neo4jGraphSpace:
 
     def identities(self) -> tuple[DocumentIdentity, ...]:
         """Every document in the space, as it was written there when it was put in."""
-        records, _, _ = self.driver.execute_query(
+        records, _, _ = self._query(
             "MATCH (d:Document) RETURN d.id AS id, d.file_name AS file_name, d.title AS title, "
             "d.stated_titles AS stated, d.source_path AS path"
         )
@@ -213,7 +246,7 @@ class Neo4jGraphSpace:
         if missing:
             found = {document: list(stated_titles(path, path.suffix))
                      for document, path in missing.items()}
-            self.driver.execute_query(
+            self._query(
                 "UNWIND $rows AS row MATCH (d:Document {id: row.id}) "
                 "SET d.stated_titles = row.stated",
                 rows=[{"id": document, "stated": titles} for document, titles in found.items()],
@@ -230,7 +263,7 @@ class Neo4jGraphSpace:
         )
 
     def mentions(self) -> tuple[Mention, ...]:
-        records, _, _ = self.driver.execute_query(
+        records, _, _ = self._query(
             "MATCH (e:ExternalDocument) RETURN e.id AS id, e.document_id AS document, "
             "e.label AS name"
         )
@@ -242,7 +275,7 @@ class Neo4jGraphSpace:
 
     def document_ids(self) -> list[str]:
         """Every document in the space."""
-        records, _, _ = self.driver.execute_query("MATCH (d:Document) RETURN d.id AS id")
+        records, _, _ = self._query("MATCH (d:Document) RETURN d.id AS id")
         return [record["id"] for record in records]
 
     def reset(self) -> int:
@@ -255,7 +288,7 @@ class Neo4jGraphSpace:
 
     def files(self, document_ids: Sequence[str]) -> dict[str, str]:
         """The file of each of these documents the space holds."""
-        records, _, _ = self.driver.execute_query(
+        records, _, _ = self._query(
             "UNWIND $ids AS id MATCH (d:Document {id: id}) RETURN d.id AS id, d.label AS file",
             ids=list(document_ids),
         )
@@ -264,14 +297,14 @@ class Neo4jGraphSpace:
     def crop_hashes(self) -> set[str]:
         """The crop assets the space's nodes name -- the only assets anything reads once a
         document is in (`read_node_crop`, `kept_from`, an answer's pictures)."""
-        records, _, _ = self.driver.execute_query(
+        records, _, _ = self._query(
             f"MATCH (n:DocNode) WHERE n.meta_{CROP_ASSET_KEY} IS NOT NULL "
             f"RETURN DISTINCT n.meta_{CROP_ASSET_KEY} AS h")
         return {str(record["h"]) for record in records}
 
     def contents(self, hashes: Sequence[str]) -> set[str]:
         """Which of these file contents (SHA-256) the space already holds."""
-        records, _, _ = self.driver.execute_query(
+        records, _, _ = self._query(
             "UNWIND $hashes AS h MATCH (d:Document {content_hash: h}) RETURN DISTINCT h",
             hashes=list(hashes),
         )
@@ -279,7 +312,7 @@ class Neo4jGraphSpace:
 
     def unlinked(self, rule: str) -> set[str]:
         """The documents whose mentions were not judged by `rule` -- put since, or never."""
-        records, _, _ = self.driver.execute_query(
+        records, _, _ = self._query(
             "MATCH (d:Document) WHERE coalesce(d.links_rule, '') <> $rule RETURN d.id AS id",
             rule=rule,
         )
@@ -287,7 +320,7 @@ class Neo4jGraphSpace:
 
     def mark_linked(self, documents: Sequence[str], rule: str) -> None:
         for start in range(0, len(documents), LINK_BATCH):
-            self.driver.execute_query(
+            self._query(
                 "UNWIND $documents AS document MATCH (d:Document {id: document}) "
                 "SET d.links_rule = $rule",
                 documents=list(documents[start : start + LINK_BATCH]), rule=rule,
@@ -302,13 +335,15 @@ class Neo4jGraphSpace:
             by_mention.setdefault(edge.source_id, []).append(relationship_record(edge))
 
         def write(tx: ManagedTransaction, mentions: list[str]) -> None:
-            tx.run(
+            _run(
+                tx, self.scope,
                 f"UNWIND $mentions AS mention "
                 f"MATCH (:{NODE_LABEL} {{id: mention}})-[r:{EdgeType.SAME_AS.value}]->() "
                 "DELETE r",
                 mentions=mentions,
             )
-            _write_relationships(tx, [r for m in mentions for r in by_mention.get(m, ())])
+            _write_relationships(tx, self.scope,
+                                 [r for m in mentions for r in by_mention.get(m, ())])
 
         with self.driver.session() as session:
             for start in range(0, len(of), LINK_BATCH):
@@ -319,7 +354,7 @@ class Neo4jGraphSpace:
     ) -> dict[str, str]:
         """Each document with no passages cut by `rule`, and the name its passages are read
         under -- its file, which is what an answer cites."""
-        records, _, _ = self.driver.execute_query(
+        records, _, _ = self._query(
             f"""
             MATCH (d:Document)
             WHERE ($documents IS NULL OR d.id IN $documents)
@@ -334,7 +369,7 @@ class Neo4jGraphSpace:
     def units(self, document_id: str) -> list[GraphUnit]:
         """A document's units as passages are cut from them: a visual by its caption, a unit
         with no words of its own but something under it by its label."""
-        records, _, _ = self.driver.execute_query(_UNITS, document=document_id)
+        records, _, _ = self._query(_UNITS, document=document_id)
         return [
             GraphUnit(
                 id=record["id"], parent=record["parent"], text=record["text"],
@@ -349,11 +384,13 @@ class Neo4jGraphSpace:
         """A document's passages, in place of whatever it was cut into before."""
 
         def write(tx: ManagedTransaction) -> None:
-            tx.run(
+            _run(
+                tx, self.scope,
                 f"MATCH (c:{CHUNK_LABEL} {{document_id: $document}}) DETACH DELETE c",
                 document=document_id,
             )
-            tx.run(
+            _run(
+                tx, self.scope,
                 f"""
                 UNWIND $chunks AS chunk
                 CREATE (c:{CHUNK_LABEL} {{id: chunk.id, document_id: $document,
@@ -379,10 +416,10 @@ class Neo4jGraphSpace:
     def document_map(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Which documents there are, how many others each names, and how they are tied:
         one entry per citing document and the document it names, with how many mentions."""
-        documents, _, _ = self.driver.execute_query(
+        documents, _, _ = self._query(
             """
             MATCH (d:Document)
-            // DocNode: the label document_id is indexed under -- without it, every mention
+            // DocNode: scoped, the label document_id is indexed under -- without it, every mention
             // in the space is read once for every document.
             OPTIONAL MATCH (e:DocNode:ExternalDocument {document_id: d.id})
             RETURN d.id AS id, d.label AS label, d.title AS title, count(e) AS mentions,
@@ -391,7 +428,7 @@ class Neo4jGraphSpace:
             ORDER BY label
             """
         )
-        links, _, _ = self.driver.execute_query(
+        links, _, _ = self._query(
             """
             MATCH (e:ExternalDocument)-[r:SAME_AS]->(d:Document)
             RETURN e.document_id AS from, d.id AS to, count(r) AS count,
@@ -403,7 +440,7 @@ class Neo4jGraphSpace:
 
     def similar_links(self) -> list[dict[str, Any]]:
         """Documents related by what they say: one entry a pair, with how alike they are."""
-        records, _, _ = self.driver.execute_query(
+        records, _, _ = self._query(
             """
             MATCH (a:Document)-[r:SIMILAR_TO]->(b:Document)
             RETURN a.id AS from, b.id AS to, r.score AS score
@@ -428,7 +465,7 @@ class Neo4jGraphSpace:
     def chunk_spans(self, document_id: str) -> list[dict[str, Any]]:
         """A document's passages as the outline shows them: each by the units it covers, and
         how central it is to the document (`importance`, None until it is embedded)."""
-        records, _, _ = self.driver.execute_query(
+        records, _, _ = self._query(
             f"MATCH (c:{CHUNK_LABEL} {{document_id: $document}}) "
             "RETURN c.id AS id, c.members AS members, c.importance AS importance "
             "ORDER BY toInteger(split(c.id, ':')[-1])",
@@ -472,13 +509,13 @@ class Neo4jGraphSpace:
 
     def _indexes(self) -> list[dict[str, Any]]:
         """The vector and fulltext indexes over the passages, as the schema remakes them."""
-        indexes, _, _ = self.driver.execute_query(
+        indexes, _, _ = self._query(
             "SHOW INDEXES YIELD name, type, labelsOrTypes, properties, options "
             "WHERE type IN ['VECTOR', 'FULLTEXT'] AND labelsOrTypes = [$label] "
             "RETURN name, type, properties, options ORDER BY name",
-            label=CHUNK_LABEL,
+            label=self.scope.chunk_label,
         )
-        return [_index(record) for record in indexes]
+        return [_index(record, self.scope.chunk_label) for record in indexes]
 
     def corpus_rows(
         self, document_ids: Sequence[str] | None = None, *, passages: bool = True
@@ -490,14 +527,14 @@ class Neo4jGraphSpace:
 
         def stream(query: str) -> Iterator[Any]:
             with self.driver.session() as session:
-                yield from session.run(query, chosen=chosen)
+                yield from session.run(self.scope.cypher(query), chosen=chosen)
 
         def nodes() -> Iterator[NodeRow]:
             for record in stream(
                 f"MATCH (n:{NODE_LABEL}) WHERE $chosen IS NULL OR n.document_id IN $chosen "
                 "RETURN n.id AS id, labels(n) AS labels, properties(n) AS properties"
             ):
-                labels = [NODE_LABEL, *sorted(set(record["labels"]) - {NODE_LABEL})]
+                labels = self._labels(record["labels"])
                 # Where the file lies on this machine stays on it.
                 properties = {k: v for k, v in record["properties"].items() if k != "source_path"}
                 yield ARRAY_DELIMITER.join(labels), record["id"], properties
@@ -527,22 +564,27 @@ class Neo4jGraphSpace:
             ):
                 yield "COVERS", record["chunk"], record["node"], {}
 
-        documents, _, _ = self.driver.execute_query(
+        documents, _, _ = self._query(
             "MATCH (d:Document) WHERE $chosen IS NULL OR d.id IN $chosen RETURN count(d) AS n",
             chosen=chosen,
         )
         return CorpusRows(nodes=nodes, relationships=relationships,
-                          indexes=self._indexes(), documents=documents[0]["n"])
+                          indexes=self._indexes(), documents=documents[0]["n"], scope=self.scope)
+
+    def _labels(self, labels: Sequence[str]) -> list[str]:
+        """A node's labels as the records read them: `DocNode`, then its type -- the
+        workspace's own label left out, since it says where the node is, not what it is."""
+        return [NODE_LABEL, *sorted(set(labels) - {NODE_LABEL, self.scope.node_label})]
 
     def _records(self, nodes_match: str, relationships_match: str, **parameters: Any) -> dict[
         str, list[dict[str, Any]]
     ]:
-        nodes, _, _ = self.driver.execute_query(
+        nodes, _, _ = self._query(
             f"{nodes_match} RETURN n.id AS id, labels(n) AS labels, properties(n) AS properties "
             f"ORDER BY {READING_ORDER}, n.id",
             **parameters,
         )
-        relationships, _, _ = self.driver.execute_query(
+        relationships, _, _ = self._query(
             f"{relationships_match} RETURN r.id AS id, type(r) AS type, a.id AS start, "
             "b.id AS end, properties(r) AS properties",
             **parameters,
@@ -551,7 +593,7 @@ class Neo4jGraphSpace:
             "nodes": [
                 {
                     "id": record["id"],
-                    "labels": [NODE_LABEL, *sorted(set(record["labels"]) - {NODE_LABEL})],
+                    "labels": self._labels(record["labels"]),
                     "properties": record["properties"],
                 }
                 for record in nodes
@@ -560,7 +602,13 @@ class Neo4jGraphSpace:
         }
 
 
-def _write_nodes(tx: ManagedTransaction, nodes: Sequence[dict[str, Any]]) -> None:
+def _run(tx: ManagedTransaction, scope: WorkspaceScope, query: str, **parameters: Any) -> None:
+    """`tx.run`, held to the workspace (`WorkspaceScope.cypher`)."""
+    tx.run(scope.cypher(query), **parameters)
+
+
+def _write_nodes(tx: ManagedTransaction, scope: WorkspaceScope,
+                 nodes: Sequence[dict[str, Any]]) -> None:
     by_labels: dict[tuple[str, ...], list[dict[str, Any]]] = {}
     for node in nodes:
         extra = tuple(checked_name(label) for label in node["labels"] if label != NODE_LABEL)
@@ -569,7 +617,8 @@ def _write_nodes(tx: ManagedTransaction, nodes: Sequence[dict[str, Any]]) -> Non
         )
     for extra, rows in by_labels.items():
         labels = "".join(f":{label}" for label in extra)
-        tx.run(
+        _run(
+            tx, scope,
             f"UNWIND $rows AS row MERGE (n:{NODE_LABEL} {{id: row.id}}) "
             f"SET n{labels} SET n += row.properties",
             rows=rows,
@@ -577,13 +626,14 @@ def _write_nodes(tx: ManagedTransaction, nodes: Sequence[dict[str, Any]]) -> Non
 
 
 def _write_relationships(
-    tx: ManagedTransaction, relationships: Sequence[dict[str, Any]]
+    tx: ManagedTransaction, scope: WorkspaceScope, relationships: Sequence[dict[str, Any]]
 ) -> None:
     by_type: dict[str, list[dict[str, Any]]] = {}
     for relationship in relationships:
         by_type.setdefault(checked_name(relationship["type"]), []).append(relationship)
     for kind, rows in by_type.items():
-        tx.run(
+        _run(
+            tx, scope,
             f"UNWIND $rows AS row "
             f"MATCH (a:{NODE_LABEL} {{id: row.start}}), (b:{NODE_LABEL} {{id: row.end}}) "
             f"MERGE (a)-[r:{kind} {{id: row.id}}]->(b) SET r += row.properties",
@@ -600,19 +650,20 @@ def modified_at(path: Path | str) -> float | None:
         return None
 
 
-def _forget(tx: ManagedTransaction, document_ids: list[str]) -> None:
+def _forget(tx: ManagedTransaction, scope: WorkspaceScope, document_ids: list[str]) -> None:
     """Every node and passage of these documents gone, with every link to or from them -- the
     one way a document leaves, deleted or put in again. A document that was like one has a
     place free among its best, and is measured again on the next embedding."""
-    tx.run(
+    _run(
+        tx, scope,
         "UNWIND $ids AS id MATCH (:Document {id: id})-[:SIMILAR_TO]-(like:Document) "
         "REMOVE like.similarity_rule",
         ids=document_ids,
     )
     # Label by label, each by its own document_id index.
     for label in (CHUNK_LABEL, NODE_LABEL):
-        tx.run(f"UNWIND $ids AS id MATCH (n:{label} {{document_id: id}}) DETACH DELETE n",
-               ids=document_ids)
+        _run(tx, scope, f"UNWIND $ids AS id MATCH (n:{label} {{document_id: id}}) DETACH DELETE n",
+             ids=document_ids)
 
 
 def _readable(properties: dict[str, Any]) -> dict[str, Any]:
@@ -620,11 +671,11 @@ def _readable(properties: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in properties.items() if not k.endswith("_centroid")}
 
 
-def _index(record: Any) -> dict[str, Any]:
+def _index(record: Any, label: str) -> dict[str, Any]:
     index = {
         "kind": record["type"],
         "name": record["name"],
-        "label": CHUNK_LABEL,
+        "label": label,
         "property": record["properties"][0],
     }
     config = record["options"]["indexConfig"]

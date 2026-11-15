@@ -13,12 +13,14 @@ better one, and refuses a worse.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 import neo4j
 import numpy as np
 
 from graphme.adapters.export.neo4j import CHUNK_LABEL
 from graphme.adapters.storage.neo4j_space import checked_name
+from graphme.adapters.storage.workspace_scope import DEFAULT_SCOPE, WorkspaceScope
 from graphme.application.passage_scores import relatedness
 
 NEAREST_PASSAGES = 10
@@ -48,15 +50,21 @@ CLEAR_BATCH = 1000
 
 
 class SimilarDocuments:
-    def __init__(self, driver: neo4j.Driver, *, index: str, vector_property: str) -> None:
+    def __init__(self, driver: neo4j.Driver, *, index: str, vector_property: str,
+                 scope: WorkspaceScope = DEFAULT_SCOPE) -> None:
         self._driver = driver
+        self._scope = scope
         self._index = checked_name(index)
         self._vector = f"`{checked_name(vector_property)}`"
+
+    def _query(self, query: str, **parameters: Any) -> Any:
+        """`execute_query`, held to the workspace (`WorkspaceScope.cypher`)."""
+        return self._driver.execute_query(self._scope.cypher(query), **parameters)
 
     def relate(self, document_ids: Sequence[str] | None) -> None:
         """Each document not measured by this rule linked anew -- rating a document's
         passages takes its measure away."""
-        records, _, _ = self._driver.execute_query(
+        records, _, _ = self._query(
             f"""
             MATCH (d:Document)
             WHERE ($documents IS NULL OR d.id IN $documents)
@@ -72,7 +80,7 @@ class SimilarDocuments:
         # Every link of the documents measured goes first, once: measured one after another,
         # a later one would otherwise take away a link an earlier one had just made.
         for start in range(0, len(documents), CLEAR_BATCH):
-            self._driver.execute_query(
+            self._query(
                 "UNWIND $documents AS document "
                 "MATCH (:Document {id: document})-[r:SIMILAR_TO]-() DELETE r",
                 documents=documents[start : start + CLEAR_BATCH],
@@ -91,7 +99,7 @@ class SimilarDocuments:
         # The links this document and its candidates hold, read once; who gives up which is
         # worked out here, and written in one go.
         ends = [document, *(other for _, other in scored)]
-        records, _, _ = self._driver.execute_query(
+        records, _, _ = self._query(
             "UNWIND $ends AS end MATCH (:Document {id: end})-[r:SIMILAR_TO]-(o:Document) "
             "RETURN end, elementId(r) AS link, r.score AS score, o.id AS other",
             ends=ends,
@@ -136,11 +144,14 @@ class SimilarDocuments:
             made.append({"one": one, "two": two, "id": pair, "score": score})
 
         def write(tx: neo4j.ManagedTransaction) -> None:
-            tx.run("MATCH (d:Document {id: $document}) SET d.similarity_rule = $rule",
-                   document=document, rule=SIMILARITY_RULE)
-            tx.run("MATCH ()-[r:SIMILAR_TO]->() WHERE elementId(r) IN $gone DELETE r",
-                   gone=[x for x in gone if not x.startswith("similar:")])
-            tx.run(
+            def run(query: str, **given: Any) -> None:
+                tx.run(self._scope.cypher(query), **given)
+
+            run("MATCH (d:Document {id: $document}) SET d.similarity_rule = $rule",
+                document=document, rule=SIMILARITY_RULE)
+            run("MATCH (:Document)-[r:SIMILAR_TO]->() WHERE elementId(r) IN $gone DELETE r",
+                gone=[x for x in gone if not x.startswith("similar:")])
+            run(
                 "UNWIND $made AS m MATCH (a:Document {id: m.one}), (b:Document {id: m.two}) "
                 "CREATE (a)-[:SIMILAR_TO {id: m.id, score: m.score, rule: $rule}]->(b)",
                 made=[m for m in made if m["id"] in links], rule=SIMILARITY_RULE,
@@ -154,7 +165,7 @@ class SimilarDocuments:
         once, the cosine of every pair taken inside Neo4j, and each passage's nearest in the
         other document picked from that matrix here."""
         vector = self._vector
-        records, _, _ = self._driver.execute_query(
+        records, _, _ = self._query(
             f"""
             MATCH (q:{CHUNK_LABEL} {{document_id: $document}}) WHERE q.{vector} IS NOT NULL
             WITH collect(q) AS asking

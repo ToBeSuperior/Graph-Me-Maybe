@@ -5,6 +5,25 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.72] - 2026-11-15
+
+### Added
+
+- **One question over several workspaces**: `/v1/search` and `/v1/ask` take `workspaces` (ids),
+  and so does the MCP `search`/`ask`. Each workspace is searched in its own graph and the
+  rankings are fused by reciprocal rank; each source says which workspace it came from.
+
+### Changed
+
+- Every workspace is now a graph of its own inside the one Neo4j the app runs (Neo4j
+  Community holds one database), its nodes, passages and indexes named by the workspace and
+  every statement held to them. A workspace whose graph was in its own folder is copied in
+  once at the first start, counted and checked; a copy that fails leaves it where it was, and
+  `GET /v1/workspaces` lists it under `unmoved` with the reason.
+- A short document number written alone ("per QP-210") links to the document filed under it
+  (its file name starts with it), whatever its digits; "SHA-256" still links to nothing unless
+  a document is filed under it.
+
 ## [0.1.71] - 2026-11-14
 
 ### Added
