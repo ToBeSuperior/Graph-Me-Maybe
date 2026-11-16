@@ -34,5 +34,4 @@ neo4j-graphrag's default retrievers may therefore rank slightly differently.
 
 Passages are cut from each document's outline: a section that fits is one passage, a larger one is
 cut between its items under its headings, and a single unit too big is cut between its lines. Each
-passage carries an importance score, used by similarity links and shown in the document view. The
-details, and why it is done this way, are in [method.md](method.md).
+passage carries an importance score, used by similarity links and shown in the document view.

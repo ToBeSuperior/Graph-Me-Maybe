@@ -166,8 +166,6 @@ full contract is at `/docs` and in [`src/graphme/server/models.py`](src/graphme/
    search in Neo4j, fuses them, keeps only passages with real evidence, then walks the links to bring
    the connected documents along — see [docs/retrieval.md](docs/retrieval.md).
 
-The rules are in [`finalized_source.md`](finalized_source.md); why the pipeline looks like this, and
-what failed on the way, is in [`docs/method.md`](docs/method.md).
 
 ## 📄 Supported formats
 

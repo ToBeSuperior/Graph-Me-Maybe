@@ -62,9 +62,8 @@ concrete adapters together. Both the CLI and the server go through it.
 | the web app | `frontend/src/` (words for both languages in `lib/words.ts`) |
 | the installers | `install.sh`, `install.ps1`, `src/graphme/launcher.py` |
 
-Before changing the pipeline, read [`finalized_source.md`](finalized_source.md) (the rules) and
-[`docs/method.md`](docs/method.md) (why they are what they are). Many rules there exist because the
-obvious approach failed on a real document.
+Many of the pipeline's rules exist because the obvious approach failed on a real document: the
+tests and the comments beside each rule say which, so keep both when changing it.
 
 The API contract lives in `src/graphme/server/models.py`. After changing it, run `npm run api` in
 `frontend/` to regenerate `frontend/src/api/schema.d.ts`; the web app compiles against those types.
