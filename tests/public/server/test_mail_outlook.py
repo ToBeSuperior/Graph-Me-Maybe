@@ -101,3 +101,23 @@ def test_a_company_that_has_not_approved_the_app_connects_nothing(outlook: TestC
 
     assert "not connected" in page.text and "admin" in page.text
     assert outlook.get("/v1/mail/accounts").json() == []
+
+
+def test_the_callback_opened_twice_still_says_connected(outlook: TestClient) -> None:
+    # A browser may ask the address again (a reload, a prefetch) after the sign-in finished.
+    url = outlook.post("/v1/mail/microsoft/connect").json()["url"]
+    state = parse_qs(urlsplit(url).query)["state"][0]
+    for _ in range(2):
+        page = outlook.get("/v1/mail/microsoft/callback",
+                           params={"state": state, "code": "invented"})
+        assert "kim@invented.test is connected" in page.text
+    assert len(outlook.get("/v1/mail/accounts").json()) == 1
+
+
+def test_mail_held_for_a_closed_workspace_is_said(outlook: TestClient,
+                                                  workspace_demo: Demo) -> None:
+    account = _signed_in(outlook)
+    workspace_demo.mail_accounts().hold(str(account["id"]), ["one.eml", "two.eml"], [])
+
+    [listed] = outlook.get("/v1/mail/accounts").json()
+    assert listed["waiting"] == 2

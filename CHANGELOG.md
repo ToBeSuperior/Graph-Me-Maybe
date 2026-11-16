@@ -5,6 +5,23 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.74] - 2026-11-17
+
+### Added
+
+- **The library**: `GraphMe(workspace="name")` opens one of the app's workspaces, made when
+  missing; `graphme.langchain.GraphMeLoader` (`[langchain]`) gives one LangChain `Document` per
+  passage; a search model run on this machine is fetched the first time `embed`, `search` or
+  `ask` needs it, and by `graphme setup`. `docs/library.md` and two notebooks on the invented
+  samples show the API.
+- A mail account says how many fetched mails wait for its workspace to be opened.
+
+### Fixed
+
+- A mail sign-in whose callback is opened twice says connected instead of failed.
+- Files and folders Windows marks hidden or system (`$RECYCLE.BIN`, `desktop.ini`) are not
+  listed, counted or read in a drive.
+
 ## [0.1.73] - 2026-11-16
 
 ### Added

@@ -401,6 +401,7 @@ const ko = {
   mailReading: '읽는 중입니다. 새 메일이 오면 앱이 열려 있는 동안 읽어 들입니다.',
   mailCurrent: (since: string | null) => (since ? `${since} 이후의 메일을 읽었습니다.` : '모든 메일을 읽었습니다.'),
   mailEarlier: '이전 메일도 읽기',
+  mailWaiting: (n: number, workspace: string) => `새 메일 ${n}통을 받았습니다. ${workspace} 워크스페이스를 열면 그래프에 들어갑니다.`,
   mailDisconnect: '연결 해제',
   mailDisconnectDelete: '워크스페이스도 삭제',
   mailDisconnectKeep: '워크스페이스는 남기기',
@@ -887,6 +888,9 @@ const en: Words = {
   mailReading: 'Reading. New mail is read while the app is open.',
   mailCurrent: (since) => (since ? `Mail since ${since} is read.` : 'All mail is read.'),
   mailEarlier: 'Read earlier mail',
+  mailWaiting: (n, workspace) => (n === 1
+    ? `1 new message is read in; it goes into the graph when the ${workspace} workspace is opened.`
+    : `${n} new messages are read in; they go into the graph when the ${workspace} workspace is opened.`),
   mailDisconnect: 'Disconnect',
   mailDisconnectDelete: 'Delete its workspace too',
   mailDisconnectKeep: 'Keep its workspace',

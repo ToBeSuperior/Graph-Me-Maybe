@@ -1,6 +1,5 @@
 """The demo's additions to the server: sample documents to try it on, two readings of every
-page and ten minutes to draw one, and Neo4j warmed at start. `graphme app` and
-`tools/hierarchy_demo/app.py` both run it."""
+page and ten minutes to draw one, and Neo4j warmed at start. `graphme app` runs it."""
 from __future__ import annotations
 
 import logging
@@ -17,8 +16,7 @@ from pydantic import BaseModel
 
 from graphme.config import Settings, load_settings
 from graphme.samples import write_samples
-from graphme.server import create_app
-from graphme.server.app import default_web, make_demo
+from graphme.server.app import create_app, default_web, make_demo
 from graphme.server.jobs import BUILDING
 from graphme.server.models import BuildState
 from graphme.server.settings import preflight_behind

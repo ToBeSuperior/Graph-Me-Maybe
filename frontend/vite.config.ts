@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
-// The server answers on 8765 (`graphme serve`, or the demo: `python tools/hierarchy_demo/app.py`);
+// The server answers on 8765 (`graphme serve`, or the demo: `graphme app`);
 // in development the app is served here and asks it through this proxy, so both run as one origin.
 const DEMO = process.env.DEMO_URL ?? 'http://127.0.0.1:8765';
 

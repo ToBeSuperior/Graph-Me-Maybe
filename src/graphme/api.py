@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 
+from graphme import model_endpoint
 from graphme.adapters.export.neo4j_import import write_import_bundle
 from graphme.adapters.storage.graph_rag import GraphAnswer, GraphRag, GraphSource
 from graphme.adapters.storage.local_neo4j import ended
@@ -31,6 +32,7 @@ from graphme.runtime import (
     create_graph_space,
     create_neo4j_admin,
     create_page_renderer,
+    local_models,
     read_document,
 )
 
@@ -62,12 +64,27 @@ def read(path: str | Path, *, settings: Settings | None = None, **in_code: Any
         return read_document(corpus_graph_builder(settings, client, renderer), renderer, source)
 
 
+def search_model(settings: Settings, say: Callable[[str], object] = print) -> None:
+    """A search model run on this machine (`general`, `korean`) fetched unless it is there,
+    checked against its pinned checksum: by `GraphMe` the first time it is needed, by `setup`
+    ahead; the app fetches it at start."""
+    row = model_endpoint.EMBEDDERS.get(settings.embedding_provider)
+    if row is None or row.model_file is None:
+        return
+    models = local_models(settings.local_models or settings.data_dir)
+    if not models.installed(row.model_file):
+        say(f"fetching the search model {row.model_file.file} "
+            f"({row.model_file.size / 1e6:.0f} MB)")
+        models.install(row.model_file)
+
+
 def setup(*, server: bool = False, settings: Settings | None = None,
           say: Callable[[str], object] = print, **in_code: Any) -> None:
     """Fetch ahead of time what is otherwise fetched on first use, for CI or an offline machine:
     the viewer that draws DOCX, PPTX, XLSX and HWP (into the settings' viewer folder), a Chromium
-    unless Chrome is installed, the app's own Neo4j and Java unless a Neo4j is named, and with
-    `server` the web app `graphme serve` shows."""
+    unless Chrome is installed, the app's own Neo4j and Java unless a Neo4j is named, the
+    search model when it runs on this machine, and with `server` the web app `graphme serve`
+    shows."""
     from graphme import release_assets
     from graphme.adapters.storage.local_neo4j import install
     from graphme.config import app_home
@@ -77,8 +94,25 @@ def setup(*, server: bool = False, settings: Settings | None = None,
     release_assets.ready_to_draw(settings.viewer_directory, settings.chrome_executable, say=say)
     if settings.local_neo4j is not None:
         install(settings.local_neo4j, say=say)
+    search_model(settings, say=say)
     if server:
         release_assets.web(app_home() / "web", say=say)
+
+
+def _in_workspace(settings: Settings, name: str) -> Settings:
+    """`settings` held to the app's workspace called `name` (or with that id), made when there
+    is none; the workspace the app has open stays as it is."""
+    from graphme.server.workspaces import Workspaces
+
+    if settings.local_neo4j is None:
+        raise ValueError("a workspace is a graph in the app's own Neo4j: name no Neo4j "
+                         "(neo4j_uri) to open one")
+    registry = Workspaces(settings.local_neo4j)
+    items = registry.listed()["items"]
+    found = next((i for i in items if name in (i["name"], i["id"])), None)
+    item = found or registry.create(name)
+    return settings.model_copy(update={"workspace": item["id"],
+                                       "local_graph": registry.graph(item["id"])})
 
 
 class GraphMe:
@@ -89,8 +123,11 @@ class GraphMe:
     safe to share between threads. Settings as `read` takes them.
     """
 
-    def __init__(self, settings: Settings | None = None, **in_code: Any) -> None:
+    def __init__(self, settings: Settings | None = None, *, workspace: str | None = None,
+                 **in_code: Any) -> None:
         self.settings = _settings(settings, in_code)
+        if workspace is not None:
+            self.settings = _in_workspace(self.settings, workspace)
         self._space: Neo4jGraphSpace | None = None
         self._borrowed = False
         """The space's connection is another `GraphMe`'s (`held_to`): never closed here, and
@@ -134,19 +171,25 @@ class GraphMe:
 
     def embed(self, *, on_progress: Callable[[int, int], None] | None = None) -> int:
         """Passages cut and embedded for every document not embedded yet; how many."""
+        self._search_model()
         return self.rag().embed(on_progress=on_progress)
 
     def search(self, question: str, *, documents: int | None = None,
                top_k: int | None = None) -> list[GraphSource]:
         """The passages a question finds, until `documents` documents are reached, each with
         the documents linked to its own. `top_k` is the old name of `documents`."""
+        self._search_model()
         return self.rag().find(question, documents=self._documents(documents, top_k))
 
     def ask(self, question: str, *, documents: int | None = None,
             top_k: int | None = None) -> GraphAnswer:
         """An answer from what the question finds, citing its files. `top_k` is the old name
         of `documents`."""
+        self._search_model()
         return self.rag().ask(question, documents=self._documents(documents, top_k))
+
+    def _search_model(self) -> None:
+        search_model(self.settings)
 
     def _documents(self, documents: int | None, top_k: int | None) -> int:
         if top_k is not None:

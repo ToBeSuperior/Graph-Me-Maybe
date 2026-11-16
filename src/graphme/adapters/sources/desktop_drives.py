@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from graphme.application.ingest import SUFFIX_FORMATS
+from graphme.application.ingest import SUFFIX_FORMATS, hidden
 
 
 def box_drive_root(home: Path, *, platform: str, environ: Mapping[str, str]) -> Path | None:
@@ -173,7 +173,7 @@ DESKTOP_DRIVES: dict[str, Callable[..., Drive | None]] = {
 
 
 def _shown(path: Path) -> bool:
-    return not path.name.startswith((".", "~$"))
+    return not hidden(path)
 
 
 def listing(root: Path, relative: str, top: tuple[str, ...] | None = None) -> dict[str, Any]:

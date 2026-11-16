@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from graphme import processes
+from graphme.application.ingest import hidden
 
 DATALESS = 0x40000000
 """macOS's `SF_DATALESS`: the file or folder is a placeholder, its contents in the cloud."""
@@ -79,7 +80,7 @@ def local_usage(root: Path, top: tuple[str, ...] | None, *,
         except OSError:
             continue
         for entry in entries:
-            if entry.name.startswith("."):
+            if hidden(entry):
                 continue
             path = Path(entry.path)
             try:

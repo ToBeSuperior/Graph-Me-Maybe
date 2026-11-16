@@ -1,4 +1,4 @@
-"""Typed multimodal Graph-Me-Maybe.
+"""Graph-Me-Maybe: typed multimodal document graphs.
 
     import graphme
     doc = graphme.read("report.pptx")
@@ -15,7 +15,7 @@ from graphme.config import Settings, load_settings
 from graphme.domain.models import ExtractedDocument
 from graphme.passages import Passage, passages
 
-__version__ = "0.1.73"
+__version__ = "0.1.74"
 
 __all__ = [
     "BuildReport", "ExtractedDocument", "GraphAnswer", "GraphMe", "GraphNotEmbedded",

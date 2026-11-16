@@ -254,12 +254,24 @@ def create_app(
         return _closing_page("Box is connected. You can close this tab, go back to "
                              "Graph-Me-Maybe and pick the folders to read.")
 
+    signed_in: dict[str, str] = {}
+    """state -> the page it answered: a browser asking the address again (a reload, a
+    prefetch) after the sign-in finished is shown the same page, not a refusal."""
+
+    def answered(state: str, page: str) -> str:
+        signed_in[state] = page
+        while len(signed_in) > 20:
+            signed_in.pop(next(iter(signed_in)))
+        return page
+
     @app.get("/v1/mail/google/callback", response_class=HTMLResponse, include_in_schema=False,
              dependencies=[HERE])
     def google_callback(state: str = "", code: str | None = None,
                         error: str | None = None) -> str:
         """Where Google sends the browser back -- outside the key, as Box's: the sign-in's
         state, started by this process, is what proves it. The account is counted here."""
+        if state in signed_in:
+            return signed_in[state]
         google = demo.google_sign_in()
         try:
             if google is None:
@@ -268,8 +280,9 @@ def create_app(
                 google.finish(state=state, code=code, error=error))
         except (LookupError, ValueError) as refusal:
             return _closing_page(f"Gmail was not connected: {refusal}")
-        return _closing_page(f"{added['address']} is connected. You can close this tab and go "
-                             "back to Graph-Me-Maybe: it asks how much mail to read.")
+        return answered(state, _closing_page(
+            f"{added['address']} is connected. You can close this tab and go back to "
+            "Graph-Me-Maybe: it asks how much mail to read."))
 
     @app.get("/v1/mail/microsoft/callback", response_class=HTMLResponse,
              include_in_schema=False, dependencies=[HERE])
@@ -277,14 +290,17 @@ def create_app(
                            error: str | None = None,
                            error_description: str | None = None) -> str:
         """Where Microsoft sends the browser back, as Google's: the account is counted here."""
+        if state in signed_in:
+            return signed_in[state]
         try:
             refresh = demo.microsoft_sign_in().finish(state=state, code=code, error=error,
                                                       description=error_description)
             added = demo.mail_accounts().add_outlook(refresh)
         except (LookupError, ValueError) as refusal:
             return _closing_page(f"Outlook was not connected: {refusal}")
-        return _closing_page(f"{added['address']} is connected. You can close this tab and go "
-                             "back to Graph-Me-Maybe: it asks how much mail to read.")
+        return answered(state, _closing_page(
+            f"{added['address']} is connected. You can close this tab and go back to "
+            "Graph-Me-Maybe: it asks how much mail to read."))
 
     @app.get("/health", response_model=api.Health)
     def health() -> dict[str, str]:
@@ -432,10 +448,14 @@ def create_app(
 
     # Mail accounts, each read into a workspace of its own ------------------------------------
 
+    def shown_accounts() -> list[dict[str, Any]]:
+        return [{**a, "waiting": len(a.get("pending") or [])}
+                for a in demo.mail_accounts().listed()]
+
     @v1.get("/mail/accounts", response_model=list[api.MailAccount])
     def mail_accounts() -> list[dict[str, Any]]:
         """Every account connected; never a password."""
-        return demo.mail_accounts().listed() if demo.workspaces is not None else []
+        return shown_accounts() if demo.workspaces is not None else []
 
     @v1.post("/mail/accounts", response_model=api.MailAccount, dependencies=[HERE])
     def mail_connect(body: api.MailConnect) -> dict[str, Any]:
@@ -486,7 +506,7 @@ def create_app(
         ordinary one."""
         with refused():
             demo.disconnect_mail(account, workspace)
-            return demo.mail_accounts().listed()
+            return shown_accounts()
 
     # A cloud drive's desktop client --------------------------------------------------------
 

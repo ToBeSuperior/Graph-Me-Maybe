@@ -517,6 +517,9 @@ class MailAccount(_Model):
     last_checked: str | None = None
     error: str | None = None
     """What the mail server said when it refused."""
+    waiting: int = 0
+    """Messages read in but not yet in the graph: its workspace is closed, or a build runs.
+    They go in when the workspace is opened."""
 
 
 class MailRead(_Model):

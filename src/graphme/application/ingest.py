@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import errno
 import os
+import stat
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -74,7 +75,7 @@ def documents_in(
                     skipped.append(here)
                 continue
             for entry in entries:
-                if entry.name.startswith((".", "~$")):
+                if hidden(entry):
                     continue
                 try:
                     if entry.is_dir(follow_symlinks=False):
@@ -92,6 +93,21 @@ def documents_in(
         time.sleep(REST_SECONDS)
         walk(late, None)
     return sorted(found, key=lambda p: p.parts)  # Windows' paths compare ignoring case
+
+
+NOT_THE_USERS = stat.FILE_ATTRIBUTE_HIDDEN | stat.FILE_ATTRIBUTE_SYSTEM
+
+
+def hidden(entry: os.DirEntry[str] | Path) -> bool:
+    """Not the user's to read: a dot file, an Office lock file ("~$..."), or what Windows marks
+    hidden or system ($RECYCLE.BIN, System Volume Information)."""
+    if entry.name.startswith((".", "~$")):
+        return True
+    try:
+        attributes = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attributes & NOT_THE_USERS)
 
 
 def _listed(folder: Path, strained: list[bool]) -> list[os.DirEntry[str]]:

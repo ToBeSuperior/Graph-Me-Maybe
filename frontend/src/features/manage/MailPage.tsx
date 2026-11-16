@@ -187,6 +187,7 @@ function AccountCard({ account }: { account: Account }) {
           {account.read_since && <Button size="sm" onClick={earlier}>{t('mailEarlier')}</Button>}
         </div>
       )}
+      {account.waiting > 0 && <p role="status" className="text-muted">{t('mailWaiting', account.waiting, account.address)}</p>}
       {account.state === 'error' && <p role="alert" className="text-danger-fg">{account.error}</p>}
       {said && <p role="alert" className="text-danger-fg">{said}</p>}
       <div className="flex flex-wrap gap-2">

@@ -216,12 +216,12 @@ src/graphme/adapters/rendering/viewer/setup.sh   # the document viewer, once (~1
 Put your provider's key in `.env` (see [Configuration](#-configuration)). To use it only as a
 library, `pip install graph-me-maybe` installs the CLI and the Python API (`[server]` adds
 `graphme serve`, `[app]` the app). The viewer that draws Office files, a Chromium and Neo4j
-are fetched on first use, or ahead with `graphme setup`.
+are fetched on first use, or ahead with `graphme setup`. See [docs/library.md](docs/library.md).
 
 Run the app with the sample documents, or the bare server:
 
 ```bash
-uv run python tools/hierarchy_demo/app.py     # http://127.0.0.1:8765, with "Try sample documents"
+uv run graphme app --no-browser               # http://127.0.0.1:8765, with "Try sample documents"
 uv run graphme serve                          # the same server without the samples
 (cd frontend && npm run dev)                  # http://127.0.0.1:5173, hot reload, /v1 proxied to 8765
 ```

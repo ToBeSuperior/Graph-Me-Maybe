@@ -86,7 +86,7 @@ export function FolderDrop({ large = false, className }: { large?: boolean; clas
           {!uploading && <FolderPlus className="size-4" />}
           {t('pickFolder')}
         </Button>
-        {/* The samples are the demo's (`tools/hierarchy_demo`); `graphme serve` has none. */}
+        {/* The samples are the demo's (`graphme app`); `graphme serve` has none. */}
         {settings?.samples && (
           <Button variant="secondary" size={large ? 'lg' : 'md'} onClick={samples} busy={loadingSamples}>
             {!loadingSamples && <Sparkles className="size-4" />}

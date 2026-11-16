@@ -42,8 +42,7 @@ export interface paths {
         /**
          * Change Settings
          * @description Settings written to `.env` and taken up at once, each key tried first (no model is
-         *     called). Only from this machine's own page, whatever the key: another site open in the
-         *     browser could otherwise post keys here.
+         *     called). Only from this machine's own page (`only_here`).
          */
         put: operations["change_settings_v1_settings_put"];
         post?: never;
@@ -1568,6 +1567,11 @@ export interface components {
             last_checked?: string | null;
             /** Error */
             error?: string | null;
+            /**
+             * Waiting
+             * @default 0
+             */
+            waiting: number;
         };
         /** MailConnect */
         MailConnect: {

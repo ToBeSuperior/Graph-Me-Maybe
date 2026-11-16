@@ -889,3 +889,12 @@ test('a cancel the server refuses says why', async ({ page }) => {
   await page.getByRole('button', { name: '취소' }).click();
   await expect(page.getByText('Invented: already ending')).toBeVisible();
 });
+
+test('mail waiting for its closed workspace is said on the account', async ({ page }) => {
+  await english(page);
+  const fake = await fakeApi(page);
+  fake.mail.accounts.push({ id: 'o1', kind: 'outlook', host: 'graph.microsoft.com', port: 443, address: 'lee@invented.test',
+    workspace: 'm1', state: 'current', count: null, read_since: null, last_checked: null, error: null, waiting: 2 });
+  await page.goto('/manage/mail');
+  await expect(page.getByText('2 new messages are read in; they go into the graph when the lee@invented.test workspace is opened.')).toBeVisible();
+});
