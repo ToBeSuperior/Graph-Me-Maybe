@@ -23,23 +23,6 @@ HAIRLINE_PIXELS = 1.0
 """What a rule with no stated thickness occupies, so it can be placed and merged."""
 
 
-class DrawingLike(Protocol):
-    """A DrawingML object as the XLSX drawing parser reports it.
-
-    Only the three fields a box is measured from. The parser's own record carries more,
-    and a placer has no business knowing the rest of it.
-    """
-
-    @property
-    def anchor_from(self) -> Any: ...
-
-    @property
-    def anchor_to(self) -> Any: ...
-
-    @property
-    def transform(self) -> dict[str, Any] | None: ...
-
-
 @runtime_checkable
 class UnitPlacer(Protocol):
     """Answers where one node sits on the page it was rendered onto."""
@@ -54,17 +37,11 @@ class CellRangePlacer:
 
     A drawing (picture, chart, text box) is measured by its DrawingML extent rather than the
     cells it is anchored to: it does not fill them, and `editAs="oneCell"` leaves the `to`
-    marker stale.
+    marker stale. Extraction records both on the node (`excel._drawn_at`).
     """
 
-    def __init__(
-        self,
-        grid: SheetPixelGrid,
-        *,
-        extents: Mapping[int, DrawingLike] | None = None,
-    ) -> None:
+    def __init__(self, grid: SheetPixelGrid) -> None:
         self._grid = grid
-        self._extents: Mapping[int, DrawingLike] = extents or {}
 
     def box(self, node: GraphNode) -> PixelBox | None:
         # A drawing -- a picture, a chart, a text box -- is where it is drawn, not in its cells.
@@ -77,16 +54,16 @@ class CellRangePlacer:
         return self._grid.cell_range(node.locator.cell_range)
 
     def _drawing_extent(self, node: GraphNode) -> PixelBox | None:
-        index = node.locator.metadata.get("xml_index")
-        if not isinstance(index, int) or isinstance(index, bool):
-            return None
-        item = self._extents.get(index)
-        if item is None:
-            return None
+        drawn = node.locator.metadata
+
+        def mapping(key: str) -> Mapping[str, Any] | None:
+            value = drawn.get(key)
+            return value if isinstance(value, dict) else None
+
         return self._grid.drawing(
-            anchor_from=item.anchor_from,
-            anchor_to=item.anchor_to,
-            transform=item.transform,
+            anchor_from=mapping("anchor_from"),
+            anchor_to=mapping("anchor_to"),
+            transform=mapping("transform"),
         )
 
 

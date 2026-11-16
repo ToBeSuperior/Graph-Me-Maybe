@@ -100,6 +100,24 @@ def test_settings_are_not_changed_while_a_build_runs(page: Any) -> None:
     assert said.status_code == 409 and env.read_text() == before
 
 
+def test_a_server_started_outside_its_settings_folder_saves_to_the_env_it_read(
+    page: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`graphme serve` from a folder with no `.env` runs on the app home's; a save wrote a new
+    `.env` where it was started, and the next start read that one, not the home's."""
+    client, _, home_env, _ = page
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.setenv("GRAPHME_HOME", str(tmp_path))
+    monkeypatch.chdir(elsewhere)
+
+    said = client.put("/v1/settings", json={"values": {"GRAPHME_MODEL": "new-model"}})
+
+    assert said.status_code == 200, said.text
+    assert "GRAPHME_MODEL=new-model\n" in home_env.read_text()
+    assert not (elsewhere / ".env").exists()
+
+
 def test_a_request_that_cannot_be_read_is_a_400(page: Any) -> None:
     client, _, _, _ = page
     said = client.put("/v1/settings", json={"values": "not a mapping"})

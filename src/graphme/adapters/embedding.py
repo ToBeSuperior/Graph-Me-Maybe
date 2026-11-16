@@ -1,11 +1,60 @@
 """The embedders a graph space's passages and questions are turned into vectors with."""
 from __future__ import annotations
 
+import threading
 from abc import abstractmethod
-from typing import Any
+from collections import OrderedDict
+from collections.abc import Callable, Hashable
+from concurrent.futures import Future
+from typing import Any, Generic, TypeVar
 
 from neo4j_graphrag.embeddings import OpenAIEmbeddings
 from neo4j_graphrag.embeddings.base import Embedder
+
+V = TypeVar("V")
+
+
+class Remembered(Generic[V]):
+    """What was worked out, by what it was for, shared by every reader in the process: the
+    latest `most` kept (none: only while it runs), and what is being worked out right now
+    worked out once, the others asking at the same time handed what it returned (or raised)."""
+
+    def __init__(self, most: int) -> None:
+        self._most = most
+        self._kept: OrderedDict[Hashable, V] = OrderedDict()
+        self._flights: dict[Hashable, Future[V]] = {}
+        self._lock = threading.Lock()
+
+    def get(self, key: Hashable, work: Callable[[], V],
+            keep: Callable[[V], bool] = lambda _: True) -> V:
+        with self._lock:
+            if key in self._kept:
+                self._kept.move_to_end(key)
+                return self._kept[key]
+            flight = self._flights.get(key)
+            leads = flight is None
+            if flight is None:
+                flight = self._flights[key] = Future()
+        if leads:
+            try:
+                value = work()
+                with self._lock:
+                    if keep(value):
+                        self._kept[key] = value
+                        while len(self._kept) > self._most:
+                            self._kept.popitem(last=False)
+                flight.set_result(value)
+            except BaseException as error:
+                flight.set_exception(error)
+            finally:
+                with self._lock:
+                    del self._flights[key]
+        return flight.result()
+
+
+QUERY_VECTORS: Remembered[list[float]] = Remembered(64)
+"""A question's vectors, by the embedder's address, model and the text sent: a question over
+several workspaces is embedded once, not once a reader and again for its links."""
 
 
 class BatchEmbedder(Embedder):
@@ -33,4 +82,6 @@ class OpenAIBatchEmbeddings(OpenAIEmbeddings, BatchEmbedder):
         return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
 
     def embed_query(self, text: str, **kwargs: Any) -> list[float]:
-        return self.embed_texts([self.query_prefix + text])[0]
+        asked = self.query_prefix + text
+        return QUERY_VECTORS.get((str(self.client.base_url), self.model, asked),
+                                 lambda: self.embed_texts([asked])[0])

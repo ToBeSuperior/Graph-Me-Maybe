@@ -22,7 +22,8 @@ BASE = "http://127.0.0.1:8765"
 
 class _Rag:
     """A workspace's search: the same document ids in every workspace (ids are content-derived),
-    each passage's words naming the workspace it is in. One never embedded finds by words."""
+    each passage's words naming the workspace it is in. One never embedded has no vector
+    index, and is refused whether or not it is asked by words alone, as `GraphRag` is."""
 
     def __init__(self, workspace: str, *, embedded: bool = True) -> None:
         self.workspace, self.embedded = workspace, embedded
@@ -30,7 +31,7 @@ class _Rag:
         self.answered_from: list[str] = []
 
     def _check(self) -> None:
-        if not self.embedded and not self.text_only:
+        if not self.embedded:
             raise GraphNotEmbedded("no vector index")
 
     def find(self, question: str, *, documents: int) -> list[GraphSource]:
@@ -45,9 +46,9 @@ class _Rag:
                     "members": s.members, "linked": [], "modified": None, "origin": None})
                 for s in self.find(question, documents=documents)]
 
-    def pictures(self, items: list[RetrieverResultItem]) -> list[tuple[str, bytes]]:
+    def pictures(self, items: list[RetrieverResultItem]) -> list[list[tuple[str, bytes]]]:
         assert all(str(i.content).startswith(self.workspace) for i in items)  # never crosses
-        return []
+        return [[] for _ in items]
 
     def answered(self, question: str, items: list[RetrieverResultItem],
                  pictures: list[tuple[str, bytes]]) -> str:
@@ -119,18 +120,20 @@ def test_one_workspace_is_searched_as_today_and_names_itself(demo_: Demo) -> Non
         (FIRST, "memo:0"), (FIRST, "memo:1")]
 
 
-def test_a_workspace_never_embedded_is_searched_by_its_words(demo_: Demo) -> None:
+def test_a_workspace_never_embedded_adds_nothing_and_fails_nothing(demo_: Demo) -> None:
     other = _made(demo_, "Invented project")
     plain = _made(demo_, "Invented, never embedded")
     demo_.reader(plain)._rag.embedded = False  # type: ignore[attr-defined]
     client = TestClient(create_app(demo_), base_url=BASE)
+    asked = {"question": "invented", "documents": 2, "workspaces": [plain, other]}
 
-    found = client.post("/v1/search", json={"question": "invented", "documents": 2,
-                                            "workspaces": [other, plain]})
+    found = client.post("/v1/search", json=asked)
+    answered = client.post("/v1/ask", json=asked)
 
     assert found.status_code == 200, found.text
-    assert {s["workspace"] for s in found.json()["sources"]} == {other, plain}
-    assert found.json()["text_only"] is True
+    assert {s["workspace"] for s in found.json()["sources"]} == {other}
+    assert answered.status_code == 200, answered.text
+    assert {s["workspace"] for s in answered.json()["sources"]} == {other}
 
 
 def test_an_answer_reads_the_fused_passages_and_an_unknown_workspace_is_404(

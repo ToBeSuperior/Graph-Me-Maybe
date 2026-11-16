@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, ExternalLink } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, call, ApiError, isBuilding } from '../../api/client';
+import { api, call, errorText, isBuilding } from '../../api/client';
 import type { components } from '../../api/schema';
 import { Button, Spinner } from '../../components/ui';
 import { useT } from '../../lib/i18n';
@@ -28,7 +28,7 @@ export function BoxPage() {
     queryKey: boxKey,
     queryFn: () => call(api.GET('/v1/cloud/box')),
     // While the browser is signing in, the answer lands on the server: asked until it does.
-    refetchInterval: opening && !opening.startsWith('done') ? 2000 : false,
+    refetchInterval: (q) => (opening && !q.state.data?.connected ? 2000 : false),
   });
   const state = box.data;
   const folder = useQuery({
@@ -44,7 +44,7 @@ export function BoxPage() {
     try {
       await run();
     } catch (error) {
-      setSaid(error instanceof ApiError ? error.message : String(error));
+      setSaid(errorText(error));
     } finally {
       setWorking(false);
     }

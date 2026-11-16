@@ -99,3 +99,14 @@ def test_a_revoked_sign_in_asks_to_connect_again() -> None:
 
     with pytest.raises(NotConnected, match="connect"):
         _sign_in(microsoft, clock).access_token("refresh-0", keep=lambda token: None)
+
+
+def test_the_access_token_is_reused_under_the_refresh_token_handed_back() -> None:
+    microsoft, clock = _Microsoft(), [1000.0]
+    sign_in = _sign_in(microsoft, clock)
+    latest = ["refresh-0"]
+
+    first = sign_in.access_token(latest[0], keep=lambda fresh: latest.__setitem__(0, fresh))
+    again = sign_in.access_token(latest[0], keep=lambda fresh: latest.__setitem__(0, fresh))
+
+    assert first == again and latest == ["refresh-1"] and len(microsoft.asked) == 1

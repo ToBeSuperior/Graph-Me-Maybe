@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from graphme.server import app as server_app
+from graphme.server import state
 from graphme.server.state import Demo
 from tests.public.server.conftest import FakeSpace
 
@@ -72,6 +73,21 @@ def test_one_content_reached_by_two_paths_is_one_entry(
         ("spec.docx", True, uploaded)]
 
 
+def test_the_list_reads_no_file_to_match_it(
+    demo: Demo, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Asked every two seconds while a build runs: a file not hashed yet is not hashed for it --
+    a cloud drive's online-only file would be downloaded whole."""
+    (tmp_path / "a.pdf").write_bytes(b"%PDF-1.4")
+    demo.session(demo.open_path(str(tmp_path / "a.pdf")))
+    hashed: list[Path] = []
+    monkeypatch.setattr(state, "content_hash", lambda path: hashed.append(path) or "invented")
+
+    said = client.get("/v1/documents").json()
+
+    assert [i["name"] for i in said["items"]] == ["a.pdf"] and hashed == []
+
+
 def test_the_list_still_shows_the_servers_files_when_the_space_is_down(
     demo: Demo, client: TestClient, tmp_path: Path
 ) -> None:
@@ -113,9 +129,11 @@ def test_a_document_is_deleted_with_the_servers_reading_of_it_but_not_while_a_bu
     demo: Demo, space: FakeSpace, client: TestClient, tmp_path: Path
 ) -> None:
     space.held["space-a"] = "a.docx"
+    space.paths["space-a"] = str(tmp_path / "a.docx")
     (tmp_path / "a.docx").write_bytes(b"x")
     doc = demo.open_path(str(tmp_path / "a.docx"))
-    demo.session(doc).extracted = SimpleNamespace(document=SimpleNamespace(id="space-a"))  # type: ignore[assignment]
+    # Built this run: held as the graph keeps it, no longer as read (`_let_go_of_put`).
+    demo.session(doc).kept = SimpleNamespace(crops={})  # type: ignore[assignment]
 
     demo.build.state = "reading"
     assert client.delete("/v1/documents/space-a").status_code == 409
@@ -248,7 +266,9 @@ def test_a_file_opened_from_its_folder_and_uploaded_too_is_one_entry(
     original = tmp_path / "folder" / "spec.docx"
     original.parent.mkdir()
     original.write_bytes(content)
-    demo.session(demo.open_path(str(original)))
+    opened = demo.open_path(str(original))
+    demo.session(opened)
+    demo.content_hash(opened)  # as a build hashes each document it lets in
     demo.session(demo.add("spec.docx", content))
     space.documents = [{"id": "s1", "label": "spec.docx", "title": None, "mentions": 0,
                         "source_path": "/elsewhere/spec.docx",

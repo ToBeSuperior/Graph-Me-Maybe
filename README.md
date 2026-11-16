@@ -216,7 +216,9 @@ src/graphme/adapters/rendering/viewer/setup.sh   # the document viewer, once (~1
 ```
 
 Put your provider's key in `.env` (see [Configuration](#-configuration)). To use it only as a
-library, `pip install .` in the clone installs the CLI, the Python API and the server.
+library, `pip install graph-me-maybe` installs the CLI and the Python API (`[server]` adds
+`graphme serve`, `[app]` the app). The viewer that draws Office files, a Chromium and Neo4j
+are fetched on first use, or ahead with `graphme setup`.
 
 Run the app with the sample documents, or the bare server:
 

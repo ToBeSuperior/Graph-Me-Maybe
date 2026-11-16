@@ -280,14 +280,11 @@ wheels = [
 
 [[package]]
 name = "graph-me-maybe"
-version = "0.1.72"
+version = "0.1.73"
 source = { editable = "." }
 dependencies = [
-    { name = "fastapi" },
     { name = "httpx" },
-    { name = "keyring" },
     { name = "lxml" },
-    { name = "mcp" },
     { name = "neo4j" },
     { name = "neo4j-graphrag", extra = ["openai"] },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -298,32 +295,51 @@ dependencies = [
     { name = "playwright" },
     { name = "pydantic" },
     { name = "pymupdf" },
-    { name = "pystray", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
     { name = "python-docx" },
-    { name = "python-multipart" },
     { name = "python-pptx" },
-    { name = "pywebview", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
     { name = "pyyaml" },
     { name = "truststore" },
     { name = "typer" },
-    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
+app = [
+    { name = "fastapi" },
+    { name = "keyring" },
+    { name = "mcp" },
+    { name = "pystray", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
+    { name = "python-multipart" },
+    { name = "pywebview", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
+    { name = "uvicorn" },
+]
 dev = [
+    { name = "fastapi" },
+    { name = "keyring" },
+    { name = "mcp" },
     { name = "mypy" },
+    { name = "pystray", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
     { name = "pytest" },
+    { name = "python-multipart" },
+    { name = "pywebview", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
     { name = "ruff" },
     { name = "types-pyyaml" },
+    { name = "uvicorn" },
+]
+server = [
+    { name = "fastapi" },
+    { name = "python-multipart" },
+    { name = "uvicorn" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", specifier = ">=0.116,<1" },
+    { name = "graph-me-maybe", extras = ["app"], marker = "extra == 'dev'" },
+    { name = "graph-me-maybe", extras = ["server"], marker = "extra == 'app'" },
+    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.116,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "keyring", specifier = ">=25,<26" },
+    { name = "keyring", marker = "extra == 'app'", specifier = ">=25,<26" },
     { name = "lxml", specifier = ">=5,<7" },
-    { name = "mcp", specifier = ">=1.20,<2" },
+    { name = "mcp", marker = "extra == 'app'", specifier = ">=1.20,<2" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.17,<2" },
     { name = "neo4j", specifier = ">=6.4.0" },
     { name = "neo4j-graphrag", extras = ["openai"], specifier = ">=1.22.0" },
@@ -334,20 +350,20 @@ requires-dist = [
     { name = "playwright", specifier = ">=1.55,<2" },
     { name = "pydantic", specifier = ">=2.11,<3" },
     { name = "pymupdf", specifier = ">=1.26,<2" },
-    { name = "pystray", marker = "sys_platform == 'darwin' or sys_platform == 'win32'", specifier = ">=0.19.5,<0.20" },
+    { name = "pystray", marker = "(sys_platform == 'darwin' and extra == 'app') or (sys_platform == 'win32' and extra == 'app')", specifier = ">=0.19.5,<0.20" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4,<9" },
     { name = "python-docx", specifier = ">=1.2,<2" },
-    { name = "python-multipart", specifier = ">=0.0.20,<1" },
+    { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.20,<1" },
     { name = "python-pptx", specifier = ">=1.0,<2" },
-    { name = "pywebview", marker = "sys_platform == 'darwin' or sys_platform == 'win32'", specifier = ">=5.4,<7" },
+    { name = "pywebview", marker = "(sys_platform == 'darwin' and extra == 'app') or (sys_platform == 'win32' and extra == 'app')", specifier = ">=5.4,<7" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12,<1" },
     { name = "truststore", specifier = ">=0.10,<1" },
     { name = "typer", specifier = ">=0.16,<1" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12,<7" },
-    { name = "uvicorn", specifier = ">=0.35,<1" },
+    { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.35,<1" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["server", "app", "dev"]
 
 [[package]]
 name = "et-xmlfile"

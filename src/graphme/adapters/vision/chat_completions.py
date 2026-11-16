@@ -5,11 +5,9 @@ import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
-from io import BytesIO
 from typing import Any, Literal, TypeVar
 
 import httpx
-from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from graphme.adapters.chat import (
@@ -41,7 +39,7 @@ from graphme.adapters.vision.prompts import (
     TABLE_CHECK_SCHEMA_NAME,
     TABLE_CHECK_SYSTEM_PROMPT,
 )
-from graphme.domain.ids import canonical_json, sha256_bytes
+from graphme.domain.ids import canonical_json
 from graphme.domain.models import (
     CAPTION_CHARS,
     SCANNED_TEXT_CHARS,
@@ -488,7 +486,6 @@ class ChatCompletionsVLMAdapter:
         carry them -- but no outline travels here and nothing is placed under anything.
         This runs first, because a figure's words stop being text once it swallows them.
         """
-        self._verify_hierarchy_image(request, image)
         short = short_ids([unit.id for unit in request.units])
         prompt = {
             "task": "Name every group of units this page draws as one figure.",
@@ -523,7 +520,6 @@ class ChatCompletionsVLMAdapter:
         picture's label is "그림 5", so its crop goes along, introduced by the id the
         answer has to use.
         """
-        self._verify_hierarchy_image(request, image)
         short = short_ids([unit.id for unit in request.units])
         prompt = {
             "task": (
@@ -756,7 +752,6 @@ class ChatCompletionsVLMAdapter:
         """
         if len(candidates) < 2:
             raise ValueError("choosing a reading needs at least two of them")
-        self._verify_hierarchy_image(request, image)
         short = short_ids([unit.id for unit in (*request.units, *request.outline)])
         prompt = {
             "task": (
@@ -867,24 +862,6 @@ class ChatCompletionsVLMAdapter:
                 if last:
                     raise RuntimeError(failure) from error
         raise RuntimeError(failure)
-
-    @staticmethod
-    def _verify_hierarchy_image(request: HierarchyScopeRequest, image: bytes) -> None:
-        """The page is what the answer is judged against, so it is checked before it goes."""
-        if not image:
-            raise ValueError("hierarchy image must not be empty")
-        if sha256_bytes(image) != request.image.asset_hash:
-            raise ValueError("hierarchy image hash does not match request")
-        if len(image) != request.image.size_bytes:
-            raise ValueError("hierarchy image size does not match request")
-        try:
-            with Image.open(BytesIO(image)) as decoded:
-                if decoded.format != "PNG":
-                    raise ValueError("hierarchy image must be PNG")
-                if decoded.size != (request.image.width, request.image.height):
-                    raise ValueError("hierarchy image dimensions do not match request")
-        except (OSError, ValueError) as error:
-            raise ValueError("hierarchy image cannot be decoded as declared") from error
 
     @staticmethod
     def _with_crops(

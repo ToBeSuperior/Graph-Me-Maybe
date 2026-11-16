@@ -491,3 +491,21 @@ def test_the_windows_installer_ends_an_app_from_before_server_json() -> None:
     untracked = stop[missing:]
     for needed in ("graphme-app", "uv tool dir", "taskkill", "/T"):
         assert needed in untracked, needed
+
+
+def test_pypi_takes_the_release_wheel_as_its_pending_publisher_names() -> None:
+    """PyPI trusts exactly this workflow file and environment; a renamed one uploads nothing."""
+    import yaml
+
+    workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+    job = workflow["jobs"]["pypi"]
+    assert job["needs"] == "release" and job["environment"] == "pypi"
+    assert job["permissions"]["id-token"] == "write"
+    assert any(step.get("uses", "").startswith("pypa/gh-action-pypi-publish@")
+               for step in job["steps"])
+
+
+def test_both_installers_install_the_app_extra() -> None:
+    """The core wheel alone has no window, server or MCP: the installers take `[app]`."""
+    assert '"$work/$wheel[app]"' in (ROOT / "install.sh").read_text()
+    assert '"$(Join-Path $work $wheel)[app]"' in (ROOT / "install.ps1").read_text()

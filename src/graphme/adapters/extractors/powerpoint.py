@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from typing import Any
 
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
+from pptx.shapes.picture import Picture
 
 from graphme.domain.enums import DocumentFormat, EdgeType, EvidenceKind, NodeType
 from graphme.domain.ids import canonical_locator, sha256_bytes, sha256_file, stable_id
@@ -263,12 +265,23 @@ class PowerPointExtractor:
             drawn += flatten_shapes(
                 _layout_shapes(slide, slide_width, slide_height), from_layout=True
             )
+            # A layout numbers its shapes independently of the slide, and a group numbers its
+            # children independently again, so the origin and the path are part of the key;
+            # a pasted shape keeps its number, so a number seen again counts which one it is.
+            seen: Counter[str] = Counter()
+            keys: list[str] = []
+            for placed in drawn:
+                trail = ":".join(str(part) for part in placed.path)
+                key = f"layout:{trail}" if placed.from_layout else trail
+                seen[key] += 1
+                keys.append(key if seen[key] == 1 else f"{key}#{seen[key]}")
             ordered_shapes = sorted(
                 enumerate(drawn), key=lambda item: (item[1].top, item[1].left, item[0])
             )
-            for source_order, (_, placed) in enumerate(ordered_shapes, start=1):
+            for source_order, (index, placed) in enumerate(ordered_shapes, start=1):
                 shape = placed.shape
                 child_id = self._extract_shape(
+                    shape_key=keys[index],
                     source=source,
                     content_hash=content_hash,
                     document_id=document_id,
@@ -323,12 +336,9 @@ class PowerPointExtractor:
         nodes: list[GraphNode],
         evidence: list[EvidenceRecord],
         placed: _Placed,
+        shape_key: str,
     ) -> str | None:
         geometry = self._geometry(placed, source_order, slide_width, slide_height)
-        # A layout numbers its shapes independently of the slide, and a group numbers its
-        # children independently again, so the origin and the path are part of the key.
-        trail = ":".join(str(part) for part in placed.path)
-        shape_key = f"layout:{trail}" if placed.from_layout else trail
         label = (shape.name or f"Shape {shape_key}").strip()
         locator = SourceLocator(
             file_name=source.name,
@@ -435,8 +445,12 @@ class PowerPointExtractor:
             )
             return node_id
 
-        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-            image = shape.image
+        # A picture put in a placeholder reports the placeholder's type, not a picture's.
+        if isinstance(shape, Picture):
+            try:
+                image = shape.image
+            except ValueError:  # linked, not embedded: the file holds no picture
+                return None
             blob = image.blob
             extension = image.ext or "bin"
             media_hash = sha256_bytes(blob)

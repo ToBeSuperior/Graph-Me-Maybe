@@ -13,12 +13,11 @@ from __future__ import annotations
 
 import functools
 import io
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from PIL import Image
 
-from graphme.adapters.extractors.xlsx_drawings import DrawingObject, parse_xlsx_drawings
 from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import RendersPages
 from graphme.adapters.rendering.pdf_pages import page_ink
@@ -29,7 +28,6 @@ from graphme.application.unit_placement import (
     FlowPlacer,
     NormalizedBoxPlacer,
     UnitPlacer,
-    home_pages,
 )
 from graphme.application.visual_crops import (
     bind_page_visuals,
@@ -82,14 +80,13 @@ class RenderedVisualBinder:
         fmt = extracted.document.format
         if not figures or fmt not in BINDABLE_FORMATS:
             return extracted
-        drawings = parse_xlsx_drawings(source).objects if fmt is DocumentFormat.XLSX else ()
         pages = self._renderer.render(source, fmt)
-        home = home_pages_of(extracted, pages, fmt)
+        home = flow_pages(extracted, pages, fmt)
         placers: dict[int, UnitPlacer] = {}
         page_of: dict[str, int] = {}
         png_of = {page.index: page.png for page in pages}
         for page in pages:
-            placed = page_members(extracted, page, fmt, drawings, home)
+            placed = page_members(extracted, page, fmt, home)
             if placed is None:
                 continue
             members, placer = placed
@@ -122,17 +119,15 @@ class RenderedVisualBinder:
         fmt = extracted.document.format
         if fmt not in BINDABLE_FORMATS:
             return extracted
-        # A worksheet picture is cropped to its own extent, which only the anchors carry.
-        drawings = parse_xlsx_drawings(source).objects if fmt is DocumentFormat.XLSX else ()
         pages = self._renderer.render(source, fmt)
         # A PDF draws a diagram's frame and arrows as paths; they are no unit's box but
         # they are part of the picture a figure's crop should show.
         ink = page_ink(source) if fmt is DocumentFormat.PDF else {}
         # Flowing text crosses page breaks, and a table can be drawn on two pages. Each
         # node is bound once, where the page shows most of it.
-        home = home_pages_of(extracted, pages, fmt)
+        home = flow_pages(extracted, pages, fmt)
         for page in pages:
-            placed = page_members(extracted, page, fmt, drawings, home)
+            placed = page_members(extracted, page, fmt, home)
             if placed is None:
                 continue
             members, placer = placed
@@ -196,33 +191,18 @@ def join_vertically(parts: Sequence[bytes]) -> bytes:
     return buffer.getvalue()
 
 
-def home_pages_of(
-    extracted: ExtractedDocument,
-    pages: Sequence[RenderedPage],
-    fmt: DocumentFormat,
-) -> dict[str, int] | None:
-    """Flowing text crosses page breaks: each node is bound where most of it is."""
-    if fmt is not DocumentFormat.DOCX:
-        return None
-    return home_pages(
-        extracted.nodes,
-        {page.index: FlowPlacer.of(page) for page in pages},
-    )
-
-
 def page_members(
     extracted: ExtractedDocument,
     page: RenderedPage,
     fmt: DocumentFormat,
-    drawings: Sequence[DrawingObject],
-    home: dict[str, int] | None = None,
+    home: Mapping[str, int],
 ) -> tuple[list[GraphNode], UnitPlacer] | None:
     if fmt is DocumentFormat.DOCX:
         flow: UnitPlacer = FlowPlacer.of(page)
         members = [
             node
             for node in extracted.nodes
-            if (home or {}).get(node.id) == page.index and flow.box(node) is not None
+            if home.get(node.id) == page.index and flow.box(node) is not None
         ]
         return (members, flow) if members else None
     if fmt is DocumentFormat.XLSX:
@@ -230,14 +210,8 @@ def page_members(
         label = page.label
         if grid is None or label is None:
             return None
-        placer = CellRangePlacer(
-            grid,
-            extents={
-                item.xml_index: item
-                for item in drawings
-                if item.worksheet == label
-            },
-        )
+        # A worksheet picture is placed at its own extent, which its anchors carry.
+        placer = CellRangePlacer(grid)
         return [n for n in extracted.nodes if n.locator.sheet == label], placer
     members = [
         node
@@ -261,11 +235,10 @@ def placed_units(
     fmt = extracted.document.format
     if fmt not in BINDABLE_FORMATS:
         return {}
-    drawings = parse_xlsx_drawings(source).objects if fmt is DocumentFormat.XLSX else ()
-    home = home_pages_of(extracted, pages, fmt)
+    home = flow_pages(extracted, pages, fmt)
     placed: dict[str, tuple[int, tuple[int, int, int, int]]] = {}
     for page in pages:
-        found = page_members(extracted, page, fmt, drawings, home)
+        found = page_members(extracted, page, fmt, home)
         if found is None:
             continue
         members, placer = found

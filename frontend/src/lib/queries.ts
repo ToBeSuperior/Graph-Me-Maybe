@@ -28,7 +28,7 @@ export const keys = {
  * not: their keys carry the graph's fingerprint, so the new map makes them new questions --
  * asking the old ones again would only buy a model call the page then throws away. */
 export function graphChanged(client: QueryClient) {
-  for (const key of [keys.library, keys.map, ['document'], ['pagesOf']]) {
+  for (const key of [keys.library, keys.map, ['document'], ['pagesOf'], ['desktopDriveUsage']]) {
     client.invalidateQueries({ queryKey: key });
   }
 }
@@ -55,6 +55,12 @@ const fresh = { refetchOnMount: 'always', refetchOnWindowFocus: 'always' } as co
 
 export const libraryOptions = { queryKey: keys.library, queryFn: () => call(api.GET('/v1/documents')), ...fresh };
 export const useLibrary = () => useQuery(libraryOptions);
+
+/** One document's graph: its outline, passages and pages. */
+export const useDocumentGraph = (id: string) => useQuery({
+  queryKey: keys.document(id),
+  queryFn: () => call(api.GET('/v1/documents/{document_id}/graph', { params: { path: { document_id: id } } })),
+});
 
 /** The keys and model the server runs with, what keeps it from running, and whether it has
  * the demo's samples. */
@@ -104,7 +110,7 @@ export const useSearchModels = () =>
 
 
 /** How often the workspaces are asked again while the page shows. */
-export const WORKSPACES_EVERY = 5000;
+const WORKSPACES_EVERY = 5000;
 
 /** The graphs kept apart, the one open and whether MCP may read them; `available` false on a
  * server with its own graph DB. Asked again when the window comes back and every few seconds

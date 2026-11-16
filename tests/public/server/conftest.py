@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from graphme import api
 from graphme.config import Settings
-from graphme.server import create_app
+from graphme.server import create_app, state
 from graphme.server.state import Demo
 from tests.fakes.documents import named_document as _doc
 
@@ -23,8 +23,6 @@ def _no_settling_later(monkeypatch: pytest.MonkeyPatch) -> None:
     """A build gives back what it read again 30 s, 2 and 10 minutes later, on a thread that
     looks `online_only` and `evict` up when it wakes: left to run, it woke inside a later test
     and gave that test's stand-ins its own files. A test that wants it sets its own times."""
-    from graphme.server import state
-
     monkeypatch.setattr(state, "SETTLE_SECONDS", ())
 
 
@@ -174,11 +172,11 @@ def demo(
 ) -> Demo:
     """A server state over the fake space and admin, its folder under the test's own."""
     monkeypatch.setattr(api, "create_neo4j_admin", lambda settings: admin)
+    monkeypatch.setattr(state, "create_neo4j_admin", lambda settings: admin)
     # Its data under the test's own folder: the shared settings name the working directory's.
     settings = SETTINGS.model_copy(update={"data_dir": tmp_path / "data"})
     made = Demo(settings, renderer=None, root=tmp_path / "server")  # type: ignore[arg-type]
     made.graph._space = space  # type: ignore[assignment]
-    made.admin = lambda: admin  # type: ignore[assignment,method-assign,return-value]
     return made
 
 

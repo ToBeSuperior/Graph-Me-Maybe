@@ -4,7 +4,7 @@
 // else: the page keeps it only while it is typed, and the server never answers it.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
-import { api, call, ApiError } from '../../api/client';
+import { api, call, errorText } from '../../api/client';
 import type { components } from '../../api/schema';
 import { Button, Input, Spinner } from '../../components/ui';
 import { useT } from '../../lib/i18n';
@@ -29,7 +29,7 @@ const size = (bytes: number) => bytes >= 1e9 ? `${Math.round(bytes / 1e8) / 10} 
   : bytes >= 1e6 ? `${Math.round(bytes / 1e6)} MB` : `${Math.round(bytes / 1e3)} KB`;
 
 /** The date `months` months before today, as the server takes it (a day, UTC). */
-export function monthsAgo(months: number, now = new Date()) {
+function monthsAgo(months: number, now = new Date()) {
   const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - months, now.getUTCDate()));
   return d.toISOString().slice(0, 10);
 }
@@ -67,7 +67,7 @@ function SignInConnect({ signing, onStarted }: { signing: string | null; onStart
     try {
       onStarted((await call(api.POST(path))).url);
     } catch (error) {
-      setSaid(error instanceof ApiError ? error.message : String(error));
+      setSaid(errorText(error));
     }
   };
   return (
@@ -129,7 +129,7 @@ function ConnectForm() {
         <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" required /></label>
       <div className="flex items-center gap-3">
         <Button type="submit" variant="primary" busy={connect.isPending}>{t('mailConnect')}</Button>
-        {connect.error && <p role="alert" className="text-danger-fg">{connect.error instanceof ApiError ? connect.error.message : String(connect.error)}</p>}
+        {connect.error && <p role="alert" className="text-danger-fg">{errorText(connect.error)}</p>}
       </div>
     </form>
   );
@@ -148,7 +148,7 @@ function AccountCard({ account }: { account: Account }) {
       await run();
       await Promise.all([client.invalidateQueries({ queryKey: keys.mail }), client.invalidateQueries({ queryKey: keys.workspaces })]);
     } catch (error) {
-      setSaid(error instanceof ApiError ? error.message : String(error));
+      setSaid(errorText(error));
     }
   };
   const read = (since: string | null) => act(async () => {

@@ -424,7 +424,7 @@ def build_server(client: httpx.Client) -> FastMCP:
         jobs = builds()
         if not jobs:
             return {"state": "idle"}
-        return jobs[-1]
+        return jobs[0]  # newest first
 
     @server.tool()
     def cancel_build() -> dict[str, Any]:
@@ -434,7 +434,7 @@ def build_server(client: httpx.Client) -> FastMCP:
         running = [job for job in builds() if job.get("state") not in FINISHED]
         if not running:
             raise ToolError("no build is running")
-        cancelled: dict[str, Any] = post(f"/v1/jobs/{running[-1]['id']}/cancel")
+        cancelled: dict[str, Any] = post(f"/v1/jobs/{running[0]['id']}/cancel")
         return cancelled
 
     @server.tool()

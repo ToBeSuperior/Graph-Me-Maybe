@@ -14,7 +14,6 @@ import os
 import platform as platforms
 import shutil
 import socket
-import ssl
 import subprocess
 import sys
 import tarfile
@@ -25,13 +24,11 @@ import urllib.request
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
-from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-import truststore
-
 from graphme import processes
+from graphme.adapters.storage.local_neo4j import _digest, _fetch
 from graphme.providers import ModelFile
 
 Progress = Callable[[int, int], None]
@@ -77,27 +74,6 @@ def server_build(platform: str = sys.platform, machine: str | None = None) -> Se
         raise RuntimeError(f"no llama.cpp server build for {system} {arch}")
     name, digest = found
     return ServerBuild(url=f"{_RELEASE}/llama-{LLAMA_BUILD}-bin-{name}", sha256=digest)
-
-
-def _fetch(url: str, target: Path, progress: Progress | None = None) -> None:
-    request = urllib.request.Request(url, headers={"User-Agent": "graph-me-maybe"})
-    trusted = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)  # the system's store, as Neo4j's fetch
-    with (urllib.request.urlopen(request, timeout=60, context=trusted) as answer,  # noqa: S310
-          target.open("wb") as out):
-        total, done = int(answer.headers.get("Content-Length") or 0), 0
-        for block in iter(lambda: answer.read(1 << 20), b""):
-            out.write(block)
-            done += len(block)
-            if progress is not None:
-                progress(done, total)
-
-
-def _digest(path: Path) -> str:
-    hashed = sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1 << 20), b""):
-            hashed.update(block)
-    return hashed.hexdigest()
 
 
 def _healthy(port: int) -> bool:

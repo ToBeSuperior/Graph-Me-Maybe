@@ -230,7 +230,7 @@ function Install {
         }
 
         Say "installing Graph-Me-Maybe $tag"
-        uv tool install --force --compile-bytecode --python 3.11 (Join-Path $work $wheel)
+        uv tool install --force --compile-bytecode --python 3.11 "$(Join-Path $work $wheel)[app]"  # the app: window, server, MCP
         if ($LASTEXITCODE -ne 0) { Fail 'uv tool install failed (close Graph-Me-Maybe if it is running, then run the installer again)' }
         if (-not $env:UV_NO_MODIFY_PATH) { Quiet { uv tool update-shell } }
         $bin = (uv tool dir --bin).Trim()

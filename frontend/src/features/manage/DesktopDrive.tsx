@@ -4,7 +4,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ChevronRight, ExternalLink, FileText, Folder } from 'lucide-react';
 import { useState } from 'react';
-import { api, call, ApiError, isBuilding } from '../../api/client';
+import { api, call, errorText, isBuilding } from '../../api/client';
 import type { components } from '../../api/schema';
 import { Button, Spinner } from '../../components/ui';
 import { cn } from '../../lib/format';
@@ -135,9 +135,9 @@ export function DesktopDrive({ kind, app }: { kind: keyof typeof INSTALL; app: s
   const building = isBuilding(useBuild().data);
   const params = { params: { path: { kind } } };
   const drive = useQuery({ queryKey: ['desktopDrive', kind], queryFn: () => call(api.GET('/v1/drives/{kind}', params)) });
-  // What the drive keeps here: asked again once a build ends, which gives back what it read.
+  // What the drive keeps here: asked again once a build ends (`graphChanged`), which gives back what it read.
   const usage = useQuery({
-    queryKey: ['desktopDriveUsage', kind, building],
+    queryKey: ['desktopDriveUsage', kind],
     enabled: !!drive.data?.connected,
     queryFn: () => call(api.GET('/v1/drives/{kind}/usage', params)),
   });
@@ -163,10 +163,15 @@ export function DesktopDrive({ kind, app }: { kind: keyof typeof INSTALL; app: s
   }
   const root = drive.data.root ?? '';
   const connect = async (on: boolean) => {
-    client.setQueryData(['desktopDrive', kind],
-      await call(on ? api.POST('/v1/drives/{kind}/connect', params) : api.DELETE('/v1/drives/{kind}', params)));
-    setAt('');
-    setChecked([]);
+    setSaid(null);
+    try {
+      client.setQueryData(['desktopDrive', kind],
+        await call(on ? api.POST('/v1/drives/{kind}/connect', params) : api.DELETE('/v1/drives/{kind}', params)));
+      setAt('');
+      setChecked([]);
+    } catch (error) {
+      setSaid(errorText(error));
+    }
   };
   const build = async () => {
     setSaid(null);
@@ -174,7 +179,7 @@ export function DesktopDrive({ kind, app }: { kind: keyof typeof INSTALL; app: s
       client.setQueryData(keys.build, await call(api.POST('/v1/jobs/build', {
         body: { paths: checked.map((id) => `${root}/${id}`), files: [], embed: true } })));
     } catch (error) {
-      setSaid(error instanceof ApiError ? error.message : String(error));
+      setSaid(errorText(error));
     }
   };
   return (

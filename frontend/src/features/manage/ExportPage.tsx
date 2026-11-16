@@ -5,7 +5,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, ChevronDown, Cloud, Download, FileArchive, HardDriveDownload, ShieldAlert } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
-import { api, call, ApiError, lastExport } from '../../api/client';
+import { api, call, errorText, lastExport } from '../../api/client';
 import { Button, Input, Spinner } from '../../components/ui';
 import { changedAt, cn, shownName } from '../../lib/format';
 import { useLang, useT } from '../../lib/i18n';
@@ -53,7 +53,7 @@ export function ExportPage() {
   const [said, setSaid] = useState<string | null>(null);
   const start = async (run: () => Promise<unknown>) => {
     setSaid(null);
-    try { await run(); } catch (error) { setSaid(error instanceof ApiError ? error.message : String(error)); }
+    try { await run(); } catch (error) { setSaid(errorText(error)); }
     client.invalidateQueries({ queryKey: keys.exportJob });
   };
 

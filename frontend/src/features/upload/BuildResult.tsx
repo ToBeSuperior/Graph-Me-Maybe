@@ -10,7 +10,7 @@ import { useBuild } from '../../lib/queries';
 
 /** A failure as the server says it, `<name>: <reason>`, split at the first `: ` -- a name
  * holds none: neither macOS nor Windows lets a file or folder name hold a colon. */
-export function splitFailure(failure: string): [string, string] {
+function splitFailure(failure: string): [string, string] {
   const at = failure.indexOf(': ');
   return at < 0 ? [failure, ''] : [failure.slice(0, at), failure.slice(at + 2)];
 }

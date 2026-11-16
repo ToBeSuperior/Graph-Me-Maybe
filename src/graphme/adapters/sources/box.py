@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import time
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -26,6 +27,8 @@ ROOT = "0"
 """Box's id for the top of a user's files."""
 FIELDS = "id,type,name,size,sha1,file_version,trashed_at"
 PAGE = 1000
+NOT_READY_TRIES = 5
+"""How often a download Box says is not ready yet (202, `Retry-After`) is asked again."""
 
 
 def origin(file_id: str, name: str) -> str:
@@ -149,10 +152,19 @@ class BoxSource:
         folder = Path(tempfile.mkdtemp(prefix="box-", dir=self._scratch))
         try:
             copy = folder / name
-            copy.write_bytes(self._get(f"files/{file_id_of(origin_)}/content").content)
+            copy.write_bytes(self._content(file_id_of(origin_)))
             yield copy
         finally:
             shutil.rmtree(folder, ignore_errors=True)
+
+    def _content(self, file_id: str) -> bytes:
+        """A file's bytes. A 202 is Box saying it is not ready yet; its body is not the file."""
+        for _ in range(NOT_READY_TRIES):
+            response = self._get(f"files/{file_id}/content")
+            if response.status_code != 202:
+                return response.content
+            time.sleep(float(response.headers.get("Retry-After") or 1))
+        raise OSError(f"Box did not make file {file_id} ready to download")
 
     def web_url(self, origin_: str) -> str | None:
         return web_url(origin_)

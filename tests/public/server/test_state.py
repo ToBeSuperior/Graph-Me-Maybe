@@ -626,3 +626,18 @@ def test_an_office_file_sealed_by_a_password_or_rights_says_so(demo: Demo) -> No
     demo._steps(session, demo._prepare)
 
     assert session.state == "error" and session.error == state.PROTECTED
+
+
+def test_a_build_lets_go_of_a_cloud_copy_only_where_it_knows_the_copy_is(
+    demo: Demo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    here = tmp_path / "here"
+    (here / "inside").mkdir(parents=True)
+    (here / "inside" / ".env").write_text("INVENTED=1", encoding="utf-8")
+    monkeypatch.chdir(here / "inside")
+    demo.origins["gone"] = ("box://invented", {})  # its catalog entry dropped meanwhile
+    demo._build_corpus = lambda docs, put, embed: None  # type: ignore[method-assign]
+
+    demo._build_then_let_go(["gone"], put=False, embed=False)
+
+    assert (here / "inside" / ".env").is_file()

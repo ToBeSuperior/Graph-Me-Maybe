@@ -5,6 +5,36 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.73] - 2026-11-16
+
+### Added
+
+- **On PyPI**: `pip install graph-me-maybe` installs the CLI and the Python API; `[server]` adds
+  `graphme serve`, `[app]` the app (window, tray, MCP). The viewer that draws Office and Hangul
+  files, a Chromium (without Chrome) and the web app are fetched from this version's release
+  the first time they are needed, each checked against its `SHA256SUMS`; `graphme setup
+  [--server]` (`graphme.setup()`) fetches them, and Neo4j, ahead of time. The installers
+  install `[app]`, so the app is as before.
+- A page whose original file was moved or deleted says so instead of showing a broken picture.
+
+### Changed
+
+- A question's embedding and split are made once and kept; pictures across workspaces come in
+  the order of their rank.
+- A document the question names must be written in the question: a file name the model copied
+  from elsewhere no longer puts that document first.
+- Reading: a PDF paragraph no longer takes in the cells of a table beside it; a worksheet owns
+  its pictures once; a page with more units than can be read is said unread rather than left
+  flat; wrapped Word pictures, text boxes in cells, list numbering 0, repeated slide shape ids.
+
+### Fixed
+
+- A Neo4j answering on the port that is not this home's is refused, and never sent this home's
+  password.
+- Races in the server around builds, deletes and workspace switches; the newest build is the
+  one shown; Box listing stops polling; drive usage refreshes.
+- A long row of page tabs no longer widens a narrow window.
+
 ## [0.1.72] - 2026-11-15
 
 ### Added

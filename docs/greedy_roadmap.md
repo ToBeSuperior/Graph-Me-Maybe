@@ -34,7 +34,7 @@ Standing rules for this list:
 - [x] **1.4 Tables** -- a matter of method, left as a TODO for a fuller discussion
       (`docs/roadmap.md`). Simpler items first.
 
-## 2 · Accounts (the owner does them; steps written for them)
+## 2 · Accounts (the owner does them; steps in `docs/requests/owner-accounts.md`)
 
 - [x] **2.1 Microsoft publisher verification** -- steps given to the owner 2026-11-15; waits on them.
 - [x] **2.2 PyPI** -- registering the project and giving release rights (trusted publishing from

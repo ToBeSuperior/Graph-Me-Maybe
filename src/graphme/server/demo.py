@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from graphme.config import Settings, load_settings
 from graphme.samples import write_samples
 from graphme.server import create_app
-from graphme.server.app import WEB, make_demo
+from graphme.server.app import default_web, make_demo
 from graphme.server.jobs import BUILDING
 from graphme.server.models import BuildState
 from graphme.server.settings import preflight_behind
@@ -64,7 +64,7 @@ def demo_settings(environ: dict[str, str] | None = None) -> Settings:
 def build_app(demo: Demo, web: Path | None) -> FastAPI:
     """The server over `demo`, with the samples and the demo's own settings. Without `web`,
     a checkout's build (the server's own default) if there is one."""
-    return create_app(demo, web=web or (WEB if WEB.is_dir() else None),
+    return create_app(demo, web=web or default_web(),
                       load=demo_settings, extra=samples(demo))
 
 

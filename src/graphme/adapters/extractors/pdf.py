@@ -20,7 +20,6 @@ from graphme.adapters.extractors.pdf_scans import (
     scan_dpi,
 )
 from graphme.adapters.extractors.pdf_tables import band_between, continued_tables
-from graphme.application.visual_crops import CROP_ASSET_KEY, put_crop
 from graphme.domain.enums import (
     DocumentFormat,
     EdgeType,
@@ -338,10 +337,9 @@ class PDFExtractor:
                 if self._read_scan is not None and is_scan(page):
                     scans.append(page_index)
 
-            for page_index, png, page, reading in self._read_scans(document, scans):
+            for page_index, page, reading in self._read_scans(document, scans):
                 read = None if reading is None else self._with_reading(
-                    pages[page_index - 1], reading, png=png, page=page,
-                    content_hash=content_hash)
+                    pages[page_index - 1], reading, page=page, content_hash=content_hash)
                 if read is None:
                     continue
                 pages[page_index - 1] = read
@@ -548,7 +546,7 @@ class PDFExtractor:
 
     def _read_scans(
         self, document: pymupdf.Document, scans: Sequence[int]
-    ) -> Iterator[tuple[int, bytes, pymupdf.Page, ScannedPage | None]]:
+    ) -> Iterator[tuple[int, pymupdf.Page, ScannedPage | None]]:
         """Each scanned page read by the model, `workers` side by side. Pages are drawn a
         batch at a time, so a long scan never holds every page's picture at once. A page the
         model could not answer for stays the picture it was, as a page without captions does."""
@@ -571,14 +569,13 @@ class PDFExtractor:
                 pngs = [page.get_pixmap(dpi=scan_dpi(page)).tobytes("png")  # type: ignore[no-untyped-call]
                         for page in pages]
                 readings = pool.map(one, pngs, batch)
-                yield from zip(batch, pngs, pages, readings, strict=True)
+                yield from zip(batch, pages, readings, strict=True)
 
     def _with_reading(
         self,
         units: list[_NativeUnit],
         reading: ScannedPage,
         *,
-        png: bytes,
         page: pymupdf.Page,
         content_hash: str,
     ) -> list[_NativeUnit] | None:
@@ -639,12 +636,10 @@ class PDFExtractor:
             )
         if not readable(read):
             return None
-        crop = None if self._asset_store is None else put_crop(self._asset_store, png)
+        # Binding cuts its crop, as every crop, to its own box.
         kept = [
-            unit if unit.type is not NodeType.IMAGE else replace(unit, metadata={
-                **unit.metadata, "background": True,
-                **({CROP_ASSET_KEY: crop} if crop is not None and unit is first else {}),
-            })
+            unit if unit.type is not NodeType.IMAGE
+            else replace(unit, metadata={**unit.metadata, "background": True})
             for unit in units
         ]
         return sorted([*kept, *read], key=self._page_order)
@@ -948,16 +943,19 @@ class PDFExtractor:
             if _page_share(table.bbox, page) >= CHECKED_PAGE_SHARE
         ]
 
-        def is_a_table(item: tuple[int, Any]) -> bool:
-            index, table = item
+        # One pymupdf document is not to be shared across threads: draw here, ask beside.
+        outlined = [(index, _outlined(document[index], table.bbox)) for index, table in asked]
+
+        def is_a_table(item: tuple[int, bytes]) -> bool:
+            index, picture = item
             try:
-                return check(_outlined(document[index], table.bbox))
+                return check(picture)
             except (RuntimeError, ValueError) as error:
                 _log.warning("page %d: table not checked -- %s", index + 1, error)
                 return True
 
         with ThreadPoolExecutor(max_workers=max(1, self._workers)) as pool:
-            verdicts = list(pool.map(is_a_table, asked))
+            verdicts = list(pool.map(is_a_table, outlined))
         for (index, table), kept in zip(asked, verdicts, strict=True):
             if kept:
                 continue
@@ -1272,6 +1270,11 @@ def printed_pieces(
     pieces: dict[str, tuple[str, ...]] = {
         node.id: (node.text,) for node in nodes if node.metadata.get("scan_of") and node.text
     }
+    # The table cells extraction left out of a block stay out of its pieces too.
+    tables: dict[int, list[tuple[float, float, float, float]]] = {}
+    for node in nodes:
+        if node.metadata.get("native_kind") == "table" and node.locator.bbox is not None:
+            tables.setdefault(node.locator.page, []).append(tuple(node.locator.bbox))
     written: set[str] = set()
     with pymupdf.open(source) as document:  # type: ignore[no-untyped-call]
         for page_index, page in enumerate(document, start=1):
@@ -1281,6 +1284,7 @@ def printed_pieces(
                 node_id = wanted.get((page_index, int(block.get("number", occurrence))))
                 if node_id is None:
                     continue
+                block = PDFExtractor._outside_tables(block, tables.get(page_index, []))
                 lines = printed_block_lines(block)
                 if lines:
                     pieces[node_id] = tuple(text for text, _ in lines)

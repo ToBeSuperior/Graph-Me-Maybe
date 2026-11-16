@@ -65,6 +65,19 @@ class RagService(Protocol):
         ...
 
 
+def _needs(extra: str, *modules: str) -> None:
+    """A command whose extra is not installed says which one, not an ImportError."""
+    import importlib
+
+    try:
+        for module in modules:
+            importlib.import_module(module)
+    except ImportError as error:
+        typer.echo(f"this command needs graph-me-maybe[{extra}]: "
+                   f"pip install 'graph-me-maybe[{extra}]'", err=True)
+        raise typer.Exit(2) from error
+
+
 def create_app(
     *,
     corpus_service: CorpusService | None = None,
@@ -81,6 +94,7 @@ def create_app(
         """For an MCP client to start: `claude mcp add graph-me-maybe -- graphme mcp`. It reaches
         the app running in the background, starting it if none runs, and reads only the
         workspaces switched on for MCP in the app."""
+        _needs("app", "mcp")
         from graphme.mcp_server import run
 
         run(app_home())
@@ -179,6 +193,20 @@ def create_app(
         corpus_service.delete(list(files))
         typer.echo(f"deleted={len(files)}")
 
+    @app.command(short_help="Fetch the viewer, a browser and Neo4j now, not on first use.")
+    def setup(server: bool = typer.Option(False, "--server", help="the web app too")) -> None:
+        """What is otherwise fetched the first time it is needed, fetched now: for CI or an
+        offline machine. Each is checked against its published checksum."""
+        import httpx
+
+        from graphme.api import setup as fetch_all
+
+        try:
+            fetch_all(server=server, say=typer.echo)
+        except (OSError, RuntimeError, httpx.HTTPError) as error:
+            typer.echo(f"setup did not finish: {error}", err=True)
+            raise typer.Exit(1) from error
+
     @app.command("reset-graph", short_help="Empty the graph space: every document deleted.")
     def reset_graph(yes: bool = typer.Option(False, "--yes", help="do not ask first")) -> None:
         """Empty the graph space: every document, passage and link deleted, its indexes kept.
@@ -229,6 +257,7 @@ def create_app(
         Without GRAPHME_API_KEY it asks for no key, and so opens on this machine only."""
         # Here only: no other command waits for the web framework to load.
         from graphme.config import LOOPBACK
+        _needs("server", "fastapi", "uvicorn", "multipart")
         from graphme.server import app as server
 
         if openapi:
@@ -248,6 +277,7 @@ def create_app(
     ) -> None:
         """What the installer's shortcut runs. Settings, graph data, the web app and the viewer
         are in the app's folder (GRAPHME_HOME, else the platform's app-data folder)."""
+        _needs("app", "fastapi", "uvicorn", "keyring")
         from graphme.launcher import launch
 
         launch(port=port, browser=not no_browser)

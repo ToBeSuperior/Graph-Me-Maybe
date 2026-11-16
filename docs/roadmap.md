@@ -41,11 +41,13 @@ MMLongBench-Doc and DocBench, published on the site.
       keywords (`graphme.read(path, provider=..., api_key=...)`, `GraphMe(...)`, `CODE_SETTINGS`),
       `py.typed`, a test keeping `import graphme` free of the server, window and MCP packages, and
       `graphme.passages(doc)` (`Passage`: the space's own cut of a document read alone, with
-      `file`, `format`, `headings`, `sheet`/`cells`, `slide`, `pages`). Left: the extras split
-      and the distribution renamed `graph-me-maybe` (the installers and the release workflow
-      install the wheel by name: change them together and run an install), fetching the viewer,
-      Neo4j and the models on first use (`graphme.setup()`), the LangChain loader, workspaces
-      from code, `docs/library.md` and the notebooks, and PyPI (the owner's pending publisher).
+      `file`, `format`, `headings`, `sheet`/`cells`, `slide`, `pages`). Done 2026-11-16: the extras
+      (`[server]`, `[app]`; the installers install `[app]`), the viewer, a Chromium and the web
+      app fetched from this version's release on first use (`release_assets.py`), `graphme.setup()`
+      and `graphme setup [--server]`, and the release's wheel published to PyPI by `release.yml`
+      (Trusted Publishing; the pending publisher is registered). Left: the search model fetched
+      by `GraphMe` on first use (the server already does), the LangChain loader, workspaces
+      from code, `docs/library.md` and the notebooks, and the first upload (the next tag).
 - [ ] **A team workspace.** A workspace kept in a folder on a shared drive (Box, Google Drive,
       OneDrive/SharePoint), so a team opens the same graph. That folder is left out of what a
       build reads, whatever folder above it is chosen. To decide first: a running Neo4j's store

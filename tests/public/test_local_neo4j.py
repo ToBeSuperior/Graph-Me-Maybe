@@ -483,3 +483,22 @@ def test_a_port_another_home_took_in_the_same_moment_is_given_up_for_the_next(
         answers=lambda port: True, secure=lambda port, secret: None)
 
     assert began[0] == 7687 and set(began[1:]) == {7688} and uri == "bolt://127.0.0.1:7688"
+
+
+def test_no_port_of_its_own_after_every_try_is_an_error_and_no_password_is_sent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If every port tried answers with another home's Neo4j, none of them is this home's: it
+    stops and says so, and never sends a password change to a server that is not its own."""
+    monkeypatch.setattr(local_neo4j, "_started", [])
+    home = Neo4jHome(tmp_path)
+    sent: list[int] = []
+
+    with pytest.raises(RuntimeError, match="port"):
+        local_neo4j.ensure_local_neo4j(
+            tmp_path, ("1g", "512m"), installing=lambda root: home,
+            starting=lambda *a, **k: _Child(),  # type: ignore[arg-type]
+            is_ours=lambda data, port: False, free=lambda port: True,
+            answers=lambda port: True, secure=lambda port, secret: sent.append(port))
+
+    assert sent == [] and local_neo4j._started == []

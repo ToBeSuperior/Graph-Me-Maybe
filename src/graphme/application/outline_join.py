@@ -344,9 +344,15 @@ class Joining:
 
         for u in besides:
             parent[u] = resolve(u)
-        for u, p in parent.items():
-            if p == u:
-                parent[u] = self.top
+        # Headings or a break may name each other: a unit whose chain comes back to it is
+        # cut there, under the title, so every chain ends at the document.
+        for u in parent:
+            seen, at = {u}, parent[u]
+            while at in parent and at not in seen:
+                seen.add(at)
+                at = parent[at]
+            if at == u:
+                parent[u] = self.top if u != self.top else self.root
         return (
             *(HierarchyDecision(subject_id=u, status="drop", confidence=0.9,
                                 rationale="dropped on its page") for u in sorted(self.dropped)),

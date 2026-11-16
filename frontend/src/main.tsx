@@ -8,11 +8,7 @@ import { KeyGate } from './components/KeyGate';
 import { TipProvider } from './components/ui';
 import { DangerPage } from './features/manage/DangerPage';
 import { MailPage } from './features/manage/MailPage';
-import { BoxPage } from './features/manage/BoxPage';
-import { DrivePage } from './features/manage/DrivePage';
-import { DrivesLayout } from './features/manage/DrivesLayout';
-import { DrivesPage } from './features/manage/DrivesPage';
-import { OneDrivePage } from './features/manage/OneDrivePage';
+import { driveRoutes, DrivesLayout } from './features/manage/DrivesLayout';
 import { SettingsPage } from './features/manage/SettingsPage';
 import { ExportPage } from './features/manage/ExportPage';
 import { LibraryPage } from './features/manage/LibraryPage';
@@ -66,15 +62,7 @@ const router = createBrowserRouter([
           { path: 'docs/:id', element: <DocumentRoute /> },
           { path: 'export', element: <ExportPage /> },
           { path: 'settings', element: <SettingsPage /> },
-          {
-            element: <DrivesLayout />,
-            children: [
-              { path: 'drive', element: <DrivePage /> },
-              { path: 'onedrive', element: <OneDrivePage /> },
-              { path: 'box', element: <BoxPage /> },
-              { path: 'drives', element: <DrivesPage /> },
-            ],
-          },
+          { element: <DrivesLayout />, children: driveRoutes },
           { path: 'mail', element: <MailPage /> },
           { path: 'danger', element: <DangerPage /> },
         ],

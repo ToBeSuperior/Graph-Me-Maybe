@@ -4,10 +4,9 @@
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { api, call, pageImage } from '../../api/client';
+import { pageImage } from '../../api/client';
 import { MailContent } from '../manage/MailMessage';
-import { keys } from '../../lib/queries';
+import { useDocumentGraph } from '../../lib/queries';
 import { FileIcon, HopBadge, RelationChip } from '../../components/docs';
 import { PageViewer, type Mark } from '../../components/PageViewer';
 import { PagesPending, PageTabs } from '../../components/PageTabs';
@@ -124,10 +123,7 @@ export const Preview = memo(function Preview({ row, question }: { row: Row; ques
 
 /** A mail message has no pages to draw: the message itself is shown, as on its own page. */
 function MailPreview({ id }: { id: string }) {
-  const graph = useQuery({
-    queryKey: keys.document(id),
-    queryFn: () => call(api.GET('/v1/documents/{document_id}/graph', { params: { path: { document_id: id } } })),
-  });
+  const graph = useDocumentGraph(id);
   return graph.data ? <MailContent id={id} graph={graph.data} className="min-h-0 flex-1 overflow-y-auto px-1" />
     : <PagesPending error={graph.error as Error | null} sheets={undefined} />;
 }

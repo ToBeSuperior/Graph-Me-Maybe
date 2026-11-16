@@ -158,6 +158,64 @@ def test_deleting_a_workspace_takes_its_scope_out_of_the_graph_then_its_folder(
     assert not folder.parent.exists() and stopped == []
 
 
+def test_a_delete_waits_for_a_switch_under_way(workspace_demo: Demo) -> None:
+    """A delete checked the workspace was not the one open while a switch onto it was under
+    way, then dropped the graph the switch had just opened."""
+    import threading
+
+    made = workspace_demo.workspaces.create("Invented project")  # type: ignore[union-attr]
+    space = workspace_demo.graph.graph_space()
+    deleting = threading.Thread(target=workspace_demo.delete_workspace, args=(made["id"],))
+
+    with workspace_demo.building:  # as a switch holds it
+        deleting.start()
+        deleting.join(0.3)
+        assert space.dropped == []  # type: ignore[attr-defined]
+    deleting.join(5)
+
+    assert space.dropped == [WorkspaceScope(made["id"])]  # type: ignore[attr-defined]
+
+
+def test_while_the_graph_db_opens_a_workspace_request_is_told_it_is_starting(
+    workspace_demo: Demo, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A first start moves every workspace's old graph in, minutes long, under the lock that
+    opens the graph: a switch, a read beside, a delete or new keys waited it out."""
+    import threading
+    import time
+
+    from graphme.server.jobs import GraphStarting
+
+    monkeypatch.setattr(state, "SPACE_WAIT", 0.1)
+    made = workspace_demo.workspaces.create("Invented project")  # type: ignore[union-attr]
+    workspace_demo.graph.opened_space = None  # type: ignore[attr-defined]
+    held, release = threading.Event(), threading.Event()
+
+    def opening() -> None:
+        with workspace_demo.opening_space:
+            held.set()
+            release.wait(3)
+
+    threading.Thread(target=opening, daemon=True).start()
+    held.wait(5)
+    client = TestClient(create_app(workspace_demo), base_url=BASE)
+    try:
+        for ask in (lambda: workspace_demo.switch_workspace(made["id"]),
+                    lambda: workspace_demo.reader(made["id"]),
+                    lambda: workspace_demo.delete_workspace(made["id"]),
+                    lambda: workspace_demo.reconfigure(
+                        SETTINGS.model_copy(update={"local_neo4j": home}))):
+            started = time.monotonic()
+            with pytest.raises(GraphStarting):
+                ask()
+            assert time.monotonic() - started < 1.5
+        said = client.post(f"/v1/workspaces/{made['id']}/open")
+        assert said.status_code == 503 and said.headers.get("Retry-After")
+    finally:
+        release.set()
+    assert workspace_demo.workspaces.active == FIRST  # type: ignore[union-attr]
+
+
 def test_no_switch_while_a_build_runs(workspace_demo: Demo) -> None:
     made = workspace_demo.workspaces.create("Invented project")  # type: ignore[union-attr]
     workspace_demo.build = CorpusBuild(id="b", state="reading")

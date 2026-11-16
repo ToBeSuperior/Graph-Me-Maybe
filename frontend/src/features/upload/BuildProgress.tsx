@@ -3,7 +3,8 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { Check, X } from 'lucide-react';
 import { useState } from 'react';
-import { api, call, isBuilding, type BuildState } from '../../api/client';
+import { toast } from 'sonner';
+import { api, call, errorText, isBuilding, type BuildState } from '../../api/client';
 import { Button, Spinner } from '../../components/ui';
 import { cn } from '../../lib/format';
 import { useT, type WordKey } from '../../lib/i18n';
@@ -42,7 +43,9 @@ function CancelBuild({ id, compact }: { id: string; compact: boolean }) {
     <Button size="sm" variant="ghost" className={cn('mt-2', !compact && 'float-right')} busy={busy} title={t('cancelBuildTip')}
       onClick={async () => {
         setBusy(true);
-        try { client.setQueryData(keys.build, await call(api.POST('/v1/jobs/{job_id}/cancel', { params: { path: { job_id: id } } }))); } finally { setBusy(false); }
+        try { client.setQueryData(keys.build, await call(api.POST('/v1/jobs/{job_id}/cancel', { params: { path: { job_id: id } } }))); }
+        catch (error) { toast.error(errorText(error)); }
+        finally { setBusy(false); }
       }}>
       <X className="size-3.5" />{t('cancelBuild')}
     </Button>

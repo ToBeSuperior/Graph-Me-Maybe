@@ -22,6 +22,9 @@ def ran(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]
     monkeypatch.delenv("GRAPHME_API_KEY", raising=False)
     monkeypatch.setattr(server_settings, "_models", lambda url, headers: None)
     monkeypatch.setattr(uvicorn, "run", lambda app, **where: started.append(where))
+    from graphme.server import app as server_app
+
+    monkeypatch.setattr(server_app, "default_web", lambda: None)  # never the release's, here
     return started
 
 

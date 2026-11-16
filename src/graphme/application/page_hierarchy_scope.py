@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from graphme.application.page_regions import PixelBox, SheetPixelGrid
 from graphme.application.page_units import held_by_a_visual
 from graphme.application.reading_order import in_columns
-from graphme.application.unit_placement import CellRangePlacer, DrawingLike, UnitPlacer
+from graphme.application.unit_placement import CellRangePlacer, UnitPlacer
 from graphme.application.visual_crops import crop_box
 from graphme.domain.enums import NodeType
 from graphme.domain.models import ExtractedDocument, GraphNode, HierarchyUnit
@@ -86,14 +86,14 @@ def build_sheet_scope(
     scope: str,
     page_index: int,
     grid: SheetPixelGrid,
-    extents: Mapping[int, DrawingLike] | None = None,
+    held: frozenset[str] | None = None,
 ) -> HierarchyScopeUnits | None:
     """Return the scope for one rendered worksheet, or None when nothing was placed.
 
     A worksheet is asked like any other page (`build_placed_scope`): what a visual holds is
     part of it, not a unit beside it. Only the placing is the sheet's own. Text and tables are
     where their cells are -- a sheet is a grid without end, and nothing else bounds them --
-    and a picture or chart is its DrawingML extent (`extents`, by `xml_index`), the box its
+    and a picture or chart is its DrawingML extent, the box its
     crop was cut by, since a resized picture keeps a stale anchor cell.
     """
     members = [node for node in extracted.nodes if node.locator.sheet == sheet_name]
@@ -103,7 +103,8 @@ def build_sheet_scope(
     return build_placed_scope(
         extracted=extracted,
         members=members,
-        placer=CellRangePlacer(grid, extents=extents),
+        placer=CellRangePlacer(grid),
+        held=held,
         root=worksheet,
         scope=scope,
         page_index=page_index,
@@ -120,6 +121,7 @@ def build_placed_scope(
     page_index: int,
     indented: bool = False,
     page_width: float | None = None,
+    held: frozenset[str] | None = None,
 ) -> HierarchyScopeUnits | None:
     """Return the scope for one page whose units carry their own position.
 
@@ -134,8 +136,9 @@ def build_placed_scope(
     `indented` is for those pages, where the left edge of a line means nesting.
     `page_width` is for those pages too: running text can be set in columns, and a unit is
     read where its column puts it, not where its top edge falls.
+    `held` is `held_by_a_visual(extracted)`, for a caller asking every page of a document.
     """
-    absorbed = held_by_a_visual(extracted)
+    absorbed = held_by_a_visual(extracted) if held is None else held
     entries: list[_Entry] = []
     spaces: dict[str, int] = {}
     for node in members:

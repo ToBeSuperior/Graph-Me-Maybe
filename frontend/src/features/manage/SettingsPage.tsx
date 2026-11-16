@@ -3,7 +3,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { Check, CheckCircle2, Copy, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
-import { api, call, ApiError } from '../../api/client';
+import { api, call, errorText } from '../../api/client';
 import { Badge, Button, Dialog, DialogContent, Input, Spinner } from '../../components/ui';
 import { useT } from '../../lib/i18n';
 import { keys, useSearchModels, useSettings, useWorkspaces } from '../../lib/queries';
@@ -80,7 +80,7 @@ export function SettingsPage() {
       setValues({});
       setSaid({ ok: true, text: t('settingsSaved') });
     } catch (error) {
-      setSaid({ ok: false, text: error instanceof ApiError ? error.message : String(error) });
+      setSaid({ ok: false, text: errorText(error) });
     } finally {
       setSaving(false);
     }
@@ -138,7 +138,7 @@ function SearchModels() {
       else client.setQueryData(keys.settings, now);
       await client.invalidateQueries({ queryKey: keys.searchModels });
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -200,7 +200,7 @@ function SearchModels() {
   );
 }
 
-export const MCP_COMMAND = 'claude mcp add graph-me-maybe -- graphme mcp';
+const MCP_COMMAND = 'claude mcp add graph-me-maybe -- graphme mcp';
 const NOTICED = 'graphme.mcpNoticed';
 const noticed = () => { try { return localStorage.getItem(NOTICED) === '1'; } catch { return false; } };
 
@@ -220,7 +220,7 @@ function McpClients() {
     try {
       await work();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
+      setError(errorText(e));
     }
     await client.invalidateQueries({ queryKey: keys.workspaces });
   };

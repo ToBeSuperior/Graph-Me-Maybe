@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any, cast
 from xml.etree import ElementTree
 
-from graphme import processes
+from graphme import processes, release_assets
 from graphme.adapters.rendering.browser_capture import NO_BROWSER, SiteHandler, font_environment
 from graphme.domain.enums import NodeType
 from graphme.domain.ids import sha256_file
@@ -272,6 +272,8 @@ class HwpPrinter:
         """`source` as a PDF: printed into `folder` under its own name, if it is HWP or HWPX."""
         if source.suffix.lower() not in HWP_SUFFIXES:
             return source
+        if self._viewer == release_assets.default_viewer():
+            release_assets.viewer(self._viewer)
         folder.mkdir(parents=True, exist_ok=True)
         out = folder / source.name
         # Its messages carry file names: UTF-8 both ways, not Windows' ANSI code page.

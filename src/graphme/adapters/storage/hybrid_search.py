@@ -26,24 +26,9 @@ def _lucene_escaped(text: str) -> str:
     return re.sub(r"\b(AND|OR|NOT)\b", lambda m: m.group(1).lower(), escaped)
 
 
-def fusion_weights(question: str, *, dense: float) -> tuple[float, float]:
-    """How much the vector and the fulltext search count for this question. One naming a
-    document or part by its number leans on the words: an identifier is matched by its letters,
-    and BM25 serves specific questions better than cosine (arXiv:2504.05324). A weight already
-    leaning on the words stays as set."""
-    text = 1.0 - dense
-    if _names_an_identifier(question) and dense > text:
-        return round(text, 6), round(dense, 6)
-    return round(dense, 6), round(text, 6)
-
-
 _IDENTIFIER = re.compile(r"(?=[\w-]*[A-Za-z])(?=[\w-]*\d)[A-Za-z0-9][\w-]{2,}", re.ASCII)
 """A word of Latin letters and digits together, three characters or more -- QP-210, V50-0003,
 ZX42 -- the way a document, a part or a lot is named; a plain number or a unit is not one."""
-
-
-def _names_an_identifier(question: str) -> bool:
-    return bool(named_identifiers(question))
 
 
 SEARCH_DEPTH = 400
@@ -115,15 +100,16 @@ class _OnceRetriever(HybridCypherRetriever):
         search's weight / (rrf_k + r), and its score is the sum, scaled so a passage first in
         both scores 1 -- the relative relevance the page shows. A passage is fused only with
         evidence it is about the question (`_FUSED`); none, and the search found nothing. A
-        question naming a code is weighted toward the words (`fusion_weights`) only where some
-        passage holds the code.
+        question naming a code leans on the words where some passage holds the code: an
+        identifier is matched by its letters, and BM25 serves specific questions better than
+        cosine (arXiv:2504.05324). A weight already leaning on the words stays as set.
         Highest score first: the query's later steps keep no order."""
+        dense, text = round(self.dense_weight, 6), round(1.0 - self.dense_weight, 6)
         # A code no passage holds says nothing about where the answer is (a page number dropped
         # as furniture, a code inside a picture): the question is searched as one naming none.
-        if self._holds_any(named_identifiers(question)):
-            dense, text = fusion_weights(question, dense=self.dense_weight)
-        else:
-            dense, text = round(self.dense_weight, 6), round(1.0 - self.dense_weight, 6)
+        named = named_identifiers(question)
+        if named and dense > text and self._holds_any(named):
+            dense, text = text, dense
         asked: dict[str, Any] = {
             "vector_index_name": self.vector_index_name,
             "fulltext_index_name": self.fulltext_index_name,
@@ -150,10 +136,7 @@ class _OnceRetriever(HybridCypherRetriever):
 
 
     def _holds_any(self, named: list[str]) -> bool:
-        """Whether some passage holds one of the identifiers a question names -- true when it
-        names none."""
-        if not named:
-            return True
+        """Whether some passage holds one of the identifiers a question names."""
         records, _, _ = self.driver.execute_query(
             "CALL db.index.fulltext.queryNodes($index, $words, {limit: 1}) YIELD node "
             "RETURN count(node) AS found",
@@ -238,5 +221,11 @@ def named_identifiers(question: str) -> list[str]:
     without the particle written right after one ("QP-210의"). A word is cut where its Latin
     letters and digits end."""
     words = (word.lower() for word in re.findall(r"[A-Za-z0-9][\w-]*", question, re.ASCII))
-    numbers = (re.sub(r"[가-힣]+$", "", number) for number in sorted(document_numbers(question)))
-    return list(dict.fromkeys([*numbers, *(w for w in words if _IDENTIFIER.fullmatch(w))]))
+    return list(dict.fromkeys(
+        [*numbers_named(question), *(w for w in words if _IDENTIFIER.fullmatch(w))]))
+
+
+def numbers_named(question: str) -> list[str]:
+    """The document numbers a question writes (`document_numbers`), without the particle
+    written right after one ("SOP-2026-0412의")."""
+    return [re.sub(r"[가-힣]+$", "", number) for number in sorted(document_numbers(question))]

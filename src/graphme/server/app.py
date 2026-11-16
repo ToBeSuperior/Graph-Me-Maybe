@@ -16,9 +16,10 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypeVar
+from typing import Annotated, Any, Literal, TypeVar, cast
 from urllib.parse import quote
 
+import httpx
 from fastapi import (
     APIRouter,
     Depends,
@@ -63,7 +64,7 @@ from graphme.application.visual_crops import (
     read_crop,
     read_node_crop,
 )
-from graphme.config import Settings, load_settings
+from graphme.config import Settings, load_settings, settings_folder
 from graphme.domain.enums import DocumentFormat
 from graphme.runtime import create_page_renderer
 from graphme.server import models as api
@@ -85,6 +86,24 @@ WEB = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 """The web app as a checkout builds it (`npm run build` in `frontend/`); an installed package
 has none, and serves the API alone."""
 
+
+
+def default_web() -> Path | None:
+    """The checkout's web app, else the release's in the app's home -- fetched there the first
+    time (a pip install has none); with neither, None and the API alone."""
+    if WEB.is_dir():
+        return WEB
+    from graphme import release_assets
+    from graphme.config import app_home
+
+    try:
+        return release_assets.web(app_home() / "web")
+    except (OSError, KeyError, RuntimeError, httpx.HTTPError) as error:
+        logging.getLogger(__name__).warning("the web app did not download (%s): the API alone",
+                                            error)
+        return None
+
+
 MAX_QUESTION_CHARS = 1000
 """The longest question asked: a page of text is not a question, and it is what is embedded."""
 
@@ -103,10 +122,11 @@ MAP_LIMIT = 300
 
 def errors(app: FastAPI) -> None:
     """Every answer that is not a success said as `{"detail": str}`: a request that cannot be
-    read (400), this project's own refusals (`Busy`, `GraphNotEmbedded` 409, `Undrawn` 503),
-    and anything else (500, the whole of it in the log). Python's own exceptions are not
-    turned into anything here: only the route that called what documents them does that
-    (`refused`), so a bug's KeyError is a 500, not a 404."""
+    read (400), this project's own refusals (`Busy`, `GraphNotEmbedded` 409, `Undrawn` 503,
+    `GraphStarting` 503 with Retry-After, which the page keeps asking through), and anything
+    else (500, the whole of it in the log). Python's own exceptions are not turned into
+    anything here: only the route that called what documents them does that (`refused`), so a
+    bug's KeyError is a 500, not a 404."""
 
     @app.exception_handler(RequestValidationError)
     async def unreadable(_: Request, error: RequestValidationError) -> JSONResponse:
@@ -122,6 +142,10 @@ def errors(app: FastAPI) -> None:
     @app.exception_handler(Undrawn)
     async def undrawn(_: Request, error: Exception) -> JSONResponse:
         return JSONResponse({"detail": str(error)}, 503)
+
+    @app.exception_handler(GraphStarting)
+    async def starting(_: Request, error: Exception) -> JSONResponse:
+        return JSONResponse({"detail": str(error)}, 503, headers={"Retry-After": "3"})
 
     @app.exception_handler(ServiceUnavailable)
     @app.exception_handler(SessionExpired)
@@ -148,6 +172,24 @@ def refused() -> Iterator[None]:
         # A KeyError's own str() puts its message in quotes.
         said = error.args[0] if isinstance(error, KeyError) and error.args else error
         raise HTTPException(404, str(said)) from error
+
+
+def only_here(request: Request) -> None:
+    """What only this machine's own page may ask for, whatever the key: another site open in
+    the browser could otherwise ask for it (403)."""
+    if not from_here(request):
+        raise HTTPException(403, "only this machine's pages may do this")
+
+
+HERE = Depends(only_here)
+
+
+def opened_in_browser(url: str) -> dict[str, str]:
+    """`url` opened in this machine's browser, and handed back: the page opens it when the
+    server cannot."""
+    with contextlib.suppress(Exception):
+        processes.open_in_browser(url)
+    return {"url": url}
 
 
 def _closing_page(said: str) -> str:
@@ -199,13 +241,12 @@ def create_app(
 
     v1 = APIRouter(prefix="/v1", dependencies=[Depends(keyed)])
 
-    @app.get("/v1/cloud/box/callback", response_class=HTMLResponse, include_in_schema=False)
-    def box_callback(request: Request, state: str = "", code: str | None = None,
+    @app.get("/v1/cloud/box/callback", response_class=HTMLResponse, include_in_schema=False,
+             dependencies=[HERE])
+    def box_callback(state: str = "", code: str | None = None,
                      error: str | None = None) -> str:
         """Where Box sends the browser back -- outside the key: the sign-in's
         state, started by this process, is what proves it."""
-        if not from_here(request):
-            raise HTTPException(403, "only this machine's browser may finish a sign-in")
         try:
             demo.box().finish(state=state, code=code, error=error)
         except (LookupError, ValueError) as refusal:
@@ -213,13 +254,12 @@ def create_app(
         return _closing_page("Box is connected. You can close this tab, go back to "
                              "Graph-Me-Maybe and pick the folders to read.")
 
-    @app.get("/v1/mail/google/callback", response_class=HTMLResponse, include_in_schema=False)
-    def google_callback(request: Request, state: str = "", code: str | None = None,
+    @app.get("/v1/mail/google/callback", response_class=HTMLResponse, include_in_schema=False,
+             dependencies=[HERE])
+    def google_callback(state: str = "", code: str | None = None,
                         error: str | None = None) -> str:
         """Where Google sends the browser back -- outside the key, as Box's: the sign-in's
         state, started by this process, is what proves it. The account is counted here."""
-        if not from_here(request):
-            raise HTTPException(403, "only this machine's browser may finish a sign-in")
         google = demo.google_sign_in()
         try:
             if google is None:
@@ -231,13 +271,12 @@ def create_app(
         return _closing_page(f"{added['address']} is connected. You can close this tab and go "
                              "back to Graph-Me-Maybe: it asks how much mail to read.")
 
-    @app.get("/v1/mail/microsoft/callback", response_class=HTMLResponse, include_in_schema=False)
-    def microsoft_callback(request: Request, state: str = "", code: str | None = None,
+    @app.get("/v1/mail/microsoft/callback", response_class=HTMLResponse,
+             include_in_schema=False, dependencies=[HERE])
+    def microsoft_callback(state: str = "", code: str | None = None,
                            error: str | None = None,
                            error_description: str | None = None) -> str:
         """Where Microsoft sends the browser back, as Google's: the account is counted here."""
-        if not from_here(request):
-            raise HTTPException(403, "only this machine's browser may finish a sign-in")
         try:
             refresh = demo.microsoft_sign_in().finish(state=state, code=code, error=error,
                                                       description=error_description)
@@ -267,15 +306,12 @@ def create_app(
         running."""
         return {**described(demo.settings), "samples": has_samples()}
 
-    @v1.put("/settings", response_model=api.ServerSettings)
-    def change_settings(change: api.SettingsChange, request: Request) -> dict[str, Any]:
+    @v1.put("/settings", response_model=api.ServerSettings, dependencies=[HERE])
+    def change_settings(change: api.SettingsChange) -> dict[str, Any]:
         """Settings written to `.env` and taken up at once, each key tried first (no model is
-        called). Only from this machine's own page, whatever the key: another site open in the
-        browser could otherwise post keys here."""
-        if not from_here(request):
-            raise HTTPException(403, "settings can only be changed from this machine's page")
+        called). Only from this machine's own page (`only_here`)."""
         with refused():
-            new = changed(demo, change.values, Path.cwd() / ".env", load)
+            new = changed(demo, change.values, settings_folder() / ".env", load)
         return {**described(new), "samples": has_samples()}
 
     # Search models run on this machine ---------------------------------------------------
@@ -307,29 +343,21 @@ def create_app(
 
     # Box ----------------------------------------------------------------------------------
 
-    def here(request: Request, what: str) -> None:
-        if not from_here(request):
-            raise HTTPException(403, f"Box can only be {what} from this machine")
-
     @v1.get("/cloud/box", response_model=api.Box)
     def box_state() -> dict[str, Any]:
         with refused():
             return demo.box_state()
 
-    @v1.post("/cloud/box/connect", response_model=api.BoxConnect)
+    @v1.post("/cloud/box/connect", response_model=api.BoxConnect, dependencies=[HERE])
     def box_connect(request: Request) -> dict[str, str]:
         """Sign in to Box in the browser; read-only."""
-        here(request, "connected")
         with refused():
             url = demo.box().start(f"{request.base_url}v1/cloud/box/callback")
-        with contextlib.suppress(Exception):  # the page opens it when the server cannot
-            processes.open_in_browser(url)
-        return {"url": url}
+        return opened_in_browser(url)
 
-    @v1.delete("/cloud/box", response_model=api.Box)
-    def box_disconnect(request: Request) -> dict[str, Any]:
+    @v1.delete("/cloud/box", response_model=api.Box, dependencies=[HERE])
+    def box_disconnect() -> dict[str, Any]:
         """The sign-in revoked at Box and forgotten here, with what was picked."""
-        here(request, "disconnected")
         with refused():
             demo.box_disconnect()
             return demo.box_state()
@@ -340,10 +368,9 @@ def create_app(
         with refused():
             return demo.box_folder(folder_id)
 
-    @v1.put("/cloud/box/picked", response_model=api.Box)
-    def box_pick(change: api.BoxPick, request: Request) -> dict[str, Any]:
+    @v1.put("/cloud/box/picked", response_model=api.Box, dependencies=[HERE])
+    def box_pick(change: api.BoxPick) -> dict[str, Any]:
         """What is picked now, in place of what was."""
-        here(request, "changed")
         with refused():
             return demo.box_pick([BoxPicked(i.type, i.id, i.name) for i in change.items])
 
@@ -354,27 +381,20 @@ def create_app(
             return {"available": False}
         return {"available": True, **demo.workspaces.listed(), "unmoved": dict(demo.unmoved)}
 
-    def changing(request: Request) -> None:
-        if not from_here(request):
-            raise HTTPException(403, "workspaces can only be changed from this machine")
-
     @v1.get("/workspaces", response_model=api.Workspaces)
     def workspaces() -> dict[str, Any]:
         """The graphs kept apart, and the one open."""
         return listedworkspace_registry()
 
-    @v1.post("/workspaces", response_model=api.Workspace)
-    def workspace_create(body: api.WorkspaceName, request: Request) -> dict[str, str]:
+    @v1.post("/workspaces", response_model=api.Workspace, dependencies=[HERE])
+    def workspace_create(body: api.WorkspaceName) -> dict[str, str]:
         """A workspace made, its graph empty; not opened."""
-        changing(request)
         with refused():
             return demo.workspace_registry().create(body.name)
 
-    @v1.patch("/workspaces/{workspace}", response_model=api.Workspace)
-    def workspace_change(workspace: str, body: api.WorkspaceChange,
-                         request: Request) -> dict[str, Any]:
+    @v1.patch("/workspaces/{workspace}", response_model=api.Workspace, dependencies=[HERE])
+    def workspace_change(workspace: str, body: api.WorkspaceChange) -> dict[str, Any]:
         """A workspace renamed, or opened to MCP clients or closed to them."""
-        changing(request)
         spaces = demo.workspace_registry()
         with refused():
             if body.name is not None:
@@ -383,11 +403,10 @@ def create_app(
                 spaces.set_mcp(workspace, body.mcp)
             return spaces.item(workspace)
 
-    @v1.put("/mcp", response_model=api.Workspaces)
-    def mcp_switch(body: api.McpSwitch, request: Request) -> dict[str, Any]:
+    @v1.put("/mcp", response_model=api.Workspaces, dependencies=[HERE])
+    def mcp_switch(body: api.McpSwitch) -> dict[str, Any]:
         """The switches for every MCP client: `enabled` off, `graphme mcp` reads nothing;
         `changes` on, it may delete, reset and change settings as well."""
-        changing(request)
         with refused():
             spaces = demo.workspace_registry()
             if body.enabled is not None:
@@ -396,19 +415,17 @@ def create_app(
                 spaces.set_mcp_changes(body.changes)
         return listedworkspace_registry()
 
-    @v1.post("/workspaces/{workspace}/open", response_model=api.Workspaces)
-    def workspace_open(workspace: str, request: Request) -> dict[str, Any]:
+    @v1.post("/workspaces/{workspace}/open", response_model=api.Workspaces, dependencies=[HERE])
+    def workspace_open(workspace: str) -> dict[str, Any]:
         """`workspace`'s graph opened in place of the one open -- refused (409) while a build,
         a reading or an export runs."""
-        changing(request)
         with refused():
             demo.switch_workspace(workspace)
         return listedworkspace_registry()
 
-    @v1.delete("/workspaces/{workspace}", response_model=api.Workspaces)
-    def workspace_delete(workspace: str, request: Request) -> dict[str, Any]:
+    @v1.delete("/workspaces/{workspace}", response_model=api.Workspaces, dependencies=[HERE])
+    def workspace_delete(workspace: str) -> dict[str, Any]:
         """`workspace` and its graph deleted for good -- refused (409) for the one open."""
-        changing(request)
         with refused():
             demo.delete_workspace(workspace)
         return listedworkspace_registry()
@@ -420,63 +437,53 @@ def create_app(
         """Every account connected; never a password."""
         return demo.mail_accounts().listed() if demo.workspaces is not None else []
 
-    @v1.post("/mail/accounts", response_model=api.MailAccount)
-    def mail_connect(body: api.MailConnect, request: Request) -> dict[str, Any]:
+    @v1.post("/mail/accounts", response_model=api.MailAccount, dependencies=[HERE])
+    def mail_connect(body: api.MailConnect) -> dict[str, Any]:
         """The login checked, the mailbox counted -- nothing read yet -- and a workspace made
         for it, named after the address. 400 with the server's words when it refuses."""
-        changing(request)
         with refused():
             return demo.mail_accounts().add(body.host, body.port, body.address, body.password)
 
-    @v1.post("/mail/google/connect", response_model=api.BoxConnect)
+    @v1.post("/mail/google/connect", response_model=api.BoxConnect, dependencies=[HERE])
     def mail_google_connect(request: Request) -> dict[str, str]:
         """Sign in to Google in the browser to read Gmail, read-only; the account is kept, and
         counted, when Google sends the browser back. 404 in a build without Google's client."""
-        changing(request)
         google = demo.google_sign_in()
         if google is None:
             raise HTTPException(404, "Gmail sign-in is not set up in this build -- connect "
                                      "Gmail over IMAP with an app password instead")
-        url = google.start(f"{request.base_url}v1/mail/google/callback")
-        with contextlib.suppress(Exception):  # the page opens it when the server cannot
-            processes.open_in_browser(url)
-        return {"url": url}
+        return opened_in_browser(google.start(f"{request.base_url}v1/mail/google/callback"))
 
-    @v1.post("/mail/microsoft/connect", response_model=api.BoxConnect)
+    @v1.post("/mail/microsoft/connect", response_model=api.BoxConnect, dependencies=[HERE])
     def mail_microsoft_connect(request: Request) -> dict[str, str]:
         """Sign in to Microsoft in the browser to read Outlook mail, personal or work,
         read-only; the account is kept, and counted, when Microsoft sends the browser back."""
-        changing(request)
         # `localhost`, not 127.0.0.1: the address Microsoft lets a desktop app use, any port.
-        url = demo.microsoft_sign_in().start(
-            f"http://localhost:{request.url.port}/v1/mail/microsoft/callback")
-        with contextlib.suppress(Exception):  # the page opens it when the server cannot
-            processes.open_in_browser(url)
-        return {"url": url}
+        return opened_in_browser(demo.microsoft_sign_in().start(
+            f"http://localhost:{request.url.port}/v1/mail/microsoft/callback"))
 
-    @v1.post("/mail/accounts/{account}/read", status_code=202, response_model=api.BuildState)
-    def mail_read(account: str, body: api.MailRead, request: Request,
-                  response: Response) -> dict[str, Any]:
+    @v1.post("/mail/accounts/{account}/read", status_code=202, response_model=api.BuildState,
+             dependencies=[HERE])
+    def mail_read(account: str, body: api.MailRead, response: Response) -> dict[str, Any]:
         """The mail from `since` on (all, when null) read into the account's workspace,
         opened first: a job, newest first, followed and cancelled like any build."""
-        changing(request)
         with refused():
             return started(demo.build_mail(account, body.since), response)
 
-    @v1.post("/mail/accounts/{account}/earlier", status_code=202, response_model=api.BuildState)
-    def mail_earlier(account: str, request: Request, response: Response) -> dict[str, Any]:
+    @v1.post("/mail/accounts/{account}/earlier", status_code=202,
+             response_model=api.BuildState, dependencies=[HERE])
+    def mail_earlier(account: str, response: Response) -> dict[str, Any]:
         """What `since` left out read too."""
-        changing(request)
         with refused():
             return started(demo.build_mail(account, None), response)
 
-    @v1.delete("/mail/accounts/{account}", response_model=list[api.MailAccount])
-    def mail_disconnect(account: str, request: Request,
+    @v1.delete("/mail/accounts/{account}", response_model=list[api.MailAccount],
+                dependencies=[HERE])
+    def mail_disconnect(account: str,
                         workspace: Literal["delete", "keep"] = "keep") -> list[dict[str, Any]]:
         """The password and the messages kept forgotten. The account's workspace is deleted
         when asked (409 while it is open, and nothing is forgotten then), else it stays as an
         ordinary one."""
-        changing(request)
         with refused():
             demo.disconnect_mail(account, workspace)
             return demo.mail_accounts().listed()
@@ -489,21 +496,17 @@ def create_app(
         user said to read it."""
         return demo.drive_state(kind)
 
-    @v1.post("/drives/{kind}/connect", response_model=api.DesktopDrive)
-    def desktop_drive_connect(kind: api.DriveKind, request: Request) -> dict[str, Any]:
+    @v1.post("/drives/{kind}/connect", response_model=api.DesktopDrive, dependencies=[HERE])
+    def desktop_drive_connect(kind: api.DriveKind) -> dict[str, Any]:
         """The drive read from now on, and on every start."""
-        if not from_here(request):
-            raise HTTPException(403, "a drive can only be connected from this machine")
         if demo.desktop_drive(kind) is None:
             raise HTTPException(404, f"{kind} drive is not on this machine")
         demo.drive_connect(kind, True)
         return demo.drive_state(kind)
 
-    @v1.delete("/drives/{kind}", response_model=api.DesktopDrive)
-    def desktop_drive_disconnect(kind: api.DriveKind, request: Request) -> dict[str, Any]:
+    @v1.delete("/drives/{kind}", response_model=api.DesktopDrive, dependencies=[HERE])
+    def desktop_drive_disconnect(kind: api.DriveKind) -> dict[str, Any]:
         """The drive no longer read; asked again next time."""
-        if not from_here(request):
-            raise HTTPException(403, "a drive can only be disconnected from this machine")
         demo.drive_connect(kind, False)
         return demo.drive_state(kind)
 
@@ -521,11 +524,11 @@ def create_app(
         with refused():
             return demo.drive_folder(kind, path)
 
-    @v1.post("/cloud/box/build", status_code=202, response_model=api.BuildState)
-    def box_build(request: Request, response: Response) -> dict[str, Any]:
+    @v1.post("/cloud/box/build", status_code=202, response_model=api.BuildState,
+             dependencies=[HERE])
+    def box_build(response: Response) -> dict[str, Any]:
         """The documents in what was picked into the space: a version read before is passed
         over without being fetched."""
-        here(request, "read")
         opened()
         with refused():
             return started(demo.build_box(), response)
@@ -536,8 +539,8 @@ def create_app(
         """The graph space; one that cannot be reached is said (503), not a crash."""
         try:
             return demo.space(wait=SPACE_WAIT)
-        except GraphStarting as error:  # the page asks again on its own
-            raise HTTPException(503, str(error), headers={"Retry-After": "3"}) from error
+        except GraphStarting:
+            raise  # the handler says it (503, Retry-After)
         except Exception as error:  # noqa: BLE001 -- said to the caller
             raise HTTPException(503, f"cannot connect to the graph DB: {error}") from error
 
@@ -587,10 +590,12 @@ def create_app(
         catalog = list(demo.catalog.items())  # other threads add to it while this reads
         reading = {str(Path(path).resolve()): doc for doc, path in catalog}
         # The same file reached by two paths -- uploaded here, built from its own folder --
-        # is one content: matched by it as well.
+        # is one content: matched by it as well, by a hash already worked out -- asked every
+        # poll, it never reads a file (an online-only one would be downloaded whole).
         by_content: dict[str | None, list[str]] = {}
         for doc, _ in catalog:
-            by_content.setdefault(demo.content_hash(doc), []).append(doc)
+            if (known := demo.hashes.get(doc)) is not None:
+                by_content.setdefault(known[1], []).append(doc)
 
         def state(doc: str | None) -> str:
             session = demo.sessions.get(doc) if doc else None
@@ -601,8 +606,8 @@ def create_app(
         try:
             documents, _ = demo.space(wait=SPACE_WAIT).document_map()
             space_ok = True
-        except GraphStarting as error:  # asked again, like the map, until it is up
-            raise HTTPException(503, str(error), headers={"Retry-After": "3"}) from error
+        except GraphStarting:
+            raise  # asked again, like the map, until it is up
         except Exception:  # noqa: BLE001 -- the list still shows what the server holds
             documents, space_ok = [], False
         items: list[dict[str, Any]] = []
@@ -648,14 +653,11 @@ def create_app(
             raise HTTPException(404, "the document is not in the graph")
         return {**found, "chunks": space.chunk_spans(document_id)}
 
-    @v1.post("/documents/{document_id}/open", response_model=api.Opened)
-    def open_original(document_id: str, request: Request,
-                      workspace: str | None = None) -> dict[str, str]:
+    @v1.post("/documents/{document_id}/open", response_model=api.Opened, dependencies=[HERE])
+    def open_original(document_id: str, workspace: str | None = None) -> dict[str, str]:
         """The file a document was read from, opened on this machine in the app that opens it
         -- what an MCP client asks for when the user wants the file itself. From this machine
         only: it opens a window on it."""
-        if not from_here(request):
-            raise HTTPException(403, "documents are opened only from this machine")
         path = space_of(workspace).source_path(document_id)
         if not path:
             raise HTTPException(404, "the document is not in the graph")
@@ -813,7 +815,7 @@ def create_app(
         session = demo.sessions.get(file_id)
         if session is not None:
             with session.lock:
-                if session.state not in ("idle", "error", "cancelled", "done", "rendered"):
+                if session.being_read:
                     raise HTTPException(409, "a file being read cannot be removed")
         demo.drop([file_id])
         return {"deleted": file_id}
@@ -829,9 +831,7 @@ def create_app(
             "format": session.format.value,
             "state": session.state,
             "error": session.error,
-            "pending": bool(session.pending)
-            or session.state
-            in ("rendering", "grouping", "reading", "captioning", "referencing"),
+            "pending": bool(session.pending) or session.being_read,
             "progress": session.progress.snapshot(),
             "elapsed": elapsed(session.started_at, session.ended_at),
             "sheets": [
@@ -959,10 +959,17 @@ def create_app(
             return guarded(lambda: tried(rag, side, lambda: run(rag, question, documents)))
         rags = [(ws, *rag_of(ws)) for ws in several]
 
+        def each(ws: str, rag: GraphRag, side: bool) -> tuple[U, bool]:
+            try:
+                return tried(rag, side, lambda: across(rag, question, documents))
+            except GraphNotEmbedded:
+                if not side:
+                    raise
+                return cast(U, []), False  # a workspace beside never embedded finds nothing
+
         def fused() -> tuple[T, bool]:
             with ThreadPoolExecutor(len(rags)) as pool:  # each workspace searched side by side
-                done = list(pool.map(lambda each: tried(
-                    each[1], each[2], lambda: across(each[1], question, documents)), rags))
+                done = list(pool.map(lambda r: each(*r), rags))
             found = [(ws, rag, got) for (ws, rag, _), (got, _) in zip(rags, done, strict=True)]
             return fuse(found, question, documents), any(text_only for _, text_only in done)
         return guarded(fused)
@@ -1215,6 +1222,6 @@ def serve(settings: Settings, *, host: str, port: int, web: Path | None) -> None
     preflight_behind(settings)
     demo = make_demo(settings)
     demo.search_models.ensure_chosen()
-    if web is None and WEB.is_dir():
-        web = WEB
+    if web is None:
+        web = default_web()
     uvicorn.run(create_app(demo, web=web), host=host, port=port, log_level="info")

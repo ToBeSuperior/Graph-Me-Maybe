@@ -36,3 +36,23 @@ jobs:
       - run: gh release create "$GITHUB_REF_NAME" release/* --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+
+  # The release's own wheel to PyPI as graph-me-maybe, through Trusted Publishing (no token kept):
+  # PyPI trusts this repository's release.yml in the `pypi` environment. A job of its own, so a
+  # failed upload leaves the release standing; re-run this job, not a new tag.
+  pypi:
+    needs: release
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - run: |
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --pattern '*.whl' --pattern SHA256SUMS --dir release
+          cd release && sha256sum --check --ignore-missing SHA256SUMS
+          mkdir ../dist && mv ./*.whl ../dist/
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: pypa/gh-action-pypi-publish@release/v1

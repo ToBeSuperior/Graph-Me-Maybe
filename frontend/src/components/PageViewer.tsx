@@ -3,10 +3,11 @@
 // double-click or the buttons zoom too, and a drag moves it. The page is laid out at its own
 // aspect inside the frame, and the marks are placed in the page's own pixels over it, so they
 // move and scale with it. A new set of marks brings the passage they mark into view.
-import { Maximize, Minus, Plus } from 'lucide-react';
+import { AlertTriangle, Maximize, Minus, Plus } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '../lib/format';
 import { useT } from '../lib/i18n';
+import { reason } from '../lib/reasons';
 import { Button } from './ui';
 
 const MAX = 8;
@@ -32,6 +33,14 @@ export function PageViewer({ src, alt, width, height, marks = [], className }: {
   // Which picture has drawn: a new page's marks wait for it, not for the one before.
   const [loadedSrc, setLoadedSrc] = useState('');
   const loaded = loadedSrc === src;
+  // Why the picture could not be had (its original moved or deleted): an <img> cannot read the
+  // server's reason, so it is asked once more for it.
+  const [failed, setFailed] = useState<{ src: string; why: string } | null>(null);
+  const why = failed?.src === src ? failed.why : null;
+  const fail = () => {
+    fetch(src).then((r) => r.json()).then((body: { detail?: unknown }) => String(body.detail ?? ''), () => '')
+      .then((detail) => setFailed({ src, why: detail ? reason(t, detail) : t('cannotDrawPages') }));
+  };
   const armed = useRef(false);
   const drag = useRef<{ x: number; y: number } | null>(null);
 
@@ -117,11 +126,15 @@ export function PageViewer({ src, alt, width, height, marks = [], className }: {
         if (zoom.scale > 1) setZoom({ scale: 1, x: 0, y: 0 }); else zoomBy(2.5, e);
       }}
     >
-      {!loaded && <div className="skeleton absolute inset-3" />}
+      {why !== null ? (
+        <div role="alert" className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted">
+          <AlertTriangle className="size-5" />{why}
+        </div>
+      ) : !loaded && <div className="skeleton absolute inset-3" />}
       <div className="absolute inset-0" style={{ transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})`, transformOrigin: '0 0' }}>
-        {fit > 0 && (
+        {fit > 0 && why === null && (
           <div className="absolute" style={{ left: page.left, top: page.top, width: page.w, height: page.h }}>
-            <img src={src} alt={alt} draggable={false} onLoad={() => setLoadedSrc(src)} className="absolute inset-0 h-full w-full bg-white" />
+            <img src={src} alt={alt} draggable={false} onLoad={() => setLoadedSrc(src)} onError={fail} className="absolute inset-0 h-full w-full bg-white" />
             {loaded && marks.map((m, i) => {
               const [l, tp, r, b] = m.box;
               return (

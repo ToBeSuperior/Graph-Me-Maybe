@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -283,3 +284,17 @@ def test_a_dump_is_a_dump_file_wherever_it_is_asked_for(tmp_path: Path, given: s
     assert done.exit_code == 0, done.output
     expected = (tmp_path / "folder" if given.endswith("/") else tmp_path) / "graph.dump"
     assert written == [expected]
+
+
+@pytest.mark.parametrize(("command", "missing", "extra"), [
+    (["serve"], "fastapi", "server"), (["mcp"], "mcp", "app"), (["app"], "keyring", "app")])
+def test_a_command_whose_extra_is_missing_says_which_to_install(
+        monkeypatch: pytest.MonkeyPatch, command: list[str], missing: str, extra: str) -> None:
+    from typer.testing import CliRunner
+
+    from graphme import cli as the_cli
+
+    monkeypatch.setitem(sys.modules, missing, None)  # as if not installed: importing it fails
+    said = CliRunner().invoke(the_cli.app, command)
+    assert said.exit_code == 2
+    assert f"graph-me-maybe[{extra}]" in said.output

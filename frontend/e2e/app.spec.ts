@@ -380,6 +380,22 @@ test('a build and a reading say how long they have taken', async ({ page }) => {
   await expect(page.getByText('읽는 중 · 63% — 개요 12/40 · 1분 5초')).toBeVisible();
 });
 
+test('a page whose original is gone says so instead of a broken picture', async ({ page }) => {
+  await fakeApi(page, { gone: true });
+  await page.goto('/manage/docs/f1?demo=1');
+  await expect(page.getByText('원본 파일을 찾을 수 없습니다')).toBeVisible();
+});
+
+test('a document of many pages stays inside a narrow window', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 900 });
+  await fakeApi(page, { pageCount: 40 });
+  await page.goto('/manage/docs/f1?demo=1');
+  const frame = page.getByRole('img', { name: '1쪽' }).locator('xpath=ancestor::div[contains(@class,"rounded-lg")][1]');
+  await expect(frame).toBeVisible();
+  const box = (await frame.boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(960);
+});
+
 test('a document read says how long its reading took', async ({ page }) => {
   await fakeApi(page, { elapsed: 3725 });
   await page.goto('/manage/docs/f1?demo=1');
@@ -811,4 +827,65 @@ test('disconnecting keeps the workspace at one click, and deletes it only once i
   await page.getByRole('button', { name: 'Disconnect' }).click();
   await page.getByRole('button', { name: 'Keep its workspace' }).click();
   await expect.poll(() => fake.mail.left).toEqual(['a1:delete', 'a1:keep']);
+});
+
+test('Box is asked again only until its sign-in lands', async ({ page }) => {
+  // The sign-in link was kept after it landed, so the page asked the server every two seconds for good.
+  const fake = await fakeApi(page);
+  fake.box.connected = false;
+  await page.goto('/manage/box');
+  await page.getByRole('button', { name: 'Box 연결' }).click();
+  fake.box.connected = true;
+  await expect(page.getByTestId('box-api')).toBeVisible();
+  let asked = 0;
+  page.on('request', (r) => { if (new URL(r.url()).pathname === '/v1/cloud/box') asked += 1; });
+  await page.waitForTimeout(4500);
+  expect(asked).toBe(0);
+});
+
+test('a drive says again how much it keeps once a build ends', async ({ page }) => {
+  // The answer was kept under "not building": the build's end brought back the one from before it.
+  const fake = await fakeApi(page, { jobs: [{ ...BUILD, id: 'bx', state: 'done', documents: 1 }] });
+  fake.connected.box = true;
+  let served = 0;
+  await page.route('**/v1/drives/box/usage', (route) => { served += 1; return route.fulfill({ json: { bytes: served * 1e6, files: served } }); });
+  await page.goto('/manage/box');
+  const drive = page.getByTestId('box-drive');
+  await expect(drive.getByText('(파일 1개)', { exact: false })).toBeVisible();
+  await drive.getByRole('checkbox', { name: 'Plan.pdf' }).check();
+  await drive.getByRole('button', { name: 'Box Drive에서 그래프 만들기' }).click();
+  await expect(drive.getByRole('status')).toBeVisible();
+  await expect(drive.getByRole('status')).toHaveCount(0);  // the build ended
+  await expect(drive.getByText(`(파일 ${served}개)`, { exact: false })).toBeVisible();
+  expect(served).toBeGreaterThan(1);
+});
+
+test('another workspace opened asks for the library once', async ({ page }) => {
+  await fakeApi(page);
+  await page.goto('/manage');
+  await expect(page.getByText('가상 보고', { exact: false }).first()).toBeVisible();
+  let asked = 0;
+  page.on('request', (r) => { if (new URL(r.url()).pathname === '/v1/documents') asked += 1; });
+  await page.getByRole('button', { name: /워크스페이스: Default/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Invented audits' }).click();
+  await expect(page.getByRole('button', { name: /워크스페이스: Invented audits/ })).toBeVisible();
+  await page.waitForTimeout(1500);
+  expect(asked).toBe(1);
+});
+
+test('a drive that cannot be connected says why', async ({ page }) => {
+  await fakeApi(page, { box: false });
+  await page.route('**/v1/drives/box/connect', (route) => route.fulfill({ status: 409, json: { detail: 'Invented refusal' } }));
+  await page.goto('/manage/box');
+  const drive = page.getByTestId('box-drive');
+  await drive.getByRole('button', { name: '연결', exact: true }).click();
+  await expect(drive.getByText('Invented refusal')).toBeVisible();
+});
+
+test('a cancel the server refuses says why', async ({ page }) => {
+  await fakeApi(page, { jobs: [BUILD] });
+  await page.route('**/v1/jobs/b1/cancel', (route) => route.fulfill({ status: 409, json: { detail: 'Invented: already ending' } }));
+  await page.goto('/manage');
+  await page.getByRole('button', { name: '취소' }).click();
+  await expect(page.getByText('Invented: already ending')).toBeVisible();
 });

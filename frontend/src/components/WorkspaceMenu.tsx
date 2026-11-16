@@ -29,9 +29,8 @@ export function WorkspaceMenu() {
     setOpening(name);
     try {
       const listed = await call(api.POST('/v1/workspaces/{workspace}/open', { params: { path: { workspace: id } } }));
+      // Another graph: `useWorkspaceFollower` drops every answer drawn from the last one.
       client.setQueryData(keys.workspaces, listed);
-      // Another graph: every answer drawn from the last one is gone, the list of workspaces aside.
-      await client.resetQueries({ predicate: (q) => q.queryKey[0] !== keys.workspaces[0] });
       toast.success(t('workspaceOpened', name));
     } catch (error) {
       failed(error);

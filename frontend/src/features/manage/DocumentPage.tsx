@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ArrowLeft, ChevronLeft, FileQuestion } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { api, call, isBuilding, nodeCrop, pageImage, type DocumentGraph, type Pages } from '../../api/client';
+import { api, call, isBuilding, nodeCrop, READING, pageImage, type DocumentGraph, type Pages } from '../../api/client';
 import { FileIcon } from '../../components/docs';
 import { PageViewer } from '../../components/PageViewer';
 import { Badge, Button, Empty, Skeleton, Spinner } from '../../components/ui';
@@ -16,14 +16,12 @@ import { kindOf, outlineOf } from '../../graph/outline';
 import { clip, formatOf, shownName, stem } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { reason } from '../../lib/reasons';
-import { keys, useBuild } from '../../lib/queries';
+import { keys, useBuild, useDocumentGraph } from '../../lib/queries';
 import { pageName, pageNameAt, usePages } from '../../lib/pages';
 import { PagesPending, PageTabs } from '../../components/PageTabs';
 import { DeleteDocument } from './DeleteDocument';
 import { isMessage, MailMessage } from './MailMessage';
 import { OpenOriginal } from './OpenOriginal';
-
-const WORKING = ['rendering', 'grouping', 'reading', 'captioning', 'referencing'];
 
 export function DocumentPage({ id }: { id: string }) {
   const [params] = useSearchParams();
@@ -32,10 +30,7 @@ export function DocumentPage({ id }: { id: string }) {
 
 function SpaceDocument({ id }: { id: string }) {
   const navigate = useNavigate();
-  const outline = useQuery({
-    queryKey: keys.document(id),
-    queryFn: () => call(api.GET('/v1/documents/{document_id}/graph', { params: { path: { document_id: id } } })),
-  });
+  const outline = useDocumentGraph(id);
   const name = outline.data?.nodes.find((n) => kindOf(n) === 'Document')?.properties.label as string | undefined;
   if ((outline.error as { status?: number } | null)?.status === 404 || (outline.data && !outline.data.nodes.length)) return <NotFound />;
   const actions = name && <>
@@ -66,7 +61,7 @@ function DemoDocument({ doc }: { doc: string }) {
     queryFn: () => call(api.GET('/v1/files/{file_id}/pages', { params: { path: { file_id: doc } } })),
     // Followed while it is read, or waits its turn in a build; at rest (done, failed, drawn only,
     // never started) there is nothing to follow.
-    refetchInterval: (q) => (!q.state.error && q.state.data && (WORKING.includes(q.state.data.state) || (building && q.state.data.state === 'idle')) ? 2500
+    refetchInterval: (q) => (!q.state.error && q.state.data && (READING.includes(q.state.data.state) || (building && q.state.data.state === 'idle')) ? 2500
       : !q.state.data && !q.state.error ? 2500 : false),
     retry: false,
     staleTime: 0,
@@ -84,7 +79,7 @@ function DemoDocument({ doc }: { doc: string }) {
   const took = s?.elapsed != null ? t('took', s.elapsed) : null;
   const status = !s ? null : s.state === 'error' ? { text: t('failed', reason(t, s.error ?? '')), busy: false }
     : s.state === 'cancelled' ? { text: t('cancelledRead'), busy: false }
-    : WORKING.includes(s.state) ? { text: [s.progress
+    : READING.includes(s.state) ? { text: [s.progress
       ? t('readingProgress', s.progress.percent, t('stageName', s.progress.stage), s.progress.done, s.progress.total)
       : s.sheets.length ? t('readingNow', s.sheets.filter((p) => !p.pending).length, s.sheets.length)
       : t('drawingPages'), took].filter(Boolean).join(' · '), busy: true }
@@ -143,7 +138,7 @@ function DocumentView({ name, graph, graphError, demoDoc, sheets, pagesOfNodes, 
         {actions}
         <span className="font-mono text-2xs text-faint uppercase">{format}</span>
       </div>
-      <div className="grid min-h-0 flex-1 gap-4 p-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 p-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
         <section className="flex min-h-[520px] flex-col rounded-xl border border-line bg-panel p-3">
           <h2 className="mb-2 text-sm font-semibold">{t('outlineTitle')}</h2>
           {graphError ? <Empty icon={<AlertTriangle className="size-5" />} title={t('cannotReadOutline')}>{graphError.message}</Empty>

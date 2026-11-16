@@ -99,6 +99,8 @@ class Session:
     # answer is applied to whatever the others left.
     lock: threading.Lock = field(default_factory=threading.Lock)
     preparing: threading.Lock = field(default_factory=threading.Lock)
+    """Its pages are drawn by one request; another asking meanwhile waits for those pages
+    instead of drawing its own. Another document's pages are not held up by them."""
     kept: Kept | None = None
     """What the graph space holds of a document built earlier -- where each node is drawn,
     its pages, its graph -- when it was opened from there: shown with no extraction, no
@@ -112,8 +114,11 @@ class Session:
     ended_at: float | None = None
     """When its reading began and ended (`time.monotonic`): from a reader taking it up, not
     from its wait in the queue."""
-    """Its pages are drawn by one request; another asking meanwhile waits for those pages
-    instead of drawing its own. Another document's pages are not held up by them."""
+
+    @property
+    def being_read(self) -> bool:
+        """Its reading under way: neither waiting to start nor finished."""
+        return self.state not in (*STARTABLE, *FINISHED)
 
     def read(self) -> ExtractedDocument:
         """The graph as it stands; a step that needs one runs only after `_prepare` made it."""

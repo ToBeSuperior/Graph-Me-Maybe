@@ -4,11 +4,13 @@ Invented folders and files."""
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
 import pytest
 
+from graphme.adapters.sources import box as box_module
 from graphme.adapters.sources.box import API, BoxSource, Picked, origin, web_url
 
 TREE: dict[str, dict[str, Any]] = {
@@ -126,3 +128,23 @@ def test_a_file_gone_from_box_is_not_found(tmp_path: Path) -> None:
 def test_a_box_file_opens_in_the_browser_at_box() -> None:
     assert web_url(origin("f1", "a.pdf")) == "https://app.box.com/file/f1"
     assert API.startswith("https://api.box.com/")
+
+
+def test_a_file_not_ready_yet_is_asked_again_never_saved_as_its_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    box = _Box()
+    waits: list[float] = []
+    monkeypatch.setattr(box_module, "time", SimpleNamespace(sleep=waits.append))
+    not_ready = [httpx.Response(202, headers={"Retry-After": "3"})]
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/content") and not_ready:
+            return not_ready.pop()
+        return box(request)
+
+    source = BoxSource(httpx.Client(transport=httpx.MockTransport(answer)),
+                       lambda: "invented-token", tmp_path / "copies")
+    with source.open_copy(origin("f1", "Leak Test Procedure.pdf")) as copy:
+        assert copy.read_bytes() == FILES["f1"][1]
+    assert waits == [3.0]

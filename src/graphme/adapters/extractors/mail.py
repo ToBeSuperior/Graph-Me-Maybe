@@ -146,6 +146,8 @@ class _HtmlBody(HTMLParser):
         if self._hidden:  # only the hidden element's own end matters
             self._hidden_open += tag == self._hidden
             return
+        if tag == "body":  # HTML may leave </head> out: the body ends it
+            self._skipping = 0
         if tag in _SKIPPED:
             self._skipping += 1
         elif self._skipping:
@@ -226,6 +228,8 @@ class _HtmlBody(HTMLParser):
 
     def close(self) -> None:
         super().close()
+        # What was left hidden or skipped ends with the document, or no table could close.
+        self._hidden, self._skipping = None, 0
         while self._tables:  # a table never closed is read as far as it went
             self.handle_endtag("table")
         self._flush()
@@ -338,7 +342,10 @@ def _invites(message: EmailMessage) -> list[tuple[str, str, bool]]:
             # often names no charset, and read as ASCII its words were lost.
             payload = part.get_payload(decode=True)
             raw = payload if isinstance(payload, bytes) else b""
-            text = invite_text(raw.decode(part.get_content_charset() or "utf-8", "replace"))
+            try:
+                text = invite_text(raw.decode(part.get_content_charset() or "utf-8", "replace"))
+            except LookupError:  # a charset Python does not know, as `_text_of` takes it
+                text = invite_text(raw.decode("utf-8", "replace"))
             if text and text not in found:
                 found.append(text)
     return [("text", text, False) for text in found]

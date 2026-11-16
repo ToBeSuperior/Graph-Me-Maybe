@@ -19,7 +19,7 @@ export function ManageLayout() {
   const mail = useMailWorkspace();
   const { pathname } = useLocation();
   return (
-    <div className="grid h-full grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[232px_minmax(0,1fr)] md:grid-rows-1">
+    <div className="grid h-full grid-cols-1 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[232px_minmax(0,1fr)] md:grid-rows-1">
       <aside className="flex flex-col gap-3 border-b border-line bg-subtle/50 p-3 md:border-r md:border-b-0">
         <AddFolderButton variant="primary" />
         <BuildProgress compact />

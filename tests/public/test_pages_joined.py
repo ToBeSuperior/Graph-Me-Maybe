@@ -283,3 +283,26 @@ def test_readings_differing_only_in_what_the_page_does_not_keep_are_not_chosen()
                                                                 source_path="r.pdf")
     assert vision.chosen == 0
     assert _parents(derived)["costs"] == "title"
+
+
+def test_a_page_with_too_many_units_to_ask_is_said_unread(monkeypatch: Any) -> None:
+    """A page past `MAX_SCOPE_UNITS` is not asked; left flat, it must not look read as flat."""
+    from graphme.adapters.vision import hierarchy_scope
+
+    monkeypatch.setattr(hierarchy_scope, "MAX_SCOPE_UNITS", 4)  # page 2 holds five
+    derived = RenderedHierarchyScopeProvider(renderer=_Pages(), vision=_Vision()).derive(
+        extracted=_report(), source_path="r.pdf")
+
+    assert derived.unread_pages == (2,)
+
+
+def test_headings_naming_each_other_do_not_make_a_loop() -> None:
+    """Two headings on one page, each named the other's parent: every chain still ends at the
+    document, or the units in the loop reach no passage and no published root."""
+    joining = _joining((_head("valve", "outlet"), _head("outlet", "valve")))
+    parent = {d.subject_id: d.parent_id for d in joining.settle({}) if d.status == "parent"}
+    for u in parent:
+        seen = {u}
+        while (u := parent.get(u)) is not None:
+            assert u not in seen, f"a loop through {u}"
+            seen.add(u)

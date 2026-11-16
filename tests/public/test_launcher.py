@@ -248,7 +248,8 @@ def test_the_window_app_is_a_program_without_a_console() -> None:
 
     project = tomllib.loads((Path(__file__).resolve().parents[2] / "pyproject.toml").read_text())
     assert project["project"]["gui-scripts"]["graphme-app"] == "graphme.launcher:main"
-    pywebview = [d for d in project["project"]["dependencies"] if d.startswith("pywebview")]
+    pywebview = [d for d in project["project"]["optional-dependencies"]["app"]
+                 if d.startswith("pywebview")]
     assert pywebview and "sys_platform" in pywebview[0]  # Linux and WSL keep the browser
 
 

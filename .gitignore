@@ -96,3 +96,6 @@ Thumbs.db
 
 # Local tests of the removed single-document pipeline, kept aside rather than deleted.
 /.removed-legacy-tests/
+
+# Account recovery codes saved from a browser: never committed.
+*Recovery-Codes*

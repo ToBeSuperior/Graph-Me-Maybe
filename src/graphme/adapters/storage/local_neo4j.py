@@ -132,10 +132,17 @@ def _trusted() -> ssl.SSLContext:
     return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
 
-def _fetch(url: str, target: Path) -> None:
+def _fetch(url: str, target: Path,
+           progress: Callable[[int, int], None] | None = None) -> None:
+    """`url` into `target`, `progress` told the bytes fetched so far and of how many."""
     with (urllib.request.urlopen(_asked(url), timeout=60, context=_trusted()) as answer,  # noqa: S310
           target.open("wb") as out):
-        shutil.copyfileobj(answer, out, 1 << 20)
+        total, done = int(answer.headers.get("Content-Length") or 0), 0
+        for block in iter(lambda: answer.read(1 << 20), b""):
+            out.write(block)
+            done += len(block)
+            if progress is not None:
+                progress(done, total)
 
 
 def _read(url: str) -> bytes:
@@ -481,10 +488,12 @@ def ensure_local_neo4j(
             child = _up(home, port, memory, starting, answers, sleep)
             # Another home starting at the same moment can bind the port found free first:
             # ours then cannot, and theirs answers on it. What answers must be this home's.
-            if is_ours(home.data, port) or len(tried) == PORT_TRIES:
+            if is_ours(home.data, port):
                 break
             stop(child)
             _started.remove((home, child))
+            if len(tried) == PORT_TRIES:  # never hand back, or set a password on, another's
+                raise RuntimeError(f"the graph DB (Neo4j) got no port of its own: {sorted(tried)}")
         if password(home.graph_root) is None:
             _given_password(home, port, secure)
             stop(child)

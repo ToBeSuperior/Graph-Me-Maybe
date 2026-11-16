@@ -15,7 +15,7 @@ export type DocumentGraph = Schemas['DocumentGraph'];
 export type GraphNode = Schemas['GraphNode'];
 export type Source = Schemas['Source'];
 export type Answer = Schemas['Answer'];
-export type ExportJob = Schemas['ExportJob'];
+type ExportJob = Schemas['ExportJob'];
 export type Job = BuildState | ExportJob;
 
 export const api = createClient<paths>({ baseUrl: '' });
@@ -32,6 +32,9 @@ export const retryDelay = (failures: number, error: unknown) =>
 export class ApiError extends Error {
   constructor(message: string, readonly status: number, readonly waiting = false) { super(message); }
 }
+
+/** What a failure says: the server's words, or the error itself. */
+export const errorText = (error: unknown) => (error instanceof ApiError ? error.message : String(error));
 
 /** The answer's data, or an ApiError with the server's `detail` (or the status when it says none). */
 export async function call<T>(request: Promise<{ data?: T; error?: unknown; response: Response }>): Promise<T> {
@@ -74,4 +77,6 @@ export const nodeCrop = (file: string, index: number, node: string) =>
   `/v1/files/${file}/pages/${index}/crop?node=${encodeURIComponent(node)}`;
 
 const BUILDING = ['reading', 'linking', 'embedding'];
+/** A file's states while it is being read. */
+export const READING = ['rendering', 'grouping', 'reading', 'captioning', 'referencing'];
 export const isBuilding = (b?: BuildState | null) => !!b && BUILDING.includes(b.state);

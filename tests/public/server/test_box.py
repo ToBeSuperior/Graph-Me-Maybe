@@ -138,6 +138,23 @@ def test_a_build_reads_what_was_picked_and_passes_over_what_it_read_before(
     assert space.put == ["a"]
 
 
+def test_a_box_build_asked_while_another_runs_fetches_nothing(
+    demo: Demo, opened: list[str]
+) -> None:
+    """Box was listed and every file downloaded in the request, before the build said one was
+    already running."""
+    from graphme.server.jobs import CorpusBuild
+
+    box = _Everything()
+    client = _connected(demo, box)
+    client.put("/v1/cloud/box/picked", json={"items": [
+        {"type": "file", "id": "f1", "name": "Leak Test Procedure.pdf"}]})
+    demo.build = CorpusBuild(id="running", state="reading")
+
+    assert client.post("/v1/cloud/box/build").status_code == 409
+    assert box.fetched == []
+
+
 def test_a_document_read_from_box_opens_at_box(demo: Demo, opened: list[str]) -> None:
     client = _connected(demo, _Everything())
     assert demo.sources.web_url("box://f1/Leak Test Procedure.pdf") == \

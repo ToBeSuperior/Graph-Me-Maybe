@@ -62,6 +62,25 @@ def read(path: str | Path, *, settings: Settings | None = None, **in_code: Any
         return read_document(corpus_graph_builder(settings, client, renderer), renderer, source)
 
 
+def setup(*, server: bool = False, settings: Settings | None = None,
+          say: Callable[[str], object] = print, **in_code: Any) -> None:
+    """Fetch ahead of time what is otherwise fetched on first use, for CI or an offline machine:
+    the viewer that draws DOCX, PPTX, XLSX and HWP (into the settings' viewer folder), a Chromium
+    unless Chrome is installed, the app's own Neo4j and Java unless a Neo4j is named, and with
+    `server` the web app `graphme serve` shows."""
+    from graphme import release_assets
+    from graphme.adapters.storage.local_neo4j import install
+    from graphme.config import app_home
+
+    settings = _settings(settings, in_code)
+    release_assets.viewer(settings.viewer_directory, say=say)
+    release_assets.ready_to_draw(settings.viewer_directory, settings.chrome_executable, say=say)
+    if settings.local_neo4j is not None:
+        install(settings.local_neo4j, say=say)
+    if server:
+        release_assets.web(app_home() / "web", say=say)
+
+
 class GraphMe:
     """The graph space: documents put in, linked, embedded, searched and asked, exported.
 

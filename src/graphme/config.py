@@ -12,7 +12,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from graphme import model_endpoint
+from graphme import model_endpoint, release_assets
 from graphme.providers import DEFAULT_EMBEDDER
 
 MICROSOFT_CLIENT_ID = "a5097817-de94-4b4c-b26c-7f2e25e3264d"
@@ -172,10 +172,9 @@ class Settings(BaseModel):
     rrf_k: int = Field(default=60, gt=0)
     """Reciprocal rank fusion's constant: a passage ranked r counts weight / (rrf_k + r). 60 is
     the value Cormack et al. fixed and the common default since."""
-    viewer_directory: Path = Field(
-        default_factory=lambda: Path.home() / ".cache/graphme/ooxml-viewer"
-    )
-    """OOXML viewer bundle; build it with adapters/rendering/viewer/setup.sh."""
+    viewer_directory: Path = Field(default_factory=release_assets.default_viewer)
+    """OOXML viewer bundle; build it with adapters/rendering/viewer/setup.sh. The default folder
+    is filled from this version's release the first time a page is drawn."""
     render_timeout_seconds: float = Field(default=300.0, gt=0)
     chrome_executable: str | None = Field(default_factory=_installed_chrome)
     """The browser that draws OOXML pages: the Chrome installed on this machine, unless set.
@@ -322,6 +321,20 @@ def app_home(environ: Mapping[str, str] = os.environ, platform: str = sys.platfo
     return Path(data) / "graph-me-maybe"
 
 
+def settings_folder() -> Path:
+    """The folder whose `.env` the settings are read from: the working folder's -- a
+    checkout's -- else the installed app's when it has one, else the working folder."""
+    base = Path.cwd()
+    if not (base / ".env").is_file():
+        try:
+            app = app_home(os.environ)
+        except KeyError:  # no home directory named in this environment
+            return base
+        if (app / ".env").is_file():
+            return app
+    return base
+
+
 CODE_SETTINGS = frozenset({
     "provider", "api_key", "model", "base_url", "embedding_provider", "embedding_key",
     "embedding_model", "neo4j_uri", "neo4j_user", "neo4j_password", "home",
@@ -340,14 +353,7 @@ def load_settings(environ: dict[str, str] | None = None, **in_code: Any) -> Sett
     if environ is None:
         # A checkout's `.env` is in the working folder; anywhere else a command uses the
         # installed app's settings and data, as `graphme app` does.
-        base = Path.cwd()
-        if not (base / ".env").is_file():
-            try:
-                app = app_home(os.environ)
-            except KeyError:  # no home directory named in this environment
-                app = base
-            if (app / ".env").is_file():
-                base = app
+        base = settings_folder()
         env = read_dotenv(base / ".env")
         env.update(os.environ)
     else:

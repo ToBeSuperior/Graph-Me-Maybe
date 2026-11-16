@@ -19,12 +19,10 @@ that, in one call; nothing here reasons from one hop to the next.
 from __future__ import annotations
 
 import logging
-import re
 import threading
 import time
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import Future
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
@@ -35,7 +33,7 @@ from neo4j_graphrag.indexes import create_vector_index
 from neo4j_graphrag.types import RetrieverResultItem
 
 from graphme.adapters.chat import Endpoint, complete, image_part, is_transient
-from graphme.adapters.embedding import BatchEmbedder
+from graphme.adapters.embedding import BatchEmbedder, Remembered
 from graphme.adapters.export.neo4j import CHUNK_LABEL, NODE_LABEL
 from graphme.adapters.storage.answer_prompt import (
     MAX_QUERIES,
@@ -51,17 +49,18 @@ from graphme.adapters.storage.hybrid_search import (
     _OnceRetriever,
     documents_with_message_ids,
     linked_without_answered_quotes,
+    numbers_named,
 )
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, checked_name
 from graphme.adapters.storage.similar_documents import SimilarDocuments
 from graphme.adapters.storage.workspace_scope import DEFAULT_SCOPE, WorkspaceScope
 from graphme.adapters.strict_schema import strict_response_schema
-from graphme.application.corpus_links import document_numbers, documents_named
+from graphme.application.corpus_links import documents_named
 from graphme.application.embedded_documents import shown_name
 from graphme.application.graph_chunks import CHUNK_RULE, chunks
 from graphme.application.passage_scores import IMPORTANCE_RULE, centroid, importance
 from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop
-from graphme.domain.text_match import estimated_tokens
+from graphme.domain.text_match import estimated_tokens, folded
 from graphme.ports.storage import AssetStore
 
 T = TypeVar("T")
@@ -77,9 +76,9 @@ BATCH = 32
 RATE_PASSAGES = 2000
 """About how many passages are rated together: their vectors are held at once."""
 LINKED_PASSAGES = {2: 2, 3: 1}
+"""Passages of a linked document brought along, by hop -- the ones nearest the question."""
 # How much of a document's opening each of its passages carries: a byline, a source, a date.
 OPENING_CHARS = 240
-"""Passages of a linked document brought along, by hop -- the ones nearest the question."""
 LINK_CANDIDATES = 6
 """Of the documents linked to one, how many are read passage by passage -- those nearest the
 question as a whole (their centroids): a document linked to dozens is not read through all
@@ -156,9 +155,14 @@ def ask_across(read: Sequence[tuple[str, GraphRag, Sequence[RetrieverResultItem]
     walked = filled(ranked, collected(ranked, documents))
     kept = walked[: len(within_budget([p["item"] for p in walked]))]
     items = [p["item"] for p in kept]
-    pictures = [picture for ws, rag, _ in read
-                if (mine := [p["item"] for p in kept if p["ws"] == ws])
-                for picture in rag.pictures(mine)][:ANSWER_PICTURES]
+    # each workspace's pictures read from its own scope, then taken in the fused order
+    held: list[list[tuple[str, bytes]]] = [[] for _ in kept]
+    for ws, rag, _ in read:
+        if mine := [at for at, p in enumerate(kept) if p["ws"] == ws]:
+            for at, theirs in zip(mine, rag.pictures([kept[at]["item"] for at in mine]),
+                                  strict=True):
+                held[at] = theirs
+    pictures = [picture for each in held for picture in each][:ANSWER_PICTURES]
     return GraphAnswer(text=read[0][1].answered(question, items, pictures),
                        sources=[_source(item) for item in items])
 
@@ -198,8 +202,8 @@ def named_phrases(question: str, said: Sequence[str]) -> tuple[str, ...]:
     """What in a question names a document: the phrases the model said do, and every
     document number written in it (`document_numbers`), which needs no model to see -- the
     particle after one ("SOP-2026-0412의") left off."""
-    numbers = (re.sub(r"[가-힣]+$", "", number) for number in sorted(document_numbers(question)))
-    return tuple(dict.fromkeys(phrase for phrase in (*said, *numbers) if phrase.strip()))
+    return tuple(dict.fromkeys(
+        phrase for phrase in (*said, *numbers_named(question)) if phrase.strip()))
 
 
 def relevant_links(linked: Sequence[dict[str, Any]], floor: float) -> list[dict[str, Any]]:
@@ -227,7 +231,6 @@ def within_budget(items: Sequence[RetrieverResultItem], budget: int = ANSWER_TOK
             break
         read.append(item)
     return read
-"""More passages than this is a prompt too long to answer from, not a better answer."""
 
 ASK_RETRY_DELAYS = (2.0, 5.0)
 """Seconds to wait before asking again when the endpoint turned a question away for now
@@ -323,12 +326,11 @@ class GraphRag:
         self._assets = assets
         """Where the crops a passage's pictures name are read from; none, and an answer is
         given the passages' words alone."""
-        self._split: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
         self._samples: list[str] | None = None
         """A line of each language the space is written in (`language_samples`), worked out
         on the first question after the passages last changed."""
         self._lock = threading.Lock()
-        self._flights: dict[object, Future[Any]] = {}
+        self._flights: Remembered[Any] = Remembered(0)
         """What is being worked out right now, by what it is for (`_shared`)."""
         self._embedder = embedder
         self._endpoint = endpoint
@@ -374,11 +376,10 @@ class GraphRag:
             self._space.put_chunks(
                 document_id, chunks(name, self._space.units(document_id)), rule=CHUNK_RULE
             )
-        # The space has changed: its languages are looked at again, and every split made
-        # beside the old ones is made again.
+        # The space has changed: its languages are looked at again, and a split is kept by
+        # the samples it was asked beside (`_asked`), so new ones ask again.
         with self._lock:
             self._samples = None
-            self._split.clear()
         self._ensure_index()
         records, _, _ = self._query(
             f"""
@@ -496,7 +497,7 @@ class GraphRag:
         items = within_budget(self.read(question, documents=documents))
         # A graph_chunk holding a table, a picture or a chart says it in words a model wrote
         # once; the picture goes too, so the answer reads it, not the description.
-        pictures = self.pictures(items) if items else []
+        pictures = [picture for each in self.pictures(items) for picture in each]
         return GraphAnswer(text=self.answered(question, items, pictures),
                            sources=[_source(item) for item in items])
 
@@ -517,22 +518,26 @@ class GraphRag:
             content += [{"type": "text", "text": label}, image_part(png)]
         return self._complete(system=SYSTEM, content=content)
 
-    def pictures(self, items: Sequence[RetrieverResultItem]) -> list[tuple[str, bytes]]:
+    def pictures(self, items: Sequence[RetrieverResultItem]) -> list[list[tuple[str, bytes]]]:
         """The crops of the tables, pictures and charts the found passages hold, and the scans
-        their words were read off, in the order the passages were found, each named by its
-        file and label -- at most ANSWER_PICTURES of them."""
-        if self._assets is None:
-            return []
-        members = list(dict.fromkeys(
-            m for item in items for m in (item.metadata or {}).get("members", [])))
+        their words were read off, each under the first passage holding it, in the order the
+        passages were found, each named by its file and label -- at most ANSWER_PICTURES of
+        them in all."""
+        pictures: list[list[tuple[str, bytes]]] = [[] for _ in items]
+        if self._assets is None or not items:
+            return pictures
+        first: dict[str, int] = {}
+        for at, item in enumerate(items):
+            for member in (item.metadata or {}).get("members", []):
+                first.setdefault(member, at)
         records, _, _ = self._query(
-            _PICTURES, ids=members, key=f"meta_{CROP_ASSET_KEY}",
+            _PICTURES, ids=list(first), key=f"meta_{CROP_ASSET_KEY}",
             routing_=neo4j.RoutingControl.READ,
         )
         by_id = {record["id"]: record for record in records}
-        pictures: list[tuple[str, bytes]] = []
         sent: set[str] = set()
-        for member in members:
+        taken = 0
+        for member, at in first.items():
             record = by_id.get(member)
             if record is None or record["picture"] in sent:
                 continue
@@ -541,8 +546,9 @@ class GraphRag:
             if (png := read_crop(record["crop"], self._assets)) is None:
                 continue
             named = shown_name(_composed(record["file"]))
-            pictures.append((f"Picture in [{named}]: {record['label']}", png))
-            if len(pictures) == ANSWER_PICTURES:
+            pictures[at].append((f"Picture in [{named}]: {record['label']}", png))
+            taken += 1
+            if taken == ANSWER_PICTURES:
                 break
         return pictures
 
@@ -627,20 +633,17 @@ class GraphRag:
             for at, record in enumerate(found)
         ]
 
-    def _queries(self, question: str) -> tuple[str, ...]:
-        """What the question asks, one search query each (`_asked`)."""
-        return self._asked(question)[0]
-
     def _asked(self, question: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """What the question asks, one search query each, and the phrases in it naming a
         document (`SPLIT_SYSTEM`) -- or the question itself and none, where the model asks it
-        as one thing or gives no usable answer. Made once for a question, however many ask at
-        the same time."""
-        with self._lock:
-            if question in self._split:
-                return self._split[question]
-        return cast(tuple[tuple[str, ...], tuple[str, ...]], self._shared(
-            ("split", question), lambda: self._split_question(question)))
+        as one thing or gives no usable answer. Made once for a question and the samples it is
+        asked beside, however many workspaces ask it, at once or after (`SPLITS`); a split that
+        failed is not kept."""
+        asked = asked_with_samples(question, self._language_samples())
+        key = (self._endpoint.wire, self._endpoint.base_url, self._endpoint.model, asked)
+        split = SPLITS.get(key, lambda: self._split_question(question, asked),
+                           keep=lambda split: split is not None)
+        return split or ((question,), ())
 
     def _complete(self, **ask: Any) -> str:
         """`complete`, asked again on ASK_RETRY_DELAYS while the endpoint says "not now"."""
@@ -653,26 +656,23 @@ class GraphRag:
             self._wait(delay)
         return complete(self._client, self._endpoint, **ask)
 
-    def _split_question(self, question: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    def _split_question(self, question: str, asked: str
+                        ) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
         try:
             reply = self._complete(
-                system=SPLIT_SYSTEM,
-                content=asked_with_samples(question, self._language_samples()),
+                system=SPLIT_SYSTEM, content=asked,
                 schema=strict_response_schema(_Split), name="question_split")
             written = _Split.model_validate_json(reply)
         except Exception as error:  # noqa: BLE001 -- unsplit is how every question was asked
             _log.warning("question not split -- %s", str(error)[:200])
-            return (question,), ()  # not kept: the next ask tries the model again
+            return None  # not kept: the next ask tries the model again
         parts = _kept(written.queries, MAX_QUERIES)
         # The same queries in the documents' other languages: what full-text search matches.
         queries = tuple(dict.fromkeys((*(parts if len(parts) > 1 else (question,)),
                                        *_kept(written.translated, MAX_QUERIES * 2))))
-        said = _kept(written.documents, MAX_QUERIES)
-        with self._lock:
-            if len(self._split) >= 256:
-                self._split.clear()
-            self._split[question] = (queries, said)
-        return queries, said
+        # A name is one the question writes: one copied off the samples names nothing asked.
+        named = [phrase for phrase in written.documents if folded(phrase) in folded(question)]
+        return queries, _kept(named, MAX_QUERIES)
 
     def _language_samples(self) -> list[str]:
         """A line of each language the space's documents are written in, from one passage of
@@ -706,20 +706,7 @@ class GraphRag:
         """`work()`, run by the first of those asking for `key` at once; the others wait for
         it and are handed what it returned (or raised). Kept only while it runs: a result
         shared longer would outlive the documents it was found in."""
-        with self._lock:
-            flight = self._flights.get(key)
-            leads = flight is None
-            if flight is None:
-                flight = self._flights[key] = Future()
-        if leads:
-            try:
-                flight.set_result(work())
-            except BaseException as error:
-                flight.set_exception(error)
-            finally:
-                with self._lock:
-                    del self._flights[key]
-        return flight.result()
+        return self._flights.get(key, work)
 
     def _ensure_index(self) -> None:
         """The vector index at this model's size: one at another size is dropped and made
@@ -864,6 +851,11 @@ def _links_of(scope: WorkspaceScope) -> str:
             MATCH (doc)-[:SIMILAR_TO]-(n:Document)
             RETURN n.id AS other, 'similar' AS direction
           }}"""
+
+SPLITS: Remembered[tuple[tuple[str, ...], tuple[str, ...]] | None] = Remembered(256)
+"""Each question's split (`GraphRag._asked`), by the endpoint and model asked and what they
+were sent -- the question beside its workspace's language samples: workspaces written alike
+ask once, one written in another language asks for its own translations."""
 
 _WAY = ("CASE WHEN 'cites' IN ways THEN 'cites' WHEN 'cited_by' IN ways THEN 'cited_by' "
         "ELSE 'similar' END")

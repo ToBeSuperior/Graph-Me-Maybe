@@ -6,7 +6,7 @@ import { AlertTriangle, ChevronRight, ExternalLink, FileSearch, RotateCw, Search
 import { toast } from 'sonner';
 import { useDeferredValue, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, call, type LibraryItem } from '../../api/client';
+import { api, call, READING, type LibraryItem } from '../../api/client';
 import { FileIcon } from '../../components/docs';
 import { Badge, Button, Empty, Input, Skeleton } from '../../components/ui';
 import { changedAt, shownName, stem } from '../../lib/format';
@@ -15,10 +15,8 @@ import { keys, useLibrary } from '../../lib/queries';
 import { FolderDrop } from '../upload/FolderDrop';
 import { PageHeader } from './ManageLayout';
 
-const BUSY = ['rendering', 'grouping', 'reading', 'captioning', 'referencing'];
-
 function stateOf(item: LibraryItem): { word: WordKey; tone: 'accent' | 'ok' | 'danger' | 'neutral' } {
-  if (BUSY.includes(item.state)) return { word: 'stateReading', tone: 'accent' };
+  if (READING.includes(item.state)) return { word: 'stateReading', tone: 'accent' };
   if (item.in_space) return { word: 'stateInGraph', tone: 'ok' };
   if (item.state === 'queued') return { word: 'stateQueued', tone: 'accent' }; // read, put in its turn
   if (item.state === 'error') return { word: 'stateFailed', tone: 'danger' };
@@ -122,7 +120,7 @@ export function LibraryPage() {
                           )}
                           {/* A row opens its document, whose page is where it is deleted: a bin
                               here sat where every other row offers its details. */}
-                          {item.in_space || BUSY.includes(item.state) || item.state === 'queued'
+                          {item.in_space || READING.includes(item.state) || item.state === 'queued'
                             ? <Link to={docLink(item)} className="text-faint hover:text-fg" aria-label={t('openInManage')} title={t('openInManage')}><ChevronRight className="size-4" /></Link>
                             : <OutsideActions item={item} />}
                         </span>

@@ -14,11 +14,9 @@ from openpyxl.worksheet.formula import ArrayFormula
 from openpyxl.worksheet.worksheet import Worksheet
 
 from graphme.adapters.extractors.xlsx_drawings import (
-    DrawingComponent,
     DrawingManifest,
     DrawingObject,
     anchor_cell_range,
-    group_drawing_components,
     parse_xlsx_drawings,
 )
 from graphme.adapters.extractors.xlsx_visual_tables import (
@@ -126,7 +124,6 @@ class _LayoutUnit:
     kind: str
     text: str = ""
     range_ref: str | None = None
-    parent_id: str | None = None
 
     @property
     def bounds(self) -> tuple[int, int, int, int]:
@@ -136,35 +133,15 @@ class _LayoutUnit:
         return int(min_col), int(min_row), int(max_col), int(max_row)
 
 
-def _drawing_member_data(component: DrawingComponent) -> list[dict[str, JsonValue]]:
-    return [
-        {
-            "object_id": member.object_id,
-            "kind": member.kind,
-            "z_index": member.z_index,
-            "group_path": list(member.group_path),
-            "nv_id": member.nv_id,
-            "name": member.name,
-            "anchor_kind": member.anchor_kind,
-            "anchor_from": cast(
-                dict[str, JsonValue], member.anchor_from.as_dict()
-            ) if member.anchor_from else None,
-            "anchor_to": cast(
-                dict[str, JsonValue], member.anchor_to.as_dict()
-            ) if member.anchor_to else None,
-            "extent": cast(
-                dict[str, JsonValue], member.extent.as_dict()
-            ) if member.extent else None,
-            "transform": member.transform,
-            "properties": member.properties,
-            "text_runs": list(member.text_runs),
-            "relationship_id": member.media_relationship_id,
-            "media_target": member.media_target,
-            "media_hash": member.media_hash,
-            "raw_xml_hash": member.raw_xml_hash,
-        }
-        for member in component.members
-    ]
+def _drawn_at(item: DrawingObject) -> dict[str, JsonValue]:
+    """Where a drawing is drawn, for placing it on the rendered sheet (`CellRangePlacer`):
+    its anchor markers and its own transform, whose extent it is measured by."""
+    return {
+        "xml_index": item.xml_index,
+        "anchor_from": cast(JsonValue, item.anchor_from.as_dict() if item.anchor_from else None),
+        "anchor_to": cast(JsonValue, item.anchor_to.as_dict() if item.anchor_to else None),
+        "transform": cast(JsonValue, item.transform),
+    }
 
 
 def _plain(value: object) -> object:
@@ -275,12 +252,10 @@ class ExcelExtractor:
         pivot_ranges: list[_TableRange] = []
         chart_sources: list[tuple[str, list[str]]] = []
         sheet_cells = {sheet.title: written_cells(sheet) for sheet in wb.worksheets}
-        # Grouped once for the workbook; each sheet takes its own, in the same order.
-        sheet_pictures: dict[str, list[DrawingComponent]] = {}
-        if self._asset_store is not None:
-            for component in group_drawing_components(drawing_manifest):
-                if component.pictures:
-                    sheet_pictures.setdefault(component.worksheet, []).append(component)
+        sheet_pictures: dict[str, list[DrawingObject]] = {}
+        for item in drawing_manifest.objects:
+            if item.is_picture:
+                sheet_pictures.setdefault(item.worksheet, []).append(item)
         for sheet in wb.worksheets:
             self._extract_sheet(
                 sheet=sheet,
@@ -390,7 +365,7 @@ class ExcelExtractor:
         pivot_ranges: list[_TableRange],
         chart_sources: list[tuple[str, list[str]]],
         drawing_manifest: DrawingManifest,
-        pictures: list[DrawingComponent],
+        pictures: list[DrawingObject],
     ) -> None:
         first_node = len(nodes)
         hidden = sheet.sheet_state != "visible"
@@ -451,8 +426,6 @@ class ExcelExtractor:
             )
 
         for candidate in detect_visual_tables(sheet, cells):
-            # Slot ownership is resolved from parsed anchor geometry during image
-            # extraction, never from component enumeration order.
             add_table(
                 node_id("visual_table", {"sheet": sheet.title, "range": candidate.ref}),
                 f"Visual table {candidate.ref}",
@@ -500,9 +473,7 @@ class ExcelExtractor:
                 nodes=nodes,
                 evidence=evidence,
                 node_id=node_id,
-                components=pictures,
-                table_ranges=sheet_table_ranges,
-                warnings=warnings,
+                pictures=pictures,
             )
         )
         self._emit_reading_hierarchy(
@@ -599,7 +570,7 @@ class ExcelExtractor:
                 sheet=sheet.title,
                 cell_range=anchor_cell_range(item),
                 source_part=item.drawing_part,
-                metadata={"xml_index": item.xml_index},
+                metadata=_drawn_at(item),
             )
             nodes.append(GraphNode(id=box_id, document_id=document_id, type=NodeType.TEXT_CHUNK,
                                    label=text.splitlines()[0][:200], text=text, locator=locator))
@@ -804,144 +775,75 @@ class ExcelExtractor:
         nodes: list[GraphNode],
         evidence: list[EvidenceRecord],
         node_id: Callable[[str, dict[str, str]], str],
-        components: list[DrawingComponent],
-        table_ranges: list[_TableRange],
-        warnings: list[WarningRecord],
+        pictures: list[DrawingObject],
     ) -> list[_LayoutUnit]:
+        """Every picture on the sheet, held by the sheet. What a picture lies in is decided
+        by where it is drawn, in binding -- never here, from the cells its anchor names: the
+        `to` marker of a picture that keeps its own size is stale."""
         if self._asset_store is None:
             return []
         items: list[_LayoutUnit] = []
-        table_visual_emitted: set[str] = set()
-        warned_components: set[str] = set()
-        for component in components:
-            for picture in component.pictures:
-                image_id = node_id(
-                    "image",
-                    {
-                        "sheet": sheet.title,
-                        "drawing_part": picture.drawing_part,
-                        "xml_index": str(picture.xml_index),
-                        "nv_id": str(picture.nv_id),
-                    },
-                )
-                ref = anchor_cell_range(picture)
-                parent: str | None = None
-                if ref is not None:
-                    min_col, min_row, max_col, max_row = range_boundaries(ref)
-                    image_rect = GridRectangle(
-                        int(min_col), int(min_row), int(max_col), int(max_row)
-                    )
-                    matching_table_ids = [
-                        table.node_id
-                        for table in table_ranges
-                        if image_rect.overlaps(table)
-                    ]
-                    if len(matching_table_ids) == 1:
-                        parent = matching_table_ids[0]
-                label = picture.name or f"Image {picture.xml_index + 1}"
-                member_data = _drawing_member_data(component)
-                locator = SourceLocator(
-                    file_name=source.name,
+        for picture in pictures:
+            image_id = node_id(
+                "image",
+                {
+                    "sheet": sheet.title,
+                    "drawing_part": picture.drawing_part,
+                    "xml_index": str(picture.xml_index),
+                    "nv_id": str(picture.nv_id),
+                },
+            )
+            ref = anchor_cell_range(picture)
+            label = picture.name or f"Image {picture.xml_index + 1}"
+            locator = SourceLocator(
+                file_name=source.name,
+                label=label,
+                sheet=sheet.title,
+                cell_range=ref,
+                relationship_id=picture.media_relationship_id,
+                source_part=picture.drawing_part,
+                metadata={
+                    "drawing_relationship_id": picture.drawing_relationship_id,
+                    "nv_id": picture.nv_id,
+                    **_drawn_at(picture),
+                },
+            )
+            suffix = Path(picture.media_target or "image.png").suffix or ".bin"
+            assert picture.media_bytes is not None
+            asset_hash = self._asset_store.put(picture.media_bytes, suffix=suffix)
+            nodes.append(
+                GraphNode(
+                    id=image_id,
+                    document_id=document_id,
+                    type=NodeType.IMAGE,
                     label=label,
-                    sheet=sheet.title,
-                    cell_range=ref,
-                    relationship_id=picture.media_relationship_id,
-                    source_part=picture.drawing_part,
-                    metadata={
-                        "drawing_relationship_id": picture.drawing_relationship_id,
-                        "xml_index": picture.xml_index,
-                        "nv_id": picture.nv_id,
-                    },
+                    locator=locator,
+                    metadata={"anchor_range": ref, "drawing_part": picture.drawing_part},
                 )
-                suffix = Path(picture.media_target or "image.png").suffix or ".bin"
-                assert picture.media_bytes is not None
-                asset_hash = self._asset_store.put(picture.media_bytes, suffix=suffix)
-                nodes.append(
-                    GraphNode(
-                        id=image_id,
-                        document_id=document_id,
-                        type=NodeType.IMAGE,
-                        label=label,
-                        locator=locator,
-                        metadata={
-                            "anchor_range": ref,
-                            "component_id": component.component_id,
-                            "drawing_part": picture.drawing_part,
-                            "source_fidelity": component.source_fidelity,
-                            "members": member_data,
-                            "contained_in_table": parent is not None,
-                        },
-                    )
+            )
+            evidence.append(
+                EvidenceRecord(
+                    id=stable_id(content_hash, f"evidence:image:{picture.object_id}"),
+                    document_id=document_id,
+                    node_id=image_id,
+                    kind=EvidenceKind.SOURCE_MEDIA,
+                    locator=locator,
+                    asset_hash=asset_hash,
+                    mime_type=self._image_mime_type(suffix),
+                    data={"media_hash": picture.media_hash},
                 )
-                mime_type = self._image_mime_type(suffix)
-                evidence.append(
-                    EvidenceRecord(
-                        id=stable_id(content_hash, f"evidence:image:{picture.object_id}"),
-                        document_id=document_id,
-                        node_id=image_id,
-                        kind=EvidenceKind.SOURCE_MEDIA,
-                        locator=locator,
-                        asset_hash=asset_hash,
-                        mime_type=mime_type,
-                        data={
-                            "component_id": component.component_id,
-                            "source_fidelity": component.source_fidelity,
-                            "media_hash": picture.media_hash,
-                            "members": member_data,
-                        },
-                    )
-                )
-                if (
-                    component.warning is not None
-                    and component.component_id not in warned_components
-                ):
-                    warnings.append(
-                        WarningRecord(
-                            id=stable_id(
-                                content_hash, f"warn:drawing_composite:{component.component_id}"
-                            ),
-                            document_id=document_id,
-                            code="drawing_composite_not_rendered",
-                            message=component.warning,
-                            severity=Severity.WARNING,
-                            locator=locator,
-                        )
-                    )
-                    warned_components.add(component.component_id)
-                if parent is not None and parent not in table_visual_emitted:
-                    evidence.append(
-                        EvidenceRecord(
-                            id=stable_id(content_hash, f"visual:{parent}"),
-                            document_id=document_id,
-                            node_id=parent,
-                            kind=EvidenceKind.SOURCE_MEDIA,
-                            locator=locator,
-                            asset_hash=asset_hash,
-                            mime_type=mime_type,
-                            data={"component_id": component.component_id, "anchor_range": ref},
-                        )
-                    )
-                    table_visual_emitted.add(parent)
-                row = (
-                    picture.anchor_from.row + 1
-                    if picture.anchor_from and picture.anchor_from.row is not None
-                    else 1
-                )
-                col = (
-                    picture.anchor_from.col + 1
-                    if picture.anchor_from and picture.anchor_from.col is not None
-                    else 1
-                )
-                items.append(
-                    _LayoutUnit(
-                        row,
-                        col,
-                        image_id,
-                        "image",
-                        range_ref=ref,
-                        parent_id=parent,
-                    )
-                )
+            )
+            row = (
+                picture.anchor_from.row + 1
+                if picture.anchor_from and picture.anchor_from.row is not None
+                else 1
+            )
+            col = (
+                picture.anchor_from.col + 1
+                if picture.anchor_from and picture.anchor_from.col is not None
+                else 1
+            )
+            items.append(_LayoutUnit(row, col, image_id, "image", range_ref=ref))
         return items
 
     def _image_mime_type(self, suffix: str) -> str:
@@ -978,8 +880,7 @@ class ExcelExtractor:
             nodes[index].id: index for index in range(first_node, len(nodes))
         }
         for unit in ordered_items:
-            owner = unit.parent_id or sheet_id
-            edges.append(self._contains(content_hash, document_id, owner, unit.item_id))
+            edges.append(self._contains(content_hash, document_id, sheet_id, unit.item_id))
             node_index = node_indexes.get(unit.item_id)
             if node_index is None:
                 continue
@@ -1030,7 +931,7 @@ class ExcelExtractor:
                 sheet=sheet.title,
                 cell_range=anchor_cell_range(frame) if frame is not None else None,
                 source_part=frame.drawing_part if frame is not None else None,
-                metadata={"xml_index": frame.xml_index} if frame is not None else {},
+                metadata=_drawn_at(frame) if frame is not None else {},
             )
             chart_family = chart.__class__.__name__.removesuffix("Chart").lower()
             chart_type = getattr(chart, "type", None)

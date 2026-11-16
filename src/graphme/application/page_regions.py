@@ -11,9 +11,9 @@ sitting side by side stay separate, because a sheet routinely lays them out that
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
 from openpyxl.utils import range_boundaries
 
@@ -35,15 +35,6 @@ most of the slide. Nothing about the shapes themselves separates the two, so the
 drawn between the numbers and kept low enough to hold a label; it can be moved again if a
 document disagrees."""
 """Rendered borders round to whole pixels, so near-adjacency still counts as contact."""
-
-
-class AnchorLike(Protocol):
-    """A DrawingML anchor marker: a zero-based cell plus an offset into it, in EMU."""
-
-    col: int | None
-    col_off: int | None
-    row: int | None
-    row_off: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,15 +115,17 @@ class SheetPixelGrid:
     def drawing(
         self,
         *,
-        anchor_from: AnchorLike | None,
-        anchor_to: AnchorLike | None = None,
-        transform: dict[str, Any] | None = None,
+        anchor_from: Mapping[str, Any] | None,
+        anchor_to: Mapping[str, Any] | None = None,
+        transform: Mapping[str, Any] | None = None,
     ) -> PixelBox | None:
-        if anchor_from is None or anchor_from.col is None or anchor_from.row is None:
+        """A drawing's box from its DrawingML anchor markers (each a zero-based `col` and
+        `row` plus `col_off` and `row_off` into them, in EMU) and its own transform."""
+        if anchor_from is None or anchor_from.get("col") is None or anchor_from.get("row") is None:
             return None
         try:
-            x0 = self.column_edges[anchor_from.col + 1] + self.emu(anchor_from.col_off)
-            y0 = self.row_edges[anchor_from.row + 1] + self.emu(anchor_from.row_off)
+            x0 = self.column_edges[anchor_from["col"] + 1] + self.emu(anchor_from.get("col_off"))
+            y0 = self.row_edges[anchor_from["row"] + 1] + self.emu(anchor_from.get("row_off"))
         except KeyError:
             return None
         # With editAs="oneCell" a drawing keeps its own size while cells resize around
@@ -140,14 +133,14 @@ class SheetPixelGrid:
         extent = (transform or {}).get("ext") or {}
         if extent.get("cx") and extent.get("cy"):
             return PixelBox(x0, y0, x0 + self.emu(extent["cx"]), y0 + self.emu(extent["cy"]))
-        if anchor_to is None or anchor_to.col is None or anchor_to.row is None:
+        if anchor_to is None or anchor_to.get("col") is None or anchor_to.get("row") is None:
             return None
         try:
             return PixelBox(
                 x0,
                 y0,
-                self.column_edges[anchor_to.col + 1] + self.emu(anchor_to.col_off),
-                self.row_edges[anchor_to.row + 1] + self.emu(anchor_to.row_off),
+                self.column_edges[anchor_to["col"] + 1] + self.emu(anchor_to.get("col_off")),
+                self.row_edges[anchor_to["row"] + 1] + self.emu(anchor_to.get("row_off")),
             )
         except KeyError:
             return None

@@ -102,9 +102,9 @@ class FakeV1:
         if path == "/v1/jobs/build":
             return httpx.Response(202, json={"id": "job-1", "kind": "build", "state": "reading"})
         if path == "/v1/jobs":
-            return httpx.Response(200, json=[
-                {"id": "job-0", "kind": "build", "state": "done", "done": 1, "total": 1},
-                {"id": "job-1", "kind": "build", "state": "reading", "done": 2, "total": 5}])
+            return httpx.Response(200, json=[  # newest first, as the app lists them
+                {"id": "job-1", "kind": "build", "state": "reading", "done": 2, "total": 5},
+                {"id": "job-0", "kind": "build", "state": "done", "done": 1, "total": 1}])
         if path == "/v1/jobs/job-1/cancel":
             return httpx.Response(200, json={"id": "job-1", "kind": "build", "state": "cancelled"})
         if path == "/v1/workspaces/w-side/open":
@@ -270,6 +270,15 @@ def test_writing_goes_to_the_open_workspace(v1: FakeV1, tmp_path: Path) -> None:
     assert said(status)["id"] == "job-1" and said(cancelled)["state"] == "cancelled"
     assert said(opened)["open"] == "w-side"
     assert shut and "Closed notes" in closed
+
+
+def test_the_build_followed_and_cancelled_is_the_newest(v1: FakeV1) -> None:
+    _, status, _ = call(v1, "build_status")
+    _, cancelled, _ = call(v1, "cancel_build")
+
+    assert said(status)["id"] == "job-1"
+    assert ("POST", "http://127.0.0.1:1/v1/jobs/job-1/cancel", None) in v1.sent
+    assert said(cancelled)["state"] == "cancelled"
 
 
 def test_connect_starts_the_agent_once_when_two_ask_at_once(tmp_path: Path) -> None:

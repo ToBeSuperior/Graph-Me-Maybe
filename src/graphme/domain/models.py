@@ -130,27 +130,6 @@ class PageSegmentationResult(DomainModel):
         return self
 
 
-class HierarchyImageDescriptor(DomainModel):
-    """Cryptographic identity for the exact visual input sent to a hierarchy VLM."""
-
-    asset_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    mime_type: Literal["image/png"] = "image/png"
-    size_bytes: int = Field(gt=0)
-    width: int = Field(gt=0)
-    height: int = Field(gt=0)
-    document_id: str = Field(min_length=1)
-    scope: str = Field(min_length=1, max_length=200)
-    page_index: int = Field(ge=1)
-    covered_unit_ids: tuple[str, ...] = Field(min_length=1, max_length=500)
-
-    @field_validator("covered_unit_ids")
-    @classmethod
-    def unique_covered_units(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if len(set(value)) != len(value):
-            raise ValueError("covered hierarchy unit IDs must be unique")
-        return value
-
-
 class HierarchyUnit(DomainModel):
     """What a unit is and where it reads, and nothing else.
 
@@ -293,7 +272,6 @@ class HierarchyScopeRequest(DomainModel):
     """The units still open where this page begins, outermost first -- the path from the
     document down to where the page before stopped. These are the places this page can
     attach to."""
-    image: HierarchyImageDescriptor
 
     @model_validator(mode="after")
     def validate_complete_scope(self) -> HierarchyScopeRequest:
@@ -317,13 +295,6 @@ class HierarchyScopeRequest(DomainModel):
             raise ValueError("a carried unit's parent must be carried with it")
         if set(self.outline_open) - carried_ids:
             raise ValueError("an open unit must be carried in the outline")
-
-        if self.image.document_id != self.document_id or self.image.scope != self.scope:
-            raise ValueError("hierarchy image must match request document and scope")
-        # The page has to show every unit being judged, or a decision about one rests
-        # on something the model never saw.
-        if not unit_ids.issubset(set(self.image.covered_unit_ids)):
-            raise ValueError("image must cover every scope unit")
         return self
 
 

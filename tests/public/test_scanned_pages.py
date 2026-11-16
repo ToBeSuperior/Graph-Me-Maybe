@@ -133,8 +133,7 @@ def test_a_scanned_page_is_read_and_its_words_are_the_models(tmp_path: Path) -> 
     scan = next(n for n in extracted.nodes if n.type is NodeType.IMAGE)
     # The scan is what the page is drawn on, and the picture an answer is shown.
     assert scan.metadata["background"] is True
-    kept = Image.open(io.BytesIO(store.kept[str(scan.metadata[CROP_ASSET_KEY])]))
-    assert kept.size == Image.open(io.BytesIO(reader.pages[0])).size  # the page it was read off
+    assert CROP_ASSET_KEY not in scan.metadata  # binding cuts it, as every crop
     assert {n.metadata["scan_of"] for n in read} == {scan.id}
     # Placed where the model saw them, in page coordinates.
     first = read[0].locator.bbox
@@ -198,7 +197,7 @@ def test_a_scan_smaller_than_the_page_does_not_take_the_words_read_off_it() -> N
     where = SourceLocator(file_name="r", label="r", page=1)
     scan = GraphNode(id="scan", document_id="d", type=NodeType.IMAGE, label="scan",
                      locator=where, retrievable=False,
-                     metadata={"background": True, CROP_ASSET_KEY: "a" * 64})
+                     metadata={"background": True})
     line = GraphNode(id="line", document_id="d", type=NodeType.TEXT_CHUNK, label="line",
                      text="line", locator=where, retrievable=False,
                      metadata={"scan_of": "scan"})
@@ -218,13 +217,21 @@ def test_a_scan_smaller_than_the_page_does_not_take_the_words_read_off_it() -> N
         def box(self, node: GraphNode) -> PixelBox | None:
             return boxes.get(node.id)
 
+    cut: list[tuple[int, int, int, int]] = []
     bound = bind_page_visuals(extracted, page=_Page(), members=(scan, line), placer=_Placer(),
-                              asset_store=_Store(), crop=lambda box: b"png")
+                              asset_store=_Store(),
+                              crop=lambda box: cut.append(box) or b"png")  # type: ignore[func-returns-value]
 
     owners = {e.target_id: e.source_id for e in bound.edges if e.type is EdgeType.CONTAINS}
     assert owners["line"] == "d"
     kept = next(n for n in bound.nodes if n.id == "scan")
-    assert kept.metadata[CROP_ASSET_KEY] == "a" * 64
+    # Binding is the one producer of a crop: the scan is cut to its own box, merged with
+    # nothing, and stays the page's backdrop.
+    assert cut == [(50, 30, 940, 1340)]
+    assert kept.metadata[CROP_ASSET_KEY]
+    assert kept.metadata["crop_bbox"] == [50, 30, 940, 1340]
+    assert kept.metadata["crop_page_index"] == 1
+    assert kept.metadata["background"] is True
 
 
 class _Captioner:

@@ -126,7 +126,7 @@ export function Results({ question, topK, stamp }: { question: string; topK: num
   );
 
   return (
-    <div className="grid h-full lg:grid-cols-[220px_minmax(0,1fr)_minmax(380px,42%)]">
+    <div className="grid h-full grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_minmax(380px,42%)]">
       <aside className="hidden min-h-0 flex-col border-r border-line bg-subtle/50 lg:flex" aria-label={t('recent')}>
         <div className="p-3">
           <Link to="/" className="flex h-8 items-center gap-2 rounded-md border border-line bg-panel px-2.5 text-sm font-medium hover:bg-hover">

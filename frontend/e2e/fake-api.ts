@@ -35,7 +35,7 @@ const BUILD_STARTED = { id: 'bx', kind: 'build', state: 'reading', done: 0, tota
 export async function fakeApi(page: Page,
   { box = true, boxDrive = true, googleDrive = true, oneDrive = true, dropbox = true, workspaces = true, empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[],
     progress = null as Record<string, unknown> | null, elapsed = null as number | null, starting = 0,
-    problems = null as string[] | null, mailWorkspace = false, mailRefused = '', mailDoc = false } = {}): Promise<Fake> {
+    problems = null as string[] | null, mailWorkspace = false, mailRefused = '', mailDoc = false, gone = false, pageCount = 2 } = {}): Promise<Fake> {
   const fake: Fake = {
     searchModels: [
       { name: 'general', model: 'harrier-oss-v1-0.6b', size: 639448320, installed: false, chosen: true,
@@ -263,11 +263,12 @@ export async function fakeApi(page: Page,
     if (/^\/v1\/files\/[^/]+\/pages$/.test(path)) {
       return json(route, { source: 'x.docx', format: 'docx', state: progress ? 'reading' : 'done', error: null,
         pending: !!progress, progress, elapsed,
-        sheets: [1, 2].map((index) => ({ index, name: null, width: 800, height: 1100, derived: [], seconds: 1, pending: false, error: null })) });
+        sheets: Array.from({ length: pageCount }, (_, i) => i + 1).map((index) => ({ index, name: null, width: 800, height: 1100, derived: [], seconds: 1, pending: false, error: null })) });
     }
     if (/^\/v1\/files\/[^/]+\/graph$/.test(path)) {
       return json(route, { nodes: [], relationships: [], chunks: [], pages: { s1: 2, p1: 1 }, crops: [] });
     }
+    if (/\/image$/.test(path) && gone) return json(route, { detail: "this document's source file cannot be found" }, 404);
     if (/\/image$/.test(path)) return route.fulfill({ status: 200, contentType: 'image/png', body: PNG });
     return json(route, { detail: `not faked: ${method} ${path}` }, 404);
   });

@@ -95,6 +95,17 @@ class DocxExtractor:
                 nodes.append(node)
                 evidence.append(record)
                 ordered_ids.append(node.id)
+                # A cell's words leave its text boxes out; each is a unit of its own.
+                self._extract_text_boxes(
+                    element=block._tbl,
+                    body_index=body_index,
+                    source=source,
+                    content_hash=content_hash,
+                    document_id=document_id,
+                    nodes=nodes,
+                    evidence=evidence,
+                    ordered_ids=ordered_ids,
+                )
 
         for child_id in ordered_ids:
             edges.append(
@@ -177,49 +188,16 @@ class DocxExtractor:
             )
             ordered_ids.append(node_id)
 
-        for box_index, box_text in enumerate(self._text_boxes(paragraph), start=1):
-            # A floating text box is one unit the way a slide's text box is: the lines in
-            # it belong together, and what encloses what is the hierarchy pass's question.
-            box_id = stable_id(
-                content_hash,
-                canonical_locator("textbox", {"body": body_index, "box": box_index}),
-            )
-            box_locator = SourceLocator(
-                file_name=source.name,
-                label=f"text box {body_index}.{box_index}",
-                metadata={
-                    "story": "textbox",
-                    "body_index": body_index,
-                    "box_index": box_index,
-                },
-            )
-            nodes.append(
-                GraphNode(
-                    id=box_id,
-                    document_id=document_id,
-                    type=NodeType.TEXT_CHUNK,
-                    label=box_text.splitlines()[0][:200],
-                    locator=box_locator,
-                    text=box_text,
-                    content_hash=sha256_bytes(box_text.encode()),
-                    metadata={
-                        "story": "textbox",
-                        "body_index": body_index,
-                        "box_index": box_index,
-                    },
-                )
-            )
-            evidence.append(
-                EvidenceRecord(
-                    id=stable_id(content_hash, f"evidence:textbox:{body_index}:{box_index}"),
-                    document_id=document_id,
-                    node_id=box_id,
-                    kind=EvidenceKind.SOURCE_TEXT,
-                    locator=box_locator,
-                    text=box_text,
-                )
-            )
-            ordered_ids.append(box_id)
+        self._extract_text_boxes(
+            element=paragraph._p,
+            body_index=body_index,
+            source=source,
+            content_hash=content_hash,
+            document_id=document_id,
+            nodes=nodes,
+            evidence=evidence,
+            ordered_ids=ordered_ids,
+        )
 
         for image_index, (relationship_id, image_part) in enumerate(
             self._inline_images(paragraph, document), start=1
@@ -319,14 +297,69 @@ class DocxExtractor:
             )
             ordered_ids.append(chart_id)
 
+    def _extract_text_boxes(
+        self,
+        *,
+        element: Any,
+        body_index: int,
+        source: Path,
+        content_hash: str,
+        document_id: str,
+        nodes: list[GraphNode],
+        evidence: list[EvidenceRecord],
+        ordered_ids: list[str],
+    ) -> None:
+        for box_index, box_text in enumerate(self._text_boxes(element), start=1):
+            # A floating text box is one unit the way a slide's text box is: the lines in
+            # it belong together, and what encloses what is the hierarchy pass's question.
+            box_id = stable_id(
+                content_hash,
+                canonical_locator("textbox", {"body": body_index, "box": box_index}),
+            )
+            box_locator = SourceLocator(
+                file_name=source.name,
+                label=f"text box {body_index}.{box_index}",
+                metadata={
+                    "story": "textbox",
+                    "body_index": body_index,
+                    "box_index": box_index,
+                },
+            )
+            nodes.append(
+                GraphNode(
+                    id=box_id,
+                    document_id=document_id,
+                    type=NodeType.TEXT_CHUNK,
+                    label=box_text.splitlines()[0][:200],
+                    locator=box_locator,
+                    text=box_text,
+                    content_hash=sha256_bytes(box_text.encode()),
+                    metadata={
+                        "story": "textbox",
+                        "body_index": body_index,
+                        "box_index": box_index,
+                    },
+                )
+            )
+            evidence.append(
+                EvidenceRecord(
+                    id=stable_id(content_hash, f"evidence:textbox:{body_index}:{box_index}"),
+                    document_id=document_id,
+                    node_id=box_id,
+                    kind=EvidenceKind.SOURCE_TEXT,
+                    locator=box_locator,
+                    text=box_text,
+                )
+            )
+            ordered_ids.append(box_id)
+
     @staticmethod
     def _charts(paragraph: Paragraph, document: DocxDocument) -> Iterable[tuple[str, Any]]:
-        for run in paragraph.runs:
-            for found in run._element.iter(CHART_TAG):
-                relationship_id = found.get(qn("r:id"))
-                part = document.part.related_parts.get(relationship_id or "")
-                if part is not None and hasattr(part, "blob"):
-                    yield relationship_id, part
+        for found in _drawn(paragraph._p, CHART_TAG):
+            relationship_id = found.get(qn("r:id"))
+            part = document.part.related_parts.get(relationship_id or "")
+            if part is not None and hasattr(part, "blob"):
+                yield relationship_id, part
 
     @staticmethod
     def _extract_table(
@@ -376,23 +409,22 @@ class DocxExtractor:
     def _inline_images(
         paragraph: Paragraph, document: DocxDocument
     ) -> Iterable[tuple[str, Any]]:
-        for run in paragraph.runs:
-            for blip in run._element.iter(qn("a:blip")):
-                relationship_id = blip.get(qn("r:embed"))
-                if relationship_id:
-                    image_part = document.part.related_parts.get(relationship_id)
-                    if image_part is not None and hasattr(image_part, "blob"):
-                        yield relationship_id, image_part
+        for blip in _drawn(paragraph._p, qn("a:blip")):
+            relationship_id = blip.get(qn("r:embed"))
+            if relationship_id:
+                image_part = document.part.related_parts.get(relationship_id)
+                if image_part is not None and hasattr(image_part, "blob"):
+                    yield relationship_id, image_part
 
     @staticmethod
-    def _text_boxes(paragraph: Paragraph) -> list[str]:
-        """The words drawn in each text box this paragraph anchors, in document order.
+    def _text_boxes(element: Any) -> list[str]:
+        """The words drawn in each text box this paragraph or table anchors, in order.
 
         `document.paragraphs` walks the body and never enters a text box, so a report
         whose title block floats had no title in the graph at all.
         """
         found: list[str] = []
-        for content in paragraph._p.iter(qn("w:txbxContent")):
+        for content in element.iter(qn("w:txbxContent")):
             # Word writes a shape twice: the modern one and a VML fallback for old
             # readers, saying the same thing. Reading both duplicated every floating box.
             if any(node.tag == _MC_FALLBACK for node in content.iterancestors()):
@@ -417,7 +449,7 @@ class DocxExtractor:
         num_id = num_id_nodes[0].get(qn("w:val"))
         level_nodes = paragraph_xml.xpath("./w:pPr/w:numPr/w:ilvl")
         ilvl = int(level_nodes[0].get(qn("w:val")) or 0) if level_nodes else 0
-        if not num_id:
+        if not num_id or num_id == "0":  # numId 0 is "no numbering"
             return text
         # Preserve list presence in the searchable display text. Full numbering
         # format reconstruction will replace this fallback in a later extractor version.
@@ -513,6 +545,20 @@ def _paragraph_text(paragraph: Paragraph) -> str:
             for ancestor in _ancestors_below(run, own)
         )
     )
+
+
+_NOT_THE_PARAGRAPHS_DRAWINGS = {qn("w:del"), qn("w:moveFrom"), _MC_FALLBACK}
+
+
+def _drawn(paragraph: Any, tag: str) -> Iterator[Any]:
+    """The `tag` elements a paragraph draws, those in a link, a tracked insertion or a content
+    control included -- `Paragraph.runs` reads only its own runs."""
+    for found in paragraph.iter(tag):
+        if not any(
+            ancestor.tag in _NOT_THE_PARAGRAPHS_DRAWINGS
+            for ancestor in _ancestors_below(found, paragraph)
+        ):
+            yield found
 
 
 def _ancestors_below(element: Any, top: Any) -> Iterator[Any]:

@@ -11,8 +11,7 @@ from PIL import Image
 
 from graphme.adapters.vision.chat_completions import ChatCompletionsVLMAdapter
 from graphme.domain.enums import NodeType
-from graphme.domain.ids import sha256_bytes
-from graphme.domain.models import HierarchyImageDescriptor, HierarchyScopeRequest, HierarchyUnit
+from graphme.domain.models import HierarchyScopeRequest, HierarchyUnit
 
 
 def _page() -> bytes:
@@ -33,10 +32,6 @@ def _request(image: bytes) -> HierarchyScopeRequest:
                 id="subject", label="Visible text", scope="page:1", order=1,
                 node_type=NodeType.TEXT_CHUNK,
             ),
-        ),
-        image=HierarchyImageDescriptor(
-            asset_hash=sha256_bytes(image), size_bytes=len(image), width=120, height=80,
-            document_id="doc", scope="page:1", page_index=1, covered_unit_ids=("subject",),
         ),
     )
 

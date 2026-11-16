@@ -97,6 +97,7 @@ class MicrosoftSignIn:
             raise
         token = self._keep(refresh, answer)
         if (fresh := answer.get("refresh_token")) and fresh != refresh:
+            self._keep(str(fresh), answer)  # the token the caller asks with next
             keep(str(fresh))
         return token
 

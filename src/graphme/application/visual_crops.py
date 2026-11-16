@@ -232,7 +232,7 @@ def put_crop(asset_store: AssetStore, image: bytes) -> str:
 def read_crop(asset_hash: str, asset_store: AssetStore) -> bytes | None:
     """A stored crop by its hash, or None when it was never written."""
     try:
-        crop: bytes = asset_store.read(asset_hash, ".png")
+        crop: bytes = asset_store.read(asset_hash, ".webp")  # as `put_crop` writes it
     except (OSError, KeyError):
         return None  # a crop that was never written is not worth failing a read for
     return crop
@@ -300,6 +300,8 @@ def bind_page_visuals(
     page_area = max(1, page.width * page.height)
     placed: list[_Placed] = []
     background: set[str] = set()
+    # A scan read for its words, marked by extraction: cut to its own box, merged with nothing.
+    scans: dict[str, PixelBox] = {}
     # Anything the page does not show has no crop to take and takes part in nothing.
     shown = [
         (node, box)
@@ -323,12 +325,12 @@ def bind_page_visuals(
         # A backdrop is what something else is printed on; a picture filling the page with
         # nothing over it -- a scan pasted onto a slide -- is what the page says. A scan read
         # for its words is the page they are printed on, whatever its margins.
-        if node.type is NodeType.IMAGE and (
-            node.metadata.get("background")
-            or ((covered >= BACKGROUND_COVERAGE or band)
+        if node.type is NodeType.IMAGE and node.metadata.get("background"):
+            scans[node.id] = box
+            continue
+        if (node.type is NodeType.IMAGE and (covered >= BACKGROUND_COVERAGE or band)
                 and any(other is not node and box.covered_fraction(over) > 0
-                        for other, over in shown))
-        ):
+                        for other, over in shown)):
             background.add(node.id)
             continue
         if node.type in FIGURE_TYPES and ink:
@@ -340,7 +342,7 @@ def bind_page_visuals(
     borders = _borders(placed)
     background |= borders
     placed = [item for item in placed if item.node.id not in borders]
-    if not placed:
+    if not placed and not scans:
         return extracted
 
     # One merge, shared with the extraction path: whatever overlaps is one region,
@@ -382,10 +384,10 @@ def bind_page_visuals(
     visual = {item.node.id for item in placed if item.node.type in VISUAL_TYPES}
     crops = {
         node_id: (put_crop(asset_store, crop(box.rounded())), box.rounded())
-        for node_id, box in boxes.items()
+        for node_id, box in [*boxes.items(), *scans.items()]
         # A rule drawn across the page has no height to speak of. It still sits somewhere
         # and takes part in the merge, but a box that rounds away has no picture in it.
-        if node_id in visual and _has_area(box)
+        if (node_id in visual or node_id in scans) and _has_area(box)
     }
 
     nodes = tuple(

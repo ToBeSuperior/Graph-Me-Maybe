@@ -221,6 +221,9 @@ def _run_capture(
         import os
         import sys
 
+        from graphme.release_assets import ready_to_draw
+
+        ready_to_draw(viewer_directory, chrome_executable)
         # Its messages carry file names: UTF-8 both ways, not Windows' ANSI code page.
         environment = {**os.environ, "DIST_ROOT": str(viewer_directory),
                        "PYTHONIOENCODING": "utf-8"}

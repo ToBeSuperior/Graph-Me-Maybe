@@ -7,17 +7,16 @@ a parent link hands the model the answer it is being asked for.
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
+from typing import Literal
 
 from PIL import Image
 
-from graphme.adapters.extractors.xlsx_drawings import DrawingObject, parse_xlsx_drawings
 from graphme.adapters.rendering.browser_office import RenderedPage
 from graphme.adapters.rendering.page_renderer import RendersPages
 from graphme.adapters.vision.carried_outline import Carried, Placements
@@ -34,7 +33,7 @@ from graphme.application.page_hierarchy_scope import (
     build_placed_scope,
     build_sheet_scope,
 )
-from graphme.application.page_units import flow_pages
+from graphme.application.page_units import flow_pages, held_by_a_visual
 from graphme.application.progress import Progress
 from graphme.application.unit_placement import (
     FlowPlacer,
@@ -50,7 +49,6 @@ from graphme.domain.models import (
     HierarchyDecision,
     HierarchyDerivation,
     HierarchyFigureGroup,
-    HierarchyImageDescriptor,
     HierarchyScopeRequest,
     HierarchyScopeResult,
     HierarchyUnit,
@@ -87,6 +85,10 @@ def unit_crops(
 
 
 MAX_SCOPE_UNITS = 500
+
+_TooMany = Literal["too_many"]
+TOO_MANY: _TooMany = "too_many"
+"""A page past `MAX_SCOPE_UNITS`: not asked, and said unread -- not read as flat."""
 
 
 SCOPE_FORMATS = (
@@ -137,13 +139,6 @@ class RenderedHierarchyScopeProvider:
         the renderer's business, not this pass's."""
         return tuple(self._renderer.render(Path(source_path), document_format))
 
-    @staticmethod
-    def _drawings(source_path: str, document_format: DocumentFormat) -> tuple[DrawingObject, ...]:
-        """A workbook's pictures and charts as drawn: their own extent, not their anchor cells."""
-        if document_format is not DocumentFormat.XLSX:
-            return ()
-        return tuple(parse_xlsx_drawings(Path(source_path)).objects)
-
     def group_figures(
         self, *, extracted: ExtractedDocument, source_path: str
     ) -> tuple[HierarchyFigureGroup, ...]:
@@ -157,9 +152,9 @@ class RenderedHierarchyScopeProvider:
         if document_format not in SCOPE_FORMATS:
             return ()
         nodes = {node.id: node for node in extracted.nodes}
+        held = held_by_a_visual(extracted)  # once a pass, not once a page
         pages = self._pages(source_path, document_format)
         home = flow_pages(extracted, pages, document_format)
-        drawings = self._drawings(source_path, document_format)
 
         self._progress.plan("figures", len(pages))
 
@@ -170,11 +165,11 @@ class RenderedHierarchyScopeProvider:
                 self._progress.step("figures")
 
         def figures_of(page: RenderedPage) -> tuple[HierarchyFigureGroup, ...]:
-            asked = self._asked(extracted, page, home, nodes, drawings)
-            if asked is None:
+            asked = self._asked(extracted, page, home, nodes, held)
+            if not isinstance(asked, tuple):
                 return ()
             scope, shown, crops = asked
-            request = self._request(extracted, scope, shown)
+            request = self._request(extracted, scope)
             try:
                 answered = self._vision.group_page_figures(
                     request=request, image=shown.png, unit_images=crops
@@ -211,15 +206,18 @@ class RenderedHierarchyScopeProvider:
         if document_format not in SCOPE_FORMATS:
             return HierarchyDerivation()  # nothing else is rendered one page per authored unit
         nodes = {node.id: node for node in extracted.nodes}
+        held = held_by_a_visual(extracted)  # once a pass, not once a page
         pages = self._pages(source_path, document_format)
         home = flow_pages(extracted, pages, document_format)
-        drawings = self._drawings(source_path, document_format)
         flowing = document_format in FLOW_FORMATS
         if not flowing:
             self._progress.plan("outline", len(pages))
-            return self._derive_apart(extracted, pages, home, nodes, drawings, on_page)
-        asked = {page.index: self._asked(extracted, page, home, nodes, drawings)
-                 for page in pages}
+            return self._derive_apart(extracted, pages, home, nodes, held, on_page)
+        found_on = {page.index: self._asked(extracted, page, home, nodes, held)
+                    for page in pages}
+        too_many = tuple(index for index, found in found_on.items() if found == TOO_MANY)
+        asked = {index: found if isinstance(found, tuple) else None
+                 for index, found in found_on.items()}
         scopes = [(index, found[0]) for index, found in asked.items() if found is not None]
         units = {unit.id: unit for _, scope in scopes for unit in scope.units}
         order = {unit.id: (index, place) for index, scope in scopes
@@ -248,7 +246,8 @@ class RenderedHierarchyScopeProvider:
                               strict=True))
         return HierarchyDerivation(
             decisions=joining.settle(joined),
-            unread_pages=tuple(index for index, _ in scopes if read.get(index) is None),
+            unread_pages=tuple(sorted(
+                (*too_many, *(index for index, _ in scopes if read.get(index) is None)))),
         )
 
     def _headings(
@@ -298,7 +297,7 @@ class RenderedHierarchyScopeProvider:
                 carried = placements.carried(replace(scope, units=tuple(seen.values())), seen)
             previous = asked.get(page.index - 1)
             try:
-                answered = self._read(self._request(extracted, scope, shown, carried),
+                answered = self._read(self._request(extracted, scope, carried),
                                       shown.png, crops,
                                       _page_tail(previous[1].png) if previous else None,
                                       flowing=True)
@@ -338,26 +337,29 @@ class RenderedHierarchyScopeProvider:
         pages: Sequence[RenderedPage],
         home: Mapping[str, int],
         nodes: Mapping[str, GraphNode],
-        drawings: Sequence[DrawingObject],
+        held: frozenset[str],
         on_page: Callable[[int, tuple[HierarchyDecision, ...] | None], None] | None,
     ) -> HierarchyDerivation:
         """Pages that stand alone, read `workers` at a time and each heard as it lands."""
 
         def read(page: RenderedPage) -> tuple[int, tuple[HierarchyDecision, ...] | None]:
-            asked = self._asked(extracted, page, home, nodes, drawings)
+            asked = self._asked(extracted, page, home, nodes, held)
             if asked is None:
                 self._progress.step("outline")
                 return page.index, ()
-            scope, shown, crops = asked
-            try:
-                answered = self._read(self._request(extracted, scope, shown), shown.png, crops)
-            except RuntimeError as error:
-                _log.warning("%s: no usable answer, left as it was -- %s", scope.scope, error)
-                result: tuple[int, tuple[HierarchyDecision, ...] | None] = (page.index, None)
-            else:
-                result = (page.index, answered.decisions)
+            result: tuple[int, tuple[HierarchyDecision, ...] | None] = (page.index, None)
+            if asked != TOO_MANY:
+                scope, shown, crops = asked
+                try:
+                    answered = self._read(
+                        self._request(extracted, scope), shown.png, crops)
+                except RuntimeError as error:
+                    _log.warning("%s: no usable answer, left as it was -- %s",
+                                 scope.scope, error)
+                else:
+                    result = (page.index, answered.decisions)
             self._progress.step("outline")
-            if on_page is not None and (asked is not None):
+            if on_page is not None:
                 on_page(*result)
             return result
 
@@ -374,17 +376,22 @@ class RenderedHierarchyScopeProvider:
         page: RenderedPage,
         home: Mapping[str, int],
         nodes: Mapping[str, GraphNode],
-        drawings: Sequence[DrawingObject] = (),
-    ) -> tuple[HierarchyScopeUnits, RenderedPage, dict[str, bytes] | None] | None:
-        """What one page is asked with: its units, the page shown, and each picture's crop.
+        held: frozenset[str],
+    ) -> tuple[HierarchyScopeUnits, RenderedPage, dict[str, bytes] | None] | _TooMany | None:
+        """What one page is asked with: its units, the page shown, and each picture's crop;
+        None for a page with nothing to ask, `TOO_MANY` for one past `MAX_SCOPE_UNITS`.
 
         The margins of a page carry nothing, so what goes out is the page cut back to what
         is drawn on it; the crops are cut from the page itself and are not touched by this,
         so no box moves.
         """
-        scope = self._scope(extracted, page, extracted.document.format, home, drawings)
-        if scope is None or len(scope.units) > MAX_SCOPE_UNITS:
+        scope = self._scope(extracted, page, extracted.document.format, home, held)
+        if scope is None:
             return None
+        if len(scope.units) > MAX_SCOPE_UNITS:
+            _log.warning("%s: %d units, more than one ask holds -- left unread",
+                         scope.scope, len(scope.units))
+            return TOO_MANY
         crops = (
             unit_crops(scope.units, nodes=nodes, asset_store=self._asset_store)
             if self._asset_store is not None
@@ -439,9 +446,10 @@ class RenderedHierarchyScopeProvider:
         page: RenderedPage,
         document_format: DocumentFormat,
         home: Mapping[str, int],
-        drawings: Sequence[DrawingObject] = (),
+        held: frozenset[str],
     ) -> HierarchyScopeUnits | None:
-        """One page's units, placed the way that format states a position."""
+        """One page's units, placed the way that format states a position; `held` is what a
+        visual holds (`held_by_a_visual`)."""
         if document_format in FLOW_FORMATS:
             root = next(
                 (node for node in extracted.nodes if node.type is NodeType.DOCUMENT), None
@@ -450,6 +458,7 @@ class RenderedHierarchyScopeProvider:
                 return None
             return build_placed_scope(
                 extracted=extracted,
+                held=held,
                 members=_flow_members(extracted, page, document_format, home),
                 placer=flow_placer(page, document_format),
                 root=root,
@@ -471,6 +480,7 @@ class RenderedHierarchyScopeProvider:
                 return None
             return build_placed_scope(
                 extracted=extracted,
+                held=held,
                 members=members,
                 placer=NormalizedBoxPlacer(
                     width=page.width, height=page.height, glyphs=page.glyph_boxes()
@@ -484,22 +494,20 @@ class RenderedHierarchyScopeProvider:
             return None
         return build_sheet_scope(
             extracted=extracted,
+            held=held,
             sheet_name=page.label,
             scope=f"sheet-{page.index:02d}",
             page_index=page.index,
             grid=grid,
-            extents={item.xml_index: item for item in drawings if item.worksheet == page.label},
         )
 
     @staticmethod
     def _request(
         extracted: ExtractedDocument,
         scope: HierarchyScopeUnits,
-        page: RenderedPage,
         carried: Carried | None = None,
     ) -> HierarchyScopeRequest:
         carried = carried or Carried()
-        unit_ids = tuple(unit.id for unit in scope.units)
         return HierarchyScopeRequest(
             request_id=f"{extracted.document.id}:{scope.scope}",
             document_id=extracted.document.id,
@@ -510,16 +518,6 @@ class RenderedHierarchyScopeProvider:
             outline=carried.units,
             outline_parents=carried.parents,
             outline_open=carried.open,
-            image=HierarchyImageDescriptor(
-                asset_hash=hashlib.sha256(page.png).hexdigest(),
-                size_bytes=len(page.png),
-                width=page.width,
-                height=page.height,
-                document_id=extracted.document.id,
-                scope=scope.scope,
-                page_index=scope.page_index,
-                covered_unit_ids=unit_ids,
-            ),
         )
 
 
