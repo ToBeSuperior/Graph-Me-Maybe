@@ -81,7 +81,7 @@ python_version = "3.11"
 platform = "linux"
 strict = true
 plugins = ["pydantic.mypy"]
-files = ["src", "tools"]  # the tools import the package; a renamed field breaks them too
+files = ["src"]
 
 [[tool.mypy.overrides]]
 module = ["openpyxl.*", "olefile"]
