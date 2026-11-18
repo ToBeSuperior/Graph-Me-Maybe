@@ -1,5 +1,6 @@
-// Mail as a source: an account is connected with its server and app password (IMAP), counted,
-// and only then asked about -- read all, or only the last months -- before one message is read.
+// Mail as a source: an account is connected with its server and app password (IMAP) and counted;
+// a small mailbox is read at once, a large one asked about -- read all, or only the last months --
+// before one message is read (`read_if_small` on the server).
 // Each account is read into a workspace of its own. The password goes in the request and nowhere
 // else: the page keeps it only while it is typed, and the server never answers it.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -39,8 +40,8 @@ export function MailPage() {
   // The Google sign-in's address while the browser signs in: its account lands on the server.
   const [signing, setSigning] = useState<{ url: string; had: number } | null>(null);
   const accounts = useQuery({ queryKey: keys.mail, queryFn: () => call(api.GET('/v1/mail/accounts')),
-    // Followed while an account is being read, and while a Google sign-in is under way.
-    refetchInterval: (q) => (q.state.data?.some((a) => a.state === 'reading')
+    // Followed while an account is counted or read, and while a sign-in is under way.
+    refetchInterval: (q) => (q.state.data?.some((a) => a.state === 'reading' || a.state === 'counting')
       || (signing && (q.state.data?.length ?? 0) <= signing.had) ? 2000 : false) });
   return (
     <div>
@@ -180,6 +181,7 @@ function AccountCard({ account }: { account: Account }) {
           </div>
         </>
       )}
+      {account.state === 'counting' && <p role="status" className="flex items-center gap-2 text-muted"><Spinner className="size-3" />{t('mailCounting', (account.counting ?? 0).toLocaleString('en-US'))}</p>}
       {account.state === 'reading' && <p role="status" className="flex items-center gap-2 text-muted"><Spinner className="size-3" />{t('mailReading')}</p>}
       {account.state === 'current' && (
         <div className="flex flex-wrap items-center gap-2">

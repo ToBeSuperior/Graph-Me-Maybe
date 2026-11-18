@@ -55,13 +55,28 @@ def mail(workspace_demo: Demo, fake: FakeImap, home: Path,
     return TestClient(create_app(workspace_demo), base_url=BASE)
 
 
+def _counted(mail: TestClient, made: dict[str, Any]) -> dict[str, Any]:
+    """The account `made` once its count is done."""
+    def now() -> dict[str, Any]:
+        return dict(next(a for a in mail.get("/v1/mail/accounts").json()
+                         if a["id"] == made["id"]))
+    assert until(lambda: now()["state"] != "counting")
+    return now()
+
+
+def _connected(mail: TestClient, **more: Any) -> dict[str, Any]:
+    """An account connected, once its count is done."""
+    return _counted(mail, mail.post("/v1/mail/accounts", json={**CONNECT, **more}).json())
+
+
 def test_connecting_makes_a_mail_workspace_and_counts_without_reading(
     mail: TestClient, fake: FakeImap, workspace_demo: Demo
 ) -> None:
     made = mail.post("/v1/mail/accounts", json=CONNECT)
 
     assert made.status_code == 200
-    account = made.json()
+    assert made.json()["state"] == "counting" and made.json()["count"] is None
+    account = _counted(mail, made.json())
     assert account["state"] == "counted" and account["count"]["messages"] == 2
     assert account["count"]["oldest"] == "2025-01-05"
     workspaces = mail.get("/v1/workspaces").json()
@@ -73,10 +88,41 @@ def test_connecting_makes_a_mail_workspace_and_counts_without_reading(
     assert mail.get("/v1/mail/accounts").json() == [account]
 
 
+def test_a_small_mailbox_is_read_at_once(
+    mail: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from graphme.server import mail_accounts
+    monkeypatch.setattr(mail_accounts, "ASK_ABOVE_MESSAGES", 2)
+
+    account = _connected(mail)
+
+    assert until(lambda: mail.get("/v1/mail/accounts").json()[0]["state"] == "current")
+    assert mail.get("/v1/workspaces").json()["active"] == account["workspace"]
+
+
+def test_a_mailbox_with_many_attachments_is_asked_about(
+    mail: TestClient, fake: FakeImap, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from graphme.server import mail_accounts
+    monkeypatch.setattr(mail_accounts, "ASK_ABOVE_ATTACHMENTS", 0)
+    with_file = EmailMessage()
+    with_file["Message-ID"] = "<file@invented.test>"
+    with_file.set_content("첨부합니다.")
+    with_file.add_attachment(b"invented", maintype="application", subtype="pdf",
+                             filename="견적.pdf")
+    fake.add("INBOX", with_file.as_bytes(), day=date(2026, 3, 2))
+    monkeypatch.setattr(mail_accounts, "ASK_ABOVE_MESSAGES", 3)
+
+    account = _connected(mail)
+
+    assert account["state"] == "counted"
+    assert mail.get("/v1/workspaces").json()["active"] == FIRST
+
+
 def test_the_password_is_never_answered_or_written_to_env(
     mail: TestClient, home: Path, tmp_path: Path
 ) -> None:
-    account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    account = _connected(mail)
     job = mail.post(f"/v1/mail/accounts/{account['id']}/read", json={"since": None}).json()
     # Done before the files are looked through: a message still being written is a temp file
     # that is gone by the time it is read.
@@ -114,7 +160,7 @@ def _bodies(fake: FakeImap) -> list[str]:
 def test_reading_since_a_date_downloads_nothing_older(
     mail: TestClient, fake: FakeImap
 ) -> None:
-    account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    account = _connected(mail)
     job = mail.post(f"/v1/mail/accounts/{account['id']}/read", json={"since": "2026-01-01"})
     assert until(lambda: mail.get(f"/v1/jobs/{job.json()['id']}").json()["state"] == "done")
     assert _bodies(fake) == ["2"]  # the 2025 message stays on the server, not downloaded
@@ -124,7 +170,7 @@ def test_a_read_cancelled_half_way_leaves_the_account_to_read_on(
     mail: TestClient, fake: FakeImap, workspace_demo: Demo
 ) -> None:
     fake.add("INBOX", _raw("third"), day=date(2026, 4, 1))
-    account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    account = _connected(mail)
     real = fake.uid
 
     def cancelling(command: str, *args: Any) -> tuple[str, list[Any]]:
@@ -154,7 +200,7 @@ def test_a_read_cancelled_half_way_leaves_the_account_to_read_on(
 def test_reading_since_a_date_then_earlier(
     mail: TestClient, workspace_demo: Demo, home: Path
 ) -> None:
-    account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    account = _connected(mail)
     messages = home / "workspaces" / account["workspace"] / "mail" / "messages"
 
     first = mail.post(f"/v1/mail/accounts/{account['id']}/read", json={"since": "2026-01-01"})
@@ -176,7 +222,7 @@ def test_reading_since_a_date_then_earlier(
 def test_a_mailbox_that_drops_says_so_in_the_account_and_the_job(
     mail: TestClient, fake: FakeImap
 ) -> None:
-    account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    account = _connected(mail)
     fake.fail_fetch_after = 0
 
     job = mail.post(f"/v1/mail/accounts/{account['id']}/read", json={"since": None}).json()
@@ -189,7 +235,7 @@ def test_a_mailbox_that_drops_says_so_in_the_account_and_the_job(
 
 def test_a_mail_workspace_follows_its_mailbox_alone(mail: TestClient, tmp_path: Path) -> None:
     """Nothing is added or taken out by hand: the mailbox says what is in the graph."""
-    account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    account = _connected(mail)
     job = mail.post(f"/v1/mail/accounts/{account['id']}/read", json={"since": None}).json()
     assert until(lambda: mail.get(f"/v1/jobs/{job['id']}").json()["state"] == "done")
     folder = tmp_path / "docs"
@@ -211,7 +257,7 @@ def test_a_mail_workspace_follows_its_mailbox_alone(mail: TestClient, tmp_path: 
 def test_disconnecting_forgets_the_password_and_offers_the_workspace(
     mail: TestClient, home: Path
 ) -> None:
-    first = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    first = _connected(mail)
     second = mail.post("/v1/mail/accounts", json={**CONNECT, "address": "park@invented.test"}
                        ).json()
     mail.post(f"/v1/mail/accounts/{first['id']}/read", json={"since": None})  # opens it
@@ -237,7 +283,7 @@ def test_a_workspace_kept_on_disconnecting_keeps_its_messages_to_open(
 ) -> None:
     # Its graph names each message by its file: the files go with the account only when the
     # workspace goes too, or a kept message's original no longer opens.
-    account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    account = _connected(mail)
     mail.post(f"/v1/mail/accounts/{account['id']}/read", json={"since": None})
     assert until(lambda: mail.get("/v1/jobs").json()[0]["state"] == "done")
     mail.post("/v1/workspaces/default/open", headers={"origin": BASE})
@@ -275,7 +321,7 @@ def _running(demo: Demo) -> None:
 def test_deleting_a_mail_workspace_the_generic_way_forgets_its_account(
     mail: TestClient, home: Path
 ) -> None:
-    account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    account = _connected(mail)
 
     deleted = mail.delete(f"/v1/workspaces/{account['workspace']}")
 
@@ -287,7 +333,7 @@ def test_deleting_a_mail_workspace_the_generic_way_forgets_its_account(
 def test_disconnecting_an_account_whose_workspace_is_already_gone_still_forgets_it(
     mail: TestClient, workspace_demo: Demo, home: Path
 ) -> None:
-    account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    account = _connected(mail)
     workspace_demo.workspace_registry().delete(account["workspace"])  # not through the app
 
     gone = mail.delete(f"/v1/mail/accounts/{account['id']}?workspace=delete")
@@ -299,7 +345,7 @@ def test_disconnecting_an_account_whose_workspace_is_already_gone_still_forgets_
 def test_a_read_refused_because_a_build_runs_leaves_the_account_as_it_was(
     mail: TestClient, workspace_demo: Demo
 ) -> None:
-    account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    account = _connected(mail)
     mail.post(f"/v1/workspaces/{account['workspace']}/open")
     _running(workspace_demo)
 
@@ -312,7 +358,7 @@ def test_a_read_refused_because_a_build_runs_leaves_the_account_as_it_was(
 def test_a_failure_of_any_kind_is_kept_in_the_account(
     mail: TestClient, workspace_demo: Demo, fake: FakeImap
 ) -> None:
-    account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    account = _connected(mail)
     mail.post(f"/v1/mail/accounts/{account['id']}/read", json={"since": None})
     assert until(lambda: mail.get("/v1/mail/accounts").json()[0]["state"] == "current")
     fake.add("INBOX", _raw("later"), day=date(2026, 4, 1))
@@ -328,7 +374,7 @@ def test_a_failure_of_any_kind_is_kept_in_the_account(
 def test_an_account_is_not_disconnected_while_its_workspace_builds(
     mail: TestClient, workspace_demo: Demo
 ) -> None:
-    account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    account = _connected(mail)
     mail.post(f"/v1/workspaces/{account['workspace']}/open")
     _running(workspace_demo)
 

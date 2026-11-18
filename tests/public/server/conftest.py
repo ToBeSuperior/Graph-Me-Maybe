@@ -19,6 +19,14 @@ SETTINGS = Settings(profile="test", embedding_provider="hash")
 
 
 @pytest.fixture(autouse=True)
+def _every_mailbox_asked_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A connected mailbox waits for its question here, however small, so a test reads it when
+    it says; `test_a_small_mailbox_is_read_at_once` puts the real sizes back."""
+    from graphme.server import mail_accounts
+    monkeypatch.setattr(mail_accounts, "ASK_ABOVE_MESSAGES", -1)
+
+
+@pytest.fixture(autouse=True)
 def _no_settling_later(monkeypatch: pytest.MonkeyPatch) -> None:
     """A build gives back what it read again 30 s, 2 and 10 minutes later, on a thread that
     looks `online_only` and `evict` up when it wakes: left to run, it woke inside a later test

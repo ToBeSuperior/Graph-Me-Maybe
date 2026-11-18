@@ -5,6 +5,20 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.75] - 2026-11-18
+
+### Changed
+
+- A mailbox of up to 1,000 messages and 100 attachments is read as soon as it is connected; a
+  larger one is still asked about first (all of it, or only the last months).
+- Connecting a mailbox returns once the login is checked; the mailbox is counted behind it,
+  and the Mail page shows how many messages are counted so far.
+
+### Fixed
+
+- The files inside Outlook's `winmail.dat` are read as the message's attachments, each by its
+  own name, instead of being cited as one unreadable file.
+
 ## [0.1.74] - 2026-11-17
 
 ### Added

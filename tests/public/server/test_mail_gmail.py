@@ -64,6 +64,7 @@ def _signed_in(gmail: TestClient) -> dict[str, object]:
     state = parse_qs(urlsplit(url).query)["state"][0]
     page = gmail.get("/v1/mail/google/callback", params={"state": state, "code": "invented"})
     assert "kim@invented.test is connected" in page.text
+    assert until(lambda: gmail.get("/v1/mail/accounts").json()[0]["state"] != "counting")
     [account] = gmail.get("/v1/mail/accounts").json()
     return dict(account)
 
@@ -115,6 +116,7 @@ def _signed_in_empty(gmail: TestClient) -> dict[str, object]:
     url = gmail.post("/v1/mail/google/connect").json()["url"]
     state = parse_qs(urlsplit(url).query)["state"][0]
     gmail.get("/v1/mail/google/callback", params={"state": state, "code": "invented"})
+    assert until(lambda: gmail.get("/v1/mail/accounts").json()[0]["state"] != "counting")
     [account] = gmail.get("/v1/mail/accounts").json()
     return dict(account)
 

@@ -96,3 +96,38 @@ def test_an_attachment_says_which_mail_carried_it() -> None:
     item = _item(_record(carriers=carriers))  # type: ignore[arg-type]
     assert ("Attached to: Re: 견적 검토 (Kim <kim@invented.test>, 2026-10-14); "
             "견적 검토 (Kim <kim@invented.test>, 2026-10-12)") in item.content
+
+
+def _attribute(level: int, ident: int, data: bytes) -> bytes:
+    return (bytes([level]) + ident.to_bytes(4, "little") + len(data).to_bytes(4, "little")
+            + data + (sum(data) % 65536).to_bytes(2, "little"))
+
+
+def _winmail(files: list[tuple[str, bytes]]) -> bytes:
+    """An invented TNEF stream as Outlook writes it: per file a start, a short title, the long
+    name among its MAPI properties (PR_ATTACH_LONG_FILENAME, Unicode) and the bytes."""
+    stream = (0x223E9F78).to_bytes(4, "little") + (1).to_bytes(2, "little")
+    stream += _attribute(1, 0x00089006, (1).to_bytes(4, "little"))  # attTnefVersion
+    for name, data in files:
+        wide = name.encode("utf-16-le") + b"\0\0"
+        props = ((1).to_bytes(4, "little") + (0x001F).to_bytes(2, "little")
+                 + (0x3707).to_bytes(2, "little") + (1).to_bytes(4, "little")
+                 + len(wide).to_bytes(4, "little") + wide + b"\0" * (-len(wide) % 4))
+        stream += _attribute(2, 0x00069002, b"\0" * 14)  # attAttachRendData
+        stream += _attribute(2, 0x00018010, b"FILE~1.XLS\0")  # attAttachTitle
+        stream += _attribute(2, 0x0006800F, data)  # attAttachData
+        stream += _attribute(2, 0x00069005, props)  # attAttachment
+    return stream
+
+
+def test_files_inside_outlooks_winmail_dat_are_carried(tmp_path: Path) -> None:
+    message = EmailMessage()
+    message["Message-ID"] = "<tnef@invented.test>"
+    message.set_content("견적서를 첨부합니다.")
+    message.add_attachment(_winmail([("견적서.xlsx", SHEET), ("메모.docx", b"invented memo")]),
+                           maintype="application", subtype="ms-tnef", filename="winmail.dat")
+    path = tmp_path / "tnef.eml"
+    path.write_bytes(message.as_bytes())
+    sheet, memo = carried_in(path)
+    assert sheet.name.startswith("견적서.emb") and sheet.content == SHEET and sheet.readable
+    assert memo.name.startswith("메모.emb") and memo.content == b"invented memo"

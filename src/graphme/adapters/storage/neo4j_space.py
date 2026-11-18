@@ -35,7 +35,12 @@ from graphme.adapters.export.neo4j_import import (
 )
 from graphme.adapters.storage.workspace_scope import DEFAULT_SCOPE, WorkspaceScope
 from graphme.application.corpus_build import SpaceUnavailable, origin_of
-from graphme.application.corpus_links import DocumentIdentity, Mention, identity_of
+from graphme.application.corpus_links import (
+    CARRIED_NAME,
+    DocumentIdentity,
+    Mention,
+    identity_of,
+)
 from graphme.application.file_titles import stated_titles
 from graphme.application.graph_chunks import Chunk, GraphUnit
 from graphme.application.visual_crops import CROP_ASSET_KEY
@@ -218,19 +223,33 @@ class Neo4jGraphSpace:
             session.execute_write(_forget, self.scope, list(document_ids))
 
     def carried_only_by(self, message_ids: Sequence[str]) -> set[str]:
-        """The attachment documents that these messages carry and no other message does: what
-        goes with them when they are deleted. An attachment is found as a message's mention
-        (`ExternalDocument`) that `SAME_AS` names it. Only a mail message -- a document with
-        `meta_mail_message_id` -- counts as a carrier: another document naming the same
-        attachment does not keep it, and a message named by another is not an attachment."""
-        records, _, _ = self._query(
-            "MATCH (x:ExternalDocument)-[:SAME_AS]->(a:Document) "
-            "WHERE x.document_id IN $ids AND a.meta_mail_message_id IS NULL "
-            "AND NOT EXISTS { MATCH (y:ExternalDocument)-[:SAME_AS]->(a) "
-            "MATCH (m:Document {id: y.document_id}) "
-            "WHERE NOT m.id IN $ids AND m.meta_mail_message_id IS NOT NULL } "
-            "RETURN DISTINCT a.id AS id", ids=list(message_ids))
-        return {record["id"] for record in records}
+        """The attachment documents that these messages carry and nothing kept carries, and
+        the files carried inside those, at any depth: what goes with them when they are
+        deleted. An attachment is found as a message's mention (`ExternalDocument`) that
+        `SAME_AS` names it; a file inside one, as the attachment's mention written under the
+        carried file's name (`embedded_name`) -- an attachment merely citing a document by
+        name does not carry it. Only a message, or a file carried in one, carries: what keeps
+        one is such a carrier not deleted, never another document naming it; a message named
+        by another is not an attachment."""
+        going = set(message_ids)
+        while True:
+            records, _, _ = self._query(
+                "MATCH (x:ExternalDocument)-[:SAME_AS]->(a:Document) "
+                "WHERE x.document_id IN $ids AND NOT a.id IN $ids "
+                "AND a.meta_mail_message_id IS NULL "
+                "AND EXISTS { MATCH (c:Document {id: x.document_id}) "
+                "WHERE c.meta_mail_message_id IS NOT NULL "
+                "OR (c.file_name =~ $carried AND x.label =~ $carried) } "
+                "AND NOT EXISTS { MATCH (y:ExternalDocument)-[:SAME_AS]->(a) "
+                "MATCH (m:Document {id: y.document_id}) WHERE NOT m.id IN $ids "
+                "AND (m.meta_mail_message_id IS NOT NULL "
+                "OR (m.file_name =~ $carried AND y.label =~ $carried)) } "
+                "RETURN DISTINCT a.id AS id",
+                ids=sorted(going), carried=CARRIED_NAME)
+            found = {record["id"] for record in records}
+            if not found:
+                return going - set(message_ids)
+            going |= found
 
     def identities(self) -> tuple[DocumentIdentity, ...]:
         """Every document in the space, as it was written there when it was put in."""

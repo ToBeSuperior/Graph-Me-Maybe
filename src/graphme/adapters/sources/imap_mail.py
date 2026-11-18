@@ -221,8 +221,12 @@ class ImapMailbox:
         _, data = connection.uid("SEARCH", None, *criteria)  # type: ignore[arg-type]
         return sorted(int(each) for each in (data[0] or b"").split())
 
-    def count(self, since: date | None = None) -> MailCount:
+    def count(self, since: date | None = None,
+              seen: Callable[[int], None] | None = None) -> MailCount:
+        """What the mailbox holds, nothing read; `seen` is told how many messages are counted
+        so far, after each batch."""
         connection = self._open()
+        done = 0
         messages = attachments = size = 0
         oldest: date | None = None
         try:
@@ -232,6 +236,9 @@ class ImapMailbox:
                 uids = self._search(connection, since)
                 messages += len(uids)
                 for at in range(0, len(uids), _BATCH):
+                    if seen is not None:
+                        seen(done)
+                    done += len(uids[at:at + _BATCH])
                     chunk = ",".join(str(each) for each in uids[at:at + _BATCH])
                     _, data = connection.uid("FETCH", chunk, "(BODYSTRUCTURE INTERNALDATE)")
                     for item in data:

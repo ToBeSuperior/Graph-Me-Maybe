@@ -51,6 +51,8 @@ TITLE_OVERLAP = 0.8
 other: a citation trims a subtitle or adds the venue, and is still that title."""
 
 _EMBEDDED = re.compile(r"\.emb([0-9a-f]{8})\.[A-Za-z]+$")
+CARRIED_NAME = ".*" + _EMBEDDED.pattern.removesuffix("$")
+"""A carried file's whole name, as Cypher's `=~` matches it."""
 
 
 def embedded_name(name: str, content: bytes) -> str:

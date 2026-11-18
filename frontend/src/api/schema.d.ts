@@ -298,8 +298,9 @@ export interface paths {
         put?: never;
         /**
          * Mail Connect
-         * @description The login checked, the mailbox counted -- nothing read yet -- and a workspace made
-         *     for it, named after the address. 400 with the server's words when it refuses.
+         * @description The login checked and a workspace made for it, named after the address; the mailbox
+         *     is then counted behind, a small one read whole and a large one left to be asked about
+         *     (`Demo.connected`). 400 with the server's words when it refuses.
          */
         post: operations["mail_connect_v1_mail_accounts_post"];
         delete?: never;
@@ -1559,7 +1560,9 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "counted" | "reading" | "current" | "error";
+            state: "counting" | "counted" | "reading" | "current" | "error";
+            /** Counting */
+            counting?: number | null;
             count?: components["schemas"]["MailCountState"] | null;
             /** Read Since */
             read_since?: string | null;

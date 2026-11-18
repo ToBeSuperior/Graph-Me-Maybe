@@ -29,6 +29,18 @@ from graphme.adapters.sources.outlook_mail import OutlookMailbox
 from graphme.adapters.sources.sign_in import Vault, vault
 from graphme.server.workspaces import Workspaces
 
+ASK_ABOVE_MESSAGES = 1_000
+ASK_ABOVE_ATTACHMENTS = 100
+"""A mailbox holding more messages, or more attachments, than these is asked about before
+anything is read -- all of it, or only the last months -- since reading it takes long and each
+attachment is read by the model. A smaller one is read whole as soon as it is connected."""
+
+
+def asks_first(count: dict[str, Any]) -> bool:
+    """Whether a mailbox so counted is asked about before it is read."""
+    return bool(count["messages"] > ASK_ABOVE_MESSAGES
+            or count["attachments"] > ASK_ABOVE_ATTACHMENTS)
+
 
 class MailAccounts:
     def __init__(
@@ -59,56 +71,70 @@ class MailAccounts:
         return found
 
     def add(self, host: str, port: int, address: str, password: str) -> dict[str, Any]:
-        """Log in, count what the mailbox holds (nothing is read), and keep the account in a
-        workspace of its own. ValueError: the server's words when it refuses, or a workspace
-        is called `address` already. Nothing is kept then."""
+        """Log in and keep the account in a workspace of its own, to be counted (`count`).
+        ValueError: the server's words when it refuses, or a workspace is called `address`
+        already. Nothing is kept then."""
         host, address = host.strip(), address.strip()
         if not (host and address and password):
             raise ValueError("a mail account needs a server, an address and a password")
         try:
-            counted = ImapMailbox(host, port, address, password, connect=self._connect).count()
+            ImapMailbox(host, port, address, password, connect=self._connect).check()
         except MailRefused as error:
             raise ValueError(str(error)) from None
         return self._keep({"kind": "imap", "host": host, "port": port, "address": address},
-                          password, counted)
+                          password)
 
     def add_gmail(self, refresh: str) -> dict[str, Any]:
-        """A Gmail account signed in to (its refresh token), counted -- nothing read -- and kept
-        in a workspace of its own, as `add` keeps an IMAP one."""
-        mailbox = self._gmail(refresh)
+        """A Gmail account signed in to (its refresh token), kept in a workspace of its own to
+        be counted, as `add` keeps an IMAP one."""
         try:
-            address = mailbox.address()
-            counted = mailbox.count()
+            address = self._gmail(refresh).address()
         except MailRefused as error:
             raise ValueError(str(error)) from None
         return self._keep({"kind": "gmail", "host": "gmail.googleapis.com", "port": 443,
-                           "address": address}, refresh, counted)
+                           "address": address}, refresh)
 
-    def _keep(self, where: dict[str, Any], secret: str, counted: MailCount) -> dict[str, Any]:
+    def _keep(self, where: dict[str, Any], secret: str) -> dict[str, Any]:
         account = uuid.uuid4().hex[:12]
         workspace = self._workspaces.create(where["address"], kind="mail",
                                             account=account)["id"]
         self._vault(account).put(secret)
-        item = {"id": account, **where, "workspace": workspace, "state": "counted",
-                "count": _counted(counted), "read_since": None, "last_checked": _now(),
+        item = {"id": account, **where, "workspace": workspace, "state": "counting",
+                "counting": 0, "count": None, "read_since": None, "last_checked": _now(),
                 "error": None}
         with self._lock:
             self._write([*self._read(), item])
         return item
 
+    def count(self, account: str) -> dict[str, Any]:
+        """Count what the mailbox holds -- nothing is read -- saying how far it has got in
+        `counting` as it goes; then the account is `counted`. A failure is kept in `error`,
+        the account left uncounted: the agent never reads one that was not counted."""
+        item = self.get(account)
+        secret = self._vault(account).get()
+        try:
+            if secret is None:
+                raise MailRefused("the password is no longer kept -- connect the account again")
+            counted = self._mailbox(item, secret).count(
+                seen=lambda so_far: self._change(account, counting=so_far))
+        except Exception as error:
+            self._change(account, state="error", error=str(error) or type(error).__name__)
+            raise
+        self._change(account, state="counted", count=_counted(counted), counting=None)
+        return self.get(account)
+
     def add_outlook(self, refresh: str) -> dict[str, Any]:
-        """An Outlook account (personal or work) signed in to, counted and kept as `add_gmail`
+        """An Outlook account (personal or work) signed in to and kept as `add_gmail`
         keeps a Gmail one. Microsoft hands back a new refresh token with each refresh: the
         latest is the one kept."""
         latest = [refresh]
         mailbox = self._outlook(lambda: latest[0], lambda fresh: latest.__setitem__(0, fresh))
         try:
             address = mailbox.address()
-            counted = mailbox.count()
         except MailRefused as error:
             raise ValueError(str(error)) from None
         return self._keep({"kind": "outlook", "host": "graph.microsoft.com", "port": 443,
-                           "address": address}, latest[0], counted)
+                           "address": address}, latest[0])
 
     def _gmail(self, refresh: str) -> GmailMailbox:
         if self._google is None:

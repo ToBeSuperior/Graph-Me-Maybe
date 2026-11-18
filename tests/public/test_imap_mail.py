@@ -245,3 +245,12 @@ def test_folders_are_opened_read_only(tmp_path: Path) -> None:
     _mailbox(fake).count()
     selects = [call for call in fake.calls if call[0] == "select"]
     assert selects and all(call[2] is True for call in selects)
+
+
+def test_counting_says_how_far_it_has_got() -> None:
+    fake = _fake(INBOX=[f"m{n}" for n in range(450)])
+    seen: list[int] = []
+
+    counted = _mailbox(fake).count(seen=seen.append)
+
+    assert counted.messages == 450 and seen == [0, 200, 400]

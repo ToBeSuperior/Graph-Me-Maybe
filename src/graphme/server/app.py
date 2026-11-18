@@ -192,6 +192,13 @@ def opened_in_browser(url: str) -> dict[str, str]:
     return {"url": url}
 
 
+def connected_page(added: dict[str, Any]) -> str:
+    """What the sign-in tab says once a mailbox is connected."""
+    return (f"{added['address']} is connected. You can close this tab and go back to "
+            "Graph-Me-Maybe: it counts the mailbox, then reads it, or asks how much to read "
+            "when it is large.")
+
+
 def _closing_page(said: str) -> str:
     return ("<!doctype html><meta charset=utf-8><title>Graph-Me-Maybe</title>"
             f"<p style='font:16px system-ui;margin:3em'>{html.escape(said)}</p>")
@@ -276,13 +283,11 @@ def create_app(
         try:
             if google is None:
                 raise LookupError("Gmail sign-in is not set up in this build")
-            added = demo.mail_accounts().add_gmail(
-                google.finish(state=state, code=code, error=error))
+            added = demo.connected(demo.mail_accounts().add_gmail(
+                google.finish(state=state, code=code, error=error)))
         except (LookupError, ValueError) as refusal:
             return _closing_page(f"Gmail was not connected: {refusal}")
-        return answered(state, _closing_page(
-            f"{added['address']} is connected. You can close this tab and go back to "
-            "Graph-Me-Maybe: it asks how much mail to read."))
+        return answered(state, _closing_page(connected_page(added)))
 
     @app.get("/v1/mail/microsoft/callback", response_class=HTMLResponse,
              include_in_schema=False, dependencies=[HERE])
@@ -295,12 +300,10 @@ def create_app(
         try:
             refresh = demo.microsoft_sign_in().finish(state=state, code=code, error=error,
                                                       description=error_description)
-            added = demo.mail_accounts().add_outlook(refresh)
+            added = demo.connected(demo.mail_accounts().add_outlook(refresh))
         except (LookupError, ValueError) as refusal:
             return _closing_page(f"Outlook was not connected: {refusal}")
-        return answered(state, _closing_page(
-            f"{added['address']} is connected. You can close this tab and go back to "
-            "Graph-Me-Maybe: it asks how much mail to read."))
+        return answered(state, _closing_page(connected_page(added)))
 
     @app.get("/health", response_model=api.Health)
     def health() -> dict[str, str]:
@@ -459,10 +462,12 @@ def create_app(
 
     @v1.post("/mail/accounts", response_model=api.MailAccount, dependencies=[HERE])
     def mail_connect(body: api.MailConnect) -> dict[str, Any]:
-        """The login checked, the mailbox counted -- nothing read yet -- and a workspace made
-        for it, named after the address. 400 with the server's words when it refuses."""
+        """The login checked and a workspace made for it, named after the address; the mailbox
+        is then counted behind, a small one read whole and a large one left to be asked about
+        (`Demo.connected`). 400 with the server's words when it refuses."""
         with refused():
-            return demo.mail_accounts().add(body.host, body.port, body.address, body.password)
+            return demo.connected(
+                demo.mail_accounts().add(body.host, body.port, body.address, body.password))
 
     @v1.post("/mail/google/connect", response_model=api.BoxConnect, dependencies=[HERE])
     def mail_google_connect(request: Request) -> dict[str, str]:
@@ -968,8 +973,8 @@ def create_app(
             raise HTTPException(
                 400, f"the question is too long -- at most {MAX_QUESTION_CHARS:,} characters"
             )
-        asked_for = request.documents if request.documents is not None else request.top_k
-        documents = asked_for if asked_for is not None else demo.settings.retrieval_documents
+        documents = (request.documents if request.documents is not None
+                     else demo.settings.retrieval_documents)
         if not 1 <= documents <= MAX_DOCUMENTS:
             raise HTTPException(400, f"documents must be between 1 and {MAX_DOCUMENTS}")
         several = list(dict.fromkeys(request.workspaces or []))

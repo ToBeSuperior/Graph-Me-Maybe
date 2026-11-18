@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class _Model(BaseModel):
@@ -240,6 +240,14 @@ class Question(_Model):
     workspaces: list[str] | None = None
     """Several workspaces asked at once, by id: each searched in its own graph, the results
     fused by rank. None or empty: `workspace` alone."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _old_name(cls, data: Any) -> Any:
+        # Read here, from the request body: reading the deprecated field itself warns.
+        if isinstance(data, dict) and data.get("documents") is None and "top_k" in data:
+            return {**data, "documents": data["top_k"]}
+        return data
 
 
 class LinkedPassage(_Model):
@@ -510,7 +518,9 @@ class MailAccount(_Model):
     address: str
     workspace: str
     """The workspace the account is read into: its own."""
-    state: Literal["counted", "reading", "current", "error"]
+    state: Literal["counting", "counted", "reading", "current", "error"]
+    counting: int | None = None
+    """While `counting`: how many messages are counted so far."""
     count: MailCountState | None = None
     read_since: date | None = None
     """Mail older than this is not read yet; None, all of it is."""

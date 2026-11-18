@@ -268,11 +268,96 @@ def _in_message(source: Path, finish: Callable[[Embedded], Embedded]) -> list[Em
         content = part.get_payload(decode=True)
         if not isinstance(content, bytes):
             continue
+        if part.get_content_type() == "application/ms-tnef" or name.lower() == "winmail.dat":
+            # Outlook's rich-text mail packs every attachment in one winmail.dat: its files.
+            tnef = _tnef_files(content)
+            if tnef:
+                found.extend(finish(Embedded("", f"mime:{index}:tnef:{at}", own, data))
+                             for at, (own, data) in enumerate(tnef))
+                continue
         if len(content) > MAX_EMBEDDED_BYTES:
             found.append(finish(Embedded("", f"mime:{index}", name, b"", kept=False)))
         else:
             found.append(finish(Embedded("", f"mime:{index}", name, content)))
     return found
+
+
+_TNEF_SIGNATURE = 0x223E9F78
+_ATTACH_START, _ATTACH_TITLE, _ATTACH_DATA, _ATTACH_PROPS = (
+    0x00069002, 0x00018010, 0x0006800F, 0x00069005)
+_FIXED = {0x0002: 4, 0x0003: 4, 0x0004: 4, 0x0005: 8, 0x0006: 8, 0x0007: 8, 0x000A: 4,
+          0x000B: 4, 0x0014: 8, 0x0040: 8, 0x0048: 16}
+"""A MAPI property's size by its type, for the types of a fixed size (MS-OXTNEF 2.1.3.4)."""
+
+
+def _tnef_files(stream: bytes) -> list[tuple[str, bytes]]:
+    """The files a TNEF stream (winmail.dat) holds, each by its long name where its MAPI
+    properties give one, else its title; [] for what is not TNEF or cannot be read. Files
+    larger than MAX_EMBEDDED_BYTES are left out."""
+    if len(stream) < 6 or struct.unpack_from("<I", stream)[0] != _TNEF_SIGNATURE:
+        return []
+    files: list[dict[str, Any]] = []
+    at = 6
+    try:
+        while at + 9 <= len(stream):
+            level, ident, length = struct.unpack_from("<BII", stream, at)
+            data = stream[at + 9 : at + 9 + length]
+            at += 9 + length + 2  # the checksum
+            if level != 2:
+                continue
+            if ident == _ATTACH_START:
+                files.append({})
+            elif files and ident == _ATTACH_TITLE:
+                files[-1]["title"] = _ansi(data.split(b"\0", 1)[0])
+            elif files and ident == _ATTACH_DATA:
+                files[-1]["data"] = data
+            elif files and ident == _ATTACH_PROPS:
+                files[-1]["long"] = _long_name(data)
+    except struct.error:
+        pass  # a stream cut short: the files read before it
+    return [(each.get("long") or each.get("title") or "attachment", each["data"])
+            for each in files if "data" in each and len(each["data"]) <= MAX_EMBEDDED_BYTES]
+
+
+def _long_name(props: bytes) -> str | None:
+    """PR_ATTACH_LONG_FILENAME (0x3707) from an attachment's MAPI properties."""
+    try:
+        (count,) = struct.unpack_from("<I", props)
+        at = 4
+        for _ in range(count):
+            kind, ident = struct.unpack_from("<HH", props, at)
+            at += 4
+            if ident >= 0x8000:  # a named property: its GUID, then a number or a name
+                (named,) = struct.unpack_from("<I", props, at + 16)
+                at += 20
+                if named:
+                    (size,) = struct.unpack_from("<I", props, at)
+                    at += 4 + size + (-size % 4)
+                else:
+                    at += 4
+            values = 1
+            if kind & 0x1000:  # several values
+                (values,) = struct.unpack_from("<I", props, at)
+                at += 4
+            base = kind & ~0x1000
+            for _ in range(values):
+                if base in _FIXED:
+                    at += _FIXED[base]
+                    continue
+                if base not in (0x001E, 0x001F, 0x0102, 0x000D):
+                    return None  # a type not known: nothing after it can be found
+                if not kind & 0x1000:  # one value still says how many it holds
+                    at += 4
+                (size,) = struct.unpack_from("<I", props, at)
+                value = props[at + 4 : at + 4 + size]
+                at += 4 + size + (-size % 4)
+                if ident == 0x3707 and base == 0x001F:
+                    return value.decode("utf-16-le").rstrip("\0") or None
+                if ident == 0x3707 and base == 0x001E:
+                    return _ansi(value.rstrip(b"\0")) or None
+    except (struct.error, UnicodeDecodeError):
+        return None
+    return None
 
 
 def _kept(package: zipfile.ZipFile, owner: str, part: str, kind: str) -> Embedded | None:

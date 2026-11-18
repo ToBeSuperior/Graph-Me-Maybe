@@ -64,6 +64,7 @@ def _signed_in(outlook: TestClient) -> dict[str, object]:
     page = outlook.get("/v1/mail/microsoft/callback",
                        params={"state": asked["state"][0], "code": "invented"})
     assert "kim@invented.test is connected" in page.text
+    assert until(lambda: outlook.get("/v1/mail/accounts").json()[0]["state"] != "counting")
     [account] = outlook.get("/v1/mail/accounts").json()
     return dict(account)
 

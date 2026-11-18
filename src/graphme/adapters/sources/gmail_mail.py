@@ -74,10 +74,16 @@ class GmailMailbox:
             if not page:
                 return
 
-    def count(self, since: date | None = None) -> MailCount:
+    def count(self, since: date | None = None,
+              seen: Callable[[int], None] | None = None) -> MailCount:
         """How many messages, how many carry an attachment, and the oldest one's day. Gmail
-        tells no size without fetching each message, so the attachments' size is not said."""
-        ids = list(self._ids(since))
+        tells no size without fetching each message, so the attachments' size is not said.
+        `seen` is told how many are counted so far, a page at a time."""
+        ids: list[str] = []
+        for ident in self._ids(since):
+            ids.append(ident)
+            if seen is not None and len(ids) % _PAGE == 0:
+                seen(len(ids))
         attached = sum(1 for _ in self._ids(since, "has:attachment"))
         oldest = None
         if ids and (last := self._get(f"messages/{ids[-1]}", format="minimal")):

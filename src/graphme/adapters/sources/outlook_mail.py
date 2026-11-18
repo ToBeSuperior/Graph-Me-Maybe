@@ -92,10 +92,16 @@ class OutlookMailbox:
                         if row.get("parentFolderId") not in skipped)
             url, params = page.get("@odata.nextLink"), {}
 
-    def count(self, since: date | None = None) -> MailCount:
+    def count(self, since: date | None = None,
+              seen: Callable[[int], None] | None = None) -> MailCount:
         """How many messages, how many carry an attachment, and the oldest one's day. Graph
-        tells no attachments' size without fetching each message: it is not said."""
-        rows = list(self._rows(since))
+        tells no attachments' size without fetching each message: it is not said. `seen` is
+        told how many are counted so far, a page at a time."""
+        rows: list[dict[str, Any]] = []
+        for row in self._rows(since):
+            rows.append(row)
+            if seen is not None and len(rows) % _PAGE == 0:
+                seen(len(rows))
         oldest = None
         if rows:
             oldest = datetime.fromisoformat(rows[-1]["receivedDateTime"].replace("Z", "+00:00"))

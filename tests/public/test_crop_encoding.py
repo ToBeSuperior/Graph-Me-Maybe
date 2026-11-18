@@ -55,8 +55,8 @@ def test_a_photograph_is_kept_lossy_and_a_ruled_table_exact(tmp_path: Path) -> N
     assert _is_webp(back_photo) and _is_webp(back_table)
     assert store.path_for(kept_photo, ".webp").is_file()
     assert len(back_photo) * 4 <= len(photo)
-    assert list(Image.open(BytesIO(back_table)).convert("RGB").getdata()) == list(
-        table.getdata())  # lossless: every pixel as it was
+    assert Image.open(BytesIO(back_table)).convert("RGB").tobytes() == table.convert(
+        "RGB").tobytes()  # lossless: every pixel as it was
 
 
 def test_a_crop_longer_than_webp_holds_is_kept_shrunk_to_fit(tmp_path: Path) -> None:

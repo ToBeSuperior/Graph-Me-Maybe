@@ -56,6 +56,7 @@ from graphme.server.jobs import (
     Session,
     Undrawn,
 )
+from graphme.server.mail_accounts import asks_first
 from graphme.server.workspaces import Workspaces
 
 __all__ = [
@@ -331,6 +332,42 @@ class Demo(Exports):
                     for path in sorted(accounts.messages(account).glob("*.eml"))]
 
         return self.build_corpus([], item["address"], find=find, empty_done=True)
+
+    def start_mail_sync(self) -> None:
+        """The agent started, and a count the last run left unfinished started again."""
+        starting = self.workspaces is not None and self._mail_thread is None
+        super().start_mail_sync()
+        if starting:
+            for item in self.mail_accounts().listed():
+                if item["state"] == "counting":
+                    self.connected(item)
+
+    def connected(self, item: dict[str, Any]) -> dict[str, Any]:
+        """A mailbox just connected counted behind -- the page follows `counting` -- and then
+        read whole at once when it is small (`read_if_small`)."""
+        threading.Thread(target=self._count_then_read, args=(item["id"],), daemon=True).start()
+        return item
+
+    def _count_then_read(self, account: str) -> None:
+        try:
+            item = self.mail_accounts().count(account)
+        except Exception as error:  # noqa: BLE001 -- kept in the account's `error`, shown there
+            logging.getLogger(__name__).warning("counting %s failed: %s", account, error)
+            return
+        self.read_if_small(item)
+
+    def read_if_small(self, item: dict[str, Any]) -> dict[str, Any]:
+        """A mailbox just counted read whole at once when it is small (`asks_first`); a large
+        one, or one that cannot be read now (a build runs, the graph is starting), is left
+        counted for the page to ask about."""
+        if asks_first(item["count"]):
+            return item
+        try:
+            self.build_mail(item["id"], None)
+        except (Busy, GraphStarting, LookupError, ValueError) as error:
+            logging.getLogger(__name__).info("%s left to ask about: %s", item["address"], error)
+            return item
+        return {**item, "state": "reading"}
 
     def disconnect_mail(self, account: str, workspace: str) -> None:
         """`account`'s password and messages forgotten, its workspace deleted (`workspace` is

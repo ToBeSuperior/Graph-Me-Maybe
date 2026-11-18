@@ -24,6 +24,9 @@ from graphme.server.mail_accounts import MailAccounts
 if TYPE_CHECKING:
     from graphme.server.state import Demo
 
+ASKED = ("counting", "counted")
+"""An account in these states waits for its first-connect question: the agent reads none of
+it, nor one never counted (a count that failed)."""
 MAIL_CHECK_SECONDS = 300
 MAIL_BACKOFF_MAX_SECONDS = 3600.0
 
@@ -63,7 +66,8 @@ class MailSync:
                 if self._building() or self._stop.is_set():
                     return
                 account = item["id"]
-                if item["state"] == "counted" or self._clock() < self._retry_at.get(account, 0):
+                if (item["state"] in ASKED or item.get("count") is None
+                        or self._clock() < self._retry_at.get(account, 0)):
                     continue
                 try:
                     result = self._accounts.sync(account, self._stop)  # keeps its failure
@@ -119,7 +123,7 @@ class MailSync:
                 item["pending"] = [p for p in item.get("pending", []) if p not in files]
                 self._accounts.hold(account, item["pending"], item.get("gone", []))
         pending, gone = item.get("pending", []), item.get("gone", [])
-        if item["state"] == "counted":  # the first-connect question comes first
+        if item["state"] in ASKED:  # the first-connect question comes first
             return
         if self._demo.workspace_registry().active != item["workspace"]:
             return

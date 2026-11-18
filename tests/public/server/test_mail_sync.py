@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from graphme.adapters.sources.imap_mail import ImapMailbox, MailRefused
 from graphme.server.jobs import Busy, CorpusBuild
 from graphme.server.mail_sync import MailSync
 from graphme.server.state import Demo
@@ -118,6 +119,7 @@ def test_an_unanswered_first_connect_is_not_read(
     mail: TestClient, fake: FakeImap, workspace_demo: Demo
 ) -> None:
     account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    assert until(lambda: _held(workspace_demo, account["id"])["state"] == "counted")
     fake.add("INBOX", _raw("later"), day=date(2026, 4, 1))
     calls = len(fake.calls)
 
@@ -125,6 +127,25 @@ def test_an_unanswered_first_connect_is_not_read(
 
     assert len(fake.calls) == calls
     assert _held(workspace_demo, account["id"])["state"] == "counted"
+
+
+def test_a_mailbox_whose_count_failed_is_never_read(
+    mail: TestClient, fake: FakeImap, workspace_demo: Demo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def outage(*_: object, **__: object) -> None:
+        raise MailRefused("[UNAVAILABLE] invented outage")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(ImapMailbox, "count", outage)
+        account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+        assert until(lambda: _held(workspace_demo, account["id"])["state"] == "error")
+    assert "invented outage" in _held(workspace_demo, account["id"])["error"]
+    calls = len(fake.calls)
+
+    workspace_demo.mail_sync.tick()
+
+    assert len(fake.calls) == calls
+    assert _held(workspace_demo, account["id"])["count"] is None
 
 
 def test_one_failing_account_does_not_stop_the_others_and_backs_off(
