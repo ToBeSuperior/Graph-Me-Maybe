@@ -5,6 +5,16 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.76] - 2026-11-18
+
+### Fixed
+
+- A Hangul document's pages after the first are no longer clipped by the first page's boxes:
+  a landscape table is printed whole, and its cells are no longer left empty.
+- A table cell of several lines in a Hangul document is no longer read twice.
+- A Hangul paragraph holding Hangul's own double brackets (『 』) is no longer read twice, once
+  from the page and again on the pages after the print.
+
 ## [0.1.75] - 2026-11-18
 
 ### Changed

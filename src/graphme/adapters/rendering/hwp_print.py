@@ -50,8 +50,11 @@ HWPTAG_PARA_TEXT = 67  # HWPTAG_BEGIN (16) + 51
 TAB = 9
 WIDE_CONTROLS = frozenset({*range(1, 10), 11, 12, *range(14, 24)})  # eight code units each
 SPACES = frozenset({30, 31})  # a space that does not break, one of fixed width
-UNCOMPARED = re.compile(r"[\s­-\U000f0000-\U0010ffff]+")
+UNCOMPARED = re.compile(r"[\W_]+")
 MIN_COMPARED = 4
+# A cell's next line follows within the rest of its row's lines, or a page's end and header.
+LINE_GAP = 600
+MIN_PIECE = 2  # a line in a narrow cell can be two characters
 UNDRAWN_MARGIN = 56
 UNDRAWN_POINTS = 10
 
@@ -167,8 +170,31 @@ def hwp_record_paragraphs(data: bytes) -> list[str]:
 
 
 def _squashed(text: str) -> str:
-    """Text as compared: no space, no soft hyphen, no private-use bullet a font draws."""
+    """Text as compared: its letters and digits only. Spaces, punctuation and private-use
+    characters go: Hangul keeps some brackets and bullets in the private-use area, and the
+    print shows them as ordinary characters or not as text at all."""
     return UNCOMPARED.sub("", text)
+
+
+def _held_in_order(words: str, held: str) -> bool:
+    """Whether `words` are in `held` in order, in pieces each at most `LINE_GAP` after the one
+    before: a table row is printed a line at a time across its cells, and a row cut by the page
+    goes on under the next page's header, so a cell's lines come apart."""
+    for start in (found.start() for found in re.finditer(re.escape(words[:MIN_COMPARED]), held)):
+        taken, at = 0, start
+        while taken < len(words):
+            piece = words[taken:taken + MIN_PIECE]
+            found = held.find(piece, at, at + LINE_GAP + len(piece))
+            if found < 0:
+                break
+            length = len(piece)
+            while (taken + length < len(words) and found + length < len(held)
+                   and held[found + length] == words[taken + length]):
+                length += 1
+            taken, at = taken + length, found + length
+        else:
+            return True
+    return False
 
 
 def undrawn(paragraphs: list[str], printed: str) -> list[str]:
@@ -176,7 +202,8 @@ def undrawn(paragraphs: list[str], printed: str) -> list[str]:
     is passed over: it is found anywhere by chance, and missed it says little."""
     held = _squashed(printed)
     return [paragraph for paragraph in paragraphs
-            if len(words := _squashed(paragraph)) >= MIN_COMPARED and words not in held]
+            if len(words := _squashed(paragraph)) >= MIN_COMPARED and words not in held
+            and not _held_in_order(words, held)]
 
 
 def keep_undrawn(source: Path, pdf: Path) -> int:

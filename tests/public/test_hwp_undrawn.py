@@ -70,6 +70,29 @@ def test_only_what_the_print_lacks_is_undrawn() -> None:
                    printed) == ["첫 칸 & 내용"]
 
 
+def test_a_private_use_bracket_the_renderer_draws_as_its_own_is_not_undrawn() -> None:
+    # Hangul keeps its double brackets in the private-use area; the print shows 『 』.
+    held = "\U000f0854Invented Programme\U000f0855 is announced, as follows."
+
+    assert undrawn([held], "『Invented Programme』 is announced, as follows.") == []
+
+
+def test_a_cell_printed_line_by_line_across_its_row_is_drawn() -> None:
+    # A row is printed a line at a time across its cells, so a cell's lines come apart.
+    printed = ("Invented grant for\nApplicants under\nnew firms in the\nseven years\n"
+               "region\n- 4 -\nNo. Name Summary\nand their staff")
+
+    assert undrawn(["Invented grant for new firms in the region",
+                    "Applicants under seven years and their staff"], printed) == []
+
+
+def test_a_cell_whose_middle_is_not_printed_is_undrawn() -> None:
+    printed = "Invented grant for\nApplicants under\nseven years\nregion"
+
+    assert undrawn(["Invented grant for new firms in the region"], printed) == [
+        "Invented grant for new firms in the region"]
+
+
 def _print(path: Path) -> Path:
     document = pymupdf.open()  # type: ignore[no-untyped-call]
     document.new_page().insert_text((72, 72), "Invented notice of the year")
@@ -100,3 +123,16 @@ def test_a_print_holding_every_paragraph_is_left_as_it_is(tmp_path: Path) -> Non
 
     assert keep_undrawn(source, pdf) == 0
     assert pdf.read_bytes() == before
+
+
+def test_a_paragraph_set_after_the_print_reads_back_with_its_middle_dot(tmp_path: Path) -> None:
+    pdf = _print(tmp_path / "n.hwpx")
+    source = tmp_path / "dot.hwpx"
+    with zipfile.ZipFile(source, "w") as archive:
+        archive.writestr("Contents/section0.xml", SECTION.split("<hp:p>")[0]
+                         + "<hp:p><hp:run><hp:t>점검 항목ㆍ기준ㆍ주기</hp:t></hp:run></hp:p>"
+                         + "</hs:sec>")
+
+    assert keep_undrawn(source, pdf) == 1
+    with pymupdf.open(pdf) as document:  # type: ignore[no-untyped-call]
+        assert "점검 항목ㆍ기준ㆍ주기" in document[1].get_text()
