@@ -2,6 +2,7 @@
 found, read only once the user says to, and browsed a level at a time. Invented folders."""
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -77,6 +78,7 @@ def test_a_drive_is_connected_only_from_this_machine(demo: Demo, tmp_path: Path)
     assert client.post("/v1/drives/google/connect", headers=elsewhere).status_code == 403
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows reads a folder chmod(0) refuses")
 def test_a_drive_this_machine_will_not_let_the_app_read_says_so(
     demo: Demo, tmp_path: Path
 ) -> None:
