@@ -1,6 +1,17 @@
---- a/packages/core/src/image/dib.ts	2026-09-21 01:00:13
-+++ b/packages/core/src/image/dib.ts	2026-09-21 01:00:13
-@@ -118,6 +118,19 @@
+diff --git a/packages/core/src/image/dib.ts b/packages/core/src/image/dib.ts
+index 1c9767c56..fcce8dc07 100644
+--- a/packages/core/src/image/dib.ts
++++ b/packages/core/src/image/dib.ts
+@@ -56,7 +56,7 @@ export function decodeDib(
+   const biBitCount = dv.getUint16(bmiOff + 14, true);
+   const biCompression = dv.getUint32(bmiOff + 16, true);
+   if (biCompression !== 0) return null; // BI_RGB only
+-  if (![1, 4, 8, 24, 32].includes(biBitCount)) return null;
++  if (![1, 4, 8, 16, 24, 32].includes(biBitCount)) return null;
+   const topDown = biHeightRaw < 0;
+   const width = Math.abs(biWidth);
+   const height = Math.abs(biHeightRaw);
+@@ -145,6 +145,19 @@ export function decodeDib(
          putPx(dstRow, x, dv.getUint8(o + 2), dv.getUint8(o + 1), dv.getUint8(o), 255);
        }
        anyAlpha = true;

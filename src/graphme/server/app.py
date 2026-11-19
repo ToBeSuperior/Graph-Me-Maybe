@@ -163,7 +163,8 @@ def errors(app: FastAPI) -> None:
 @contextmanager
 def refused() -> Iterator[None]:
     """What the call inside says it refuses, as HTTP: a value it does not take (400), a thing
-    it does not hold (404). Wrapped around that call only."""
+    it does not hold (404), a folder this machine will not let it read (403). Wrapped around
+    that call only."""
     try:
         yield
     except ValueError as error:
@@ -172,6 +173,13 @@ def refused() -> Iterator[None]:
         # A KeyError's own str() puts its message in quotes.
         said = error.args[0] if isinstance(error, KeyError) and error.args else error
         raise HTTPException(404, str(said)) from error
+    except PermissionError as error:
+        # macOS keeps iCloud Drive and other folders from a process it was not allowed to:
+        # the folder is there and reading it is refused, no prompt shown.
+        raise HTTPException(403, f"{error.filename or error}: this machine does not let the app "
+                            "read it. On a Mac, allow the app (or the terminal it runs from) "
+                            "under System Settings > Privacy & Security > Files and Folders, "
+                            "or Full Disk Access.") from error
 
 
 def only_here(request: Request) -> None:

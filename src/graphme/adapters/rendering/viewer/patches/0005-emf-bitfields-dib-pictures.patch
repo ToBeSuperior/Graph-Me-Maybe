@@ -1,6 +1,8 @@
+diff --git a/packages/core/src/image/dib.ts b/packages/core/src/image/dib.ts
+index fcce8dc07..c08c41fe9 100644
 --- a/packages/core/src/image/dib.ts
 +++ b/packages/core/src/image/dib.ts
-@@ -24,6 +24,20 @@
+@@ -24,6 +24,20 @@ import { MAX_RASTER_DIMENSION, MAX_RASTER_PIXELS, OoxmlDecodedImageLimitError, i
  const MAX_DIB_DIMENSION = MAX_RASTER_DIMENSION;
  const MAX_DIB_PIXELS = MAX_RASTER_PIXELS;
  
@@ -21,7 +23,7 @@
  /** A decoded DIB as top-down RGBA (what `ImageData`/`putImageData` expects). */
  export interface DecodedDib {
    width: number;
-@@ -51,7 +65,16 @@
+@@ -55,7 +69,16 @@ export function decodeDib(
    const biHeightRaw = dv.getInt32(bmiOff + 8, true);
    const biBitCount = dv.getUint16(bmiOff + 14, true);
    const biCompression = dv.getUint32(bmiOff + 16, true);
@@ -36,26 +38,25 @@
 +    if (read.some((channel) => channel === null)) return null;
 +    masks = read as Array<(px: number) => number>;
 +  } else if (biCompression !== 0) return null; // otherwise BI_RGB only
+   if (![1, 4, 8, 16, 24, 32].includes(biBitCount)) return null;
    const topDown = biHeightRaw < 0;
    const width = Math.abs(biWidth);
-   const height = Math.abs(biHeightRaw);
-@@ -102,8 +125,14 @@
+@@ -129,7 +152,13 @@ export function decodeDib(
      const dstRow = y;
      const rowOff = bitsOff + srcRow * rowStride;
-     if (rowOff + rowStride > dv.byteLength) break;
+     if (rowOff + rowStride > bitsOff + bitsLen) break;
 -    if (biBitCount === 32) {
 +    if (masks) {
-       for (let x = 0; x < width; x++) {
++      for (let x = 0; x < width; x++) {
 +        const px = biBitCount === 16 ? dv.getUint16(rowOff + x * 2, true) : dv.getUint32(rowOff + x * 4, true);
 +        putPx(dstRow, x, masks[0](px), masks[1](px), masks[2](px), 255);
 +      }
 +      anyAlpha = true;
 +    } else if (biBitCount === 32) {
-+      for (let x = 0; x < width; x++) {
+       for (let x = 0; x < width; x++) {
          const o = rowOff + x * 4;
          const b = dv.getUint8(o);
-         const g = dv.getUint8(o + 1);
-@@ -195,6 +224,8 @@
+@@ -227,6 +256,8 @@ export function decodePackedDib(dv: DataView, dibOff: number, dibLen: number): D
      // [MS-WMF] 2.2.2.9); the pixel bits then follow AFTER it. Skip those bytes so
      // the derived `bitsOff` stays aligned (0 = no table, the common case).
      palEntries = dv.getUint32(dibOff + 32, true);

@@ -4,10 +4,9 @@
 # DOCX and PPTX come from the published npm build, which ships the compiled WebAssembly
 # parsers; building those locally needs a Rust toolchain that produces wasm32 objects,
 # and nothing about them needs changing. XLSX is built from a pinned upstream checkout
-# with our patches (one also resolves a combo chart's second bottom category axis), the first
-# of which forwards a shape's rotation and flips (upstream parses them but
-# drops them before rendering) and exports the grid geometry the crop step maps cells
-# through. Compiling that patch needs a Rust toolchain with the wasm32 target.
+# with our patches, the first of which reads field text in shapes and exports the grid
+# geometry the crop step maps cells through. Compiling that patch needs a Rust toolchain
+# with the wasm32 target.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -66,8 +65,15 @@ for patch in "$here"/patches/*.patch; do
   [[ -e "$patch" ]] || continue
   git -C "$work/src" apply "$patch"
 done
-( cd "$work/src" && npm install --silent )
-( cd "$work/src/packages/xlsx" && npm run wasm && npm run build --silent )
+# Upstream builds with pnpm and its lockfile; npm resolves other versions, whose TypeScript
+# fails upstream's own type check. The pnpm the checkout names goes into the scratch folder and
+# runs from there -- through npx, node's own folder would go first on PATH and with it a
+# Homebrew rustc that has no wasm32 target.
+pm="$(node -p "require('$work/src/package.json').packageManager.split('+')[0]")"
+npm install --silent --prefix "$work/pm" "$pm"
+pnpm="$work/pm/node_modules/.bin/pnpm"
+( cd "$work/src" && "$pnpm" install --frozen-lockfile --silent )
+( cd "$work/src/packages/xlsx" && "$pnpm" run wasm && "$pnpm" --silent run build )
 cp -R "$work/src/packages/xlsx/dist/." "$bundle/xlsx/"
 
 echo

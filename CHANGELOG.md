@@ -5,6 +5,21 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.77] - 2026-11-19
+
+### Changed
+
+- The document viewer moves to 0.89.11: combo charts with columns on a hidden secondary axis,
+  smoothed-line axes and one-cell worksheet pictures are drawn by the viewer itself, and a
+  chart with no colour or frame of its own is drawn the way Excel draws it.
+
+### Fixed
+
+- On a Mac, a folder the app is not allowed to read (iCloud Drive, for one) now says where to
+  allow it, in Privacy & Security, instead of failing without a reason.
+- Finder's folder icon file and files a Mac marks hidden are no longer listed in a drive or read
+  by a build.
+
 ## [0.1.76] - 2026-11-18
 
 ### Fixed

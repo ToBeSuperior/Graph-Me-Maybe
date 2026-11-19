@@ -99,15 +99,17 @@ NOT_THE_USERS = stat.FILE_ATTRIBUTE_HIDDEN | stat.FILE_ATTRIBUTE_SYSTEM
 
 
 def hidden(entry: os.DirEntry[str] | Path) -> bool:
-    """Not the user's to read: a dot file, an Office lock file ("~$..."), or what Windows marks
-    hidden or system ($RECYCLE.BIN, System Volume Information)."""
-    if entry.name.startswith((".", "~$")):
+    """Not the user's to read: a dot file, an Office lock file ("~$..."), Finder's folder icon
+    ("Icon\\r"), what Windows marks hidden or system ($RECYCLE.BIN, System Volume Information)
+    or what a Mac flags hidden."""
+    if entry.name.startswith((".", "~$")) or entry.name == "Icon\r":
         return True
     try:
-        attributes = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+        found = entry.stat(follow_symlinks=False)
     except OSError:
         return False
-    return bool(attributes & NOT_THE_USERS)
+    return bool(getattr(found, "st_file_attributes", 0) & NOT_THE_USERS
+                or getattr(found, "st_flags", 0) & stat.UF_HIDDEN)
 
 
 def _listed(folder: Path, strained: list[bool]) -> list[os.DirEntry[str]]:

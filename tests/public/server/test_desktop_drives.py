@@ -75,3 +75,22 @@ def test_a_drive_is_connected_only_from_this_machine(demo: Demo, tmp_path: Path)
 
     elsewhere = {"origin": "https://elsewhere.invented"}
     assert client.post("/v1/drives/google/connect", headers=elsewhere).status_code == 403
+
+
+def test_a_drive_this_machine_will_not_let_the_app_read_says_so(
+    demo: Demo, tmp_path: Path
+) -> None:
+    # macOS keeps iCloud Drive from a process it has not been allowed to: the folder is there,
+    # and reading it is "Operation not permitted". Said as such, not as a server failure.
+    root = _drive(tmp_path)
+    demo.desktop_drive = lambda name: Drive(root)  # type: ignore[method-assign]
+    client = TestClient(create_app(demo), base_url=BASE)
+    client.post("/v1/drives/icloud/connect")
+    root.chmod(0)
+    try:
+        listed = client.get("/v1/drives/icloud/folders")
+    finally:
+        root.chmod(0o755)
+
+    assert listed.status_code == 403
+    assert "Privacy & Security" in listed.json()["detail"]

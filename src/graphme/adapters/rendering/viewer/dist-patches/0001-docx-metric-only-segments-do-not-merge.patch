@@ -1,11 +1,11 @@
---- a/dist/document-pull-client-uopDjRde.js	2026-09-14 11:02:33
-+++ b/dist/document-pull-client-uopDjRde.js	2026-09-14 11:02:33
-@@ -7041,7 +7041,7 @@
- 	let t = [];
- 	for (let n of e) {
- 		let e = t.at(-1);
--		if (e && "text" in e && "text" in n && Dl(e) === Dl(n)) {
-+		if (e && "text" in e && "text" in n && !e.metricOnly && !n.metricOnly && Dl(e) === Dl(n)) {
- 			let r = e.text.length, i = e.text + n.text, a = [...e.punctuationCompressions ?? [], ...(n.punctuationCompressions ?? []).map((e) => ({
- 				end: r + e.end,
- 				adjustmentPt: e.adjustmentPt
+--- a/dist/document-pull-client-DIRkBd6z.js
++++ b/dist/document-pull-client-DIRkBd6z.js
+@@ -13496,7 +13496,7 @@
+ 	let n = [], r, i;
+ 	for (let a of e) {
+ 		let e = n.at(-1);
+-		if (e && "text" in e && "text" in a && sp(e, a) && !e.optionalHyphen && !a.optionalHyphen && !(a.hardJoinPrev && e.optionalHyphenBreaks?.at(-1)?.offset === e.text.length) && !e.semanticSlotSpans && !a.semanticSlotSpans && a.autoSpaceBeforePt === void 0 && !(a.textShapeRequest?.kerning === !0 && e.text.endsWith(" ") !== a.text.startsWith(" ") && (e.script !== a.script || !Jp(e, a, 1) || Hp(e, t) !== null || Hp(a, t) !== null || Pp(e, t, 1) || Pp(a, t, 1))) && !(a.textShapeRequest?.kerning === !0 && (e.sourceRunIndex !== a.sourceRunIndex || e.sourceTextSequence !== a.sourceTextSequence)) && Lb(e, a) && (e.substituteScope === void 0 && a.substituteScope === void 0 || e.textShapeRequest?.substituteContext?.text === a.textShapeRequest?.substituteContext?.text && e.textShapeRequest?.substituteContext !== void 0 && a.textShapeRequest?.substituteContext?.offset === e.textShapeRequest.substituteContext.offset + e.text.length)) {
++		if (e && "text" in e && "text" in a && !e.metricOnly && !a.metricOnly && sp(e, a) && !e.optionalHyphen && !a.optionalHyphen && !(a.hardJoinPrev && e.optionalHyphenBreaks?.at(-1)?.offset === e.text.length) && !e.semanticSlotSpans && !a.semanticSlotSpans && a.autoSpaceBeforePt === void 0 && !(a.textShapeRequest?.kerning === !0 && e.text.endsWith(" ") !== a.text.startsWith(" ") && (e.script !== a.script || !Jp(e, a, 1) || Hp(e, t) !== null || Hp(a, t) !== null || Pp(e, t, 1) || Pp(a, t, 1))) && !(a.textShapeRequest?.kerning === !0 && (e.sourceRunIndex !== a.sourceRunIndex || e.sourceTextSequence !== a.sourceTextSequence)) && Lb(e, a) && (e.substituteScope === void 0 && a.substituteScope === void 0 || e.textShapeRequest?.substituteContext?.text === a.textShapeRequest?.substituteContext?.text && e.textShapeRequest?.substituteContext !== void 0 && a.textShapeRequest?.substituteContext?.offset === e.textShapeRequest.substituteContext.offset + e.text.length)) {
+ 			let t = e.text.length, o = e.text + a.text;
+ 			if (a.explicitBreakBefore || a.explicitBreaks) {
+ 				r ??= [], a.explicitBreakBefore && r.push(t);

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph-me-maybe"
-version = "0.1.76"
+version = "0.1.77"
 description = "Graph-Me-Maybe: local-first multimodal graph RAG over documents"
 readme = "README.md"
 license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
@@ -89,7 +89,7 @@ ignore_missing_imports = true
 
 # pymupdf ships without types.
 [[tool.mypy.overrides]]
-module = ["graphme.samples"]
+module = ["graphme.samples", "tools.golden.extra"]
 disallow_untyped_calls = false
 warn_return_any = false
 

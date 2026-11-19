@@ -1,15 +1,23 @@
---- a/dist/plot-area-frame-D5hEOgkJ.js	2026-09-21 00:56:13
-+++ b/dist/plot-area-frame-D5hEOgkJ.js	2026-09-21 00:56:31
-@@ -70,6 +70,12 @@
- 			for (let t = 0; t < f; t++) {
- 				let n = a + t * 3;
- 				_(i, t, e.getUint8(n + 2), e.getUint8(n + 1), e.getUint8(n), 255);
-+			}
-+			v = !0;
-+		} else if (c === 16) {
-+			for (let t = 0; t < f; t++) {
-+				let n = a + t * 2, $p = e.getUint8(n) | e.getUint8(n + 1) << 8, $r = $p >> 10 & 31, $g = $p >> 5 & 31, $b = $p & 31;
-+				_(i, t, $r << 3 | $r >> 2, $g << 3 | $g >> 2, $b << 3 | $b >> 2, 255);
+--- a/dist/plot-area-frame-DNYMd9Pf.js
++++ b/dist/plot-area-frame-DNYMd9Pf.js
+@@ -27902,6 +27902,7 @@
+ 		1,
+ 		4,
+ 		8,
++		16,
+ 		24,
+ 		32
+ 	].includes(l)) return null;
+@@ -27941,6 +27942,12 @@
+ 				g(r, t, e.getUint8(n + 2), e.getUint8(n + 1), e.getUint8(n), 255);
  			}
- 			v = !0;
- 		} else if (c === 8 && g) {
+ 			_ = !0;
++		} else if (l === 16) {
++			for (let t = 0; t < d; t++) {
++				let n = o + t * 2, $p = e.getUint8(n) | e.getUint8(n + 1) << 8, $r = $p >> 10 & 31, $g = $p >> 5 & 31, $b = $p & 31;
++				g(r, t, $r << 3 | $r >> 2, $g << 3 | $g >> 2, $b << 3 | $b >> 2, 255);
++			}
++			_ = !0;
+ 		} else if (l === 8 && h) {
+ 			for (let t = 0; t < d; t++) {
+ 				let n = e.getUint8(o + t), i = h[n] ?? 0;
