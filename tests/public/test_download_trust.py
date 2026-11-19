@@ -35,8 +35,10 @@ def test_every_download_checks_its_certificate_with_the_systems_trust(
 ) -> None:
     contexts: list[object] = []
 
-    def urlopen(request: object, timeout: float, context: object = None) -> _Answer:
-        contexts.append(context)
+    def urlopen(request: Any, timeout: float, context: object = None) -> _Answer:
+        # Only the download asked for: a job another test left running may ask for its own.
+        if "example.invalid" in getattr(request, "full_url", str(request)):
+            contexts.append(context)
         return _Answer(b"x")
 
     monkeypatch.setattr("urllib.request.urlopen", urlopen)
