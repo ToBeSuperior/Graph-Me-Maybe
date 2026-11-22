@@ -101,7 +101,7 @@ class MailAccounts:
         self._vault(account).put(secret)
         item = {"id": account, **where, "workspace": workspace, "state": "counting",
                 "counting": 0, "count": None, "read_since": None, "last_checked": _now(),
-                "error": None}
+                "error": None, "mode": "manual", "at": None}
         with self._lock:
             self._write([*self._read(), item])
         return item
@@ -189,6 +189,12 @@ class MailAccounts:
         """Files read in and files removed that the graph has not taken yet (its workspace is
         closed, or a build was running): taken when the workspace is open and idle."""
         self._change(account, pending=pending, gone=gone)
+
+    def set_mode(self, account: str, mode: str, at: str | None) -> None:
+        """How new mail is fetched (`watch.MODES`): `manual` only when asked. An account with
+        no mode fetches by itself."""
+        self.get(account)
+        self._change(account, mode=mode, at=at)
 
     def set_state(self, account: str, state: str) -> None:
         self._change(account, state=state)

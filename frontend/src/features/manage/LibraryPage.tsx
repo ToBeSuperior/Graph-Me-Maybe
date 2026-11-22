@@ -2,7 +2,7 @@
 // brought that are not in it (still being read, or failed). Each says where it stands and when
 // its file was last changed, like a folder listing.
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronRight, ExternalLink, FileSearch, RotateCw, Search, X } from 'lucide-react';
+import { AlertTriangle, ChevronRight, ExternalLink, FileSearch, RotateCw, Search, TimerReset, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDeferredValue, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -11,7 +11,8 @@ import { FileIcon } from '../../components/docs';
 import { Badge, Button, Empty, Input, Skeleton } from '../../components/ui';
 import { changedAt, shownName, stem } from '../../lib/format';
 import { useLang, useT, type WordKey } from '../../lib/i18n';
-import { keys, useLibrary } from '../../lib/queries';
+import { keys, useLibrary, useWatch } from '../../lib/queries';
+import { watching } from '../../lib/watch';
 import { FolderDrop } from '../upload/FolderDrop';
 import { PageHeader } from './ManageLayout';
 
@@ -59,6 +60,7 @@ export function LibraryPage() {
   const t = useT();
   const { lang } = useLang();
   const { data, isPending, isError, error } = useLibrary();
+  const watched = watching(useWatch().data ?? []);
   const [filter, setFilter] = useState('');
   // Typing stays quick over thousands of rows: the list follows the filter when it can.
   const deferred = useDeferredValue(filter);
@@ -74,12 +76,17 @@ export function LibraryPage() {
   return (
     <div>
       <PageHeader title={t('library')} description={data ? t('libraryCount', data.items.filter((i) => i.in_space).length, data.items.filter((i) => !i.in_space).length) : undefined}
-        actions={
+        actions={<>
+          {watched && (
+            <Link to="/manage/watch" className="flex h-8 items-center gap-1.5 rounded-md border border-line px-2.5 text-xs text-muted hover:bg-hover hover:text-fg" data-testid="watch-badge">
+              <TimerReset className="size-3.5" />{t('watchBadge', watched.changed, watched.next, watched.unreadable)}
+            </Link>
+          )}
           <div className="relative w-64">
             <Search className="pointer-events-none absolute top-2 left-2.5 size-4 text-faint" />
             <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t('findByName')} aria-label={t('findByName')} className="pl-8" />
           </div>
-        } />
+        </>} />
       <div className="p-6">
         {data && !data.space_ok && (
           <div className="mb-4 flex items-center gap-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-sm"><AlertTriangle className="size-4 text-warn" />{t('dbUnreachable')}</div>

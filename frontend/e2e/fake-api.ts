@@ -4,7 +4,7 @@ import type { Page, Route } from '@playwright/test';
 
 type Kind = 'box' | 'google' | 'onedrive' | 'dropbox' | 'icloud' | 'synology';
 
-interface Fake { found: Record<Kind, boolean>; workspaces: { active: string; mcp_enabled: boolean; mcp_changes: boolean; items: { id: string; name: string; mcp: boolean }[] }; opened: string[]; originals: string[]; deletedWorkspaces: string[]; connected: Record<Kind, boolean>; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; uploaded: string[]; built: string[][]; starting: number; threads: Record<string, FakeThread>; turns: { question: string; only: string[] | null; exclude: string[] | null; documents: number | null; stamp: string | null }[]; scoped: string[][]; mail: { accounts: Record<string, unknown>[]; connected: Record<string, unknown>[]; read: unknown[]; earlier: number; left: string[] } }
+interface Fake { found: Record<Kind, boolean>; workspaces: { active: string; mcp_enabled: boolean; mcp_changes: boolean; items: { id: string; name: string; mcp: boolean }[] }; opened: string[]; originals: string[]; deletedWorkspaces: string[]; connected: Record<Kind, boolean>; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; uploaded: string[]; built: string[][]; starting: number; threads: Record<string, FakeThread>; turns: { question: string; only: string[] | null; exclude: string[] | null; documents: number | null; stamp: string | null }[]; scoped: string[][]; mail: { accounts: Record<string, unknown>[]; connected: Record<string, unknown>[]; read: unknown[]; earlier: number; left: string[] }; watch: Record<string, unknown>[]; watchBuilt: string[]; watchFolders: { path: string; kind: string }[]; deletedDocs: string[] }
 
 
 /** A conversation as the server keeps it. */
@@ -49,7 +49,7 @@ export async function fakeApi(page: Page,
     found: { box: boxDrive, google: googleDrive, onedrive: oneDrive, dropbox: dropbox, icloud: false, synology: false }, opened: [], originals: [], deletedWorkspaces: [],
     connected: { box: false, google: false, onedrive: false, dropbox: false, icloud: false, synology: false }, boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
     installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0,
-    uploaded: [], built: [], starting, threads: {}, turns: [], scoped: [], mail: { accounts: [], connected: [], read: [], earlier: 0, left: [] } };
+    uploaded: [], built: [], starting, threads: {}, turns: [], scoped: [], mail: { accounts: [], connected: [], read: [], earlier: 0, left: [] }, watch: [], watchBuilt: [], watchFolders: [], deletedDocs: [] };
   if (mailWorkspace) fake.workspaces.items.push({ id: 'm1', name: 'kim@invented.test', mcp: false, kind: 'mail', account: 'a1' } as never);
   if (mailWorkspace) fake.workspaces.active = 'm1';
   const json = (route: Route, body: unknown, status = 200) =>
@@ -120,6 +120,27 @@ export async function fakeApi(page: Page,
     }
     // Mail accounts: connecting counts the mailbox and reads nothing; the reader is then asked.
     if (path === '/v1/mail/accounts' && method === 'GET') return json(route, fake.mail.accounts);
+    if (path === '/v1/watch' && method === 'GET') return json(route, fake.watch);
+    if (path === '/v1/watch/folders') return json(route, fake.watchFolders);
+    const deletedDoc = path.match(/^\/v1\/documents\/([^/]+)$/);
+    if (deletedDoc && method === 'DELETE') {
+      fake.deletedDocs.push(deletedDoc[1]);
+      for (const t of fake.watch) t.missing = (t.missing as { document_id: string }[]).filter((m) => m.document_id !== deletedDoc[1]);
+      return json(route, { deleted: deletedDoc[1] });
+    }
+    const watched = path.match(/^\/v1\/watch\/(folder|drive|mail)\/([^/]+)(\/build)?$/);
+    if (watched && method === 'POST') { fake.watchBuilt.push(watched[2]); return json(route, { ...BUILD_STARTED, source: 'watch' }, 202); }
+    if (watched && method === 'DELETE') { fake.watch = fake.watch.filter((t) => t.id !== watched[2]); return json(route, fake.watch); }
+    if (watched && method === 'PUT') {
+      const { mode, at, path: folder } = route.request().postDataJSON();
+      let kept = fake.watch.find((t) => t.id === watched[2]);
+      if (!kept) {
+        kept = { kind: watched[1], id: watched[2], workspace: 'default', path: folder, name: folder.split('/').pop(), changed: 0, missing: [], building: false, error: null };
+        fake.watch.push(kept);
+      }
+      Object.assign(kept, { mode, at, next_build: mode === 'daily' ? `2026-05-05T${at}:00` : null });
+      return json(route, kept);
+    }
     // A Google sign-in: the browser finishes it, and the account is on the server at the next ask.
     if (path === '/v1/mail/microsoft/connect' && method === 'POST') {
       fake.mail.accounts.push({ id: 'o1', kind: 'outlook', host: 'graph.microsoft.com', port: 443, address: 'lee@invented.test',

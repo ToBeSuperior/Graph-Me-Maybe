@@ -353,6 +353,10 @@ class HierarchyDerivation(DomainModel):
 
     decisions: tuple[HierarchyDecision, ...] = ()
     unread_pages: tuple[int, ...] = ()
+    pages_read: int = 0
+    """Pages whose outline the model was asked for."""
+    pages_reused: int = 0
+    """Pages that did not change, whose outline was kept from an earlier reading."""
 
 
 class JoinPlace(DomainModel):

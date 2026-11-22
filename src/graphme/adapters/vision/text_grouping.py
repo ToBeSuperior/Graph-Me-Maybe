@@ -15,6 +15,7 @@ from pathlib import Path
 
 from graphme.adapters.extractors.pdf import printed_pieces
 from graphme.adapters.rendering.page_renderer import RendersPages
+from graphme.application.page_readings import PageReadings
 from graphme.application.page_units import flow_pages
 from graphme.application.progress import Progress
 from graphme.application.unit_grouping import explode_text, group_document_units
@@ -39,11 +40,13 @@ class RenderedUnitGrouper:
         vision: VisionProvider,
         workers: int = 1,
         progress: Progress | None = None,
+        readings: PageReadings | None = None,
     ) -> None:
         self._renderer = renderer
         self._vision = vision
         self._workers = workers
         self._progress = progress
+        self._readings = readings
 
     def group(
         self,
@@ -74,6 +77,7 @@ class RenderedUnitGrouper:
             page_of=flow_pages(exploded, rendered, document_format),
             progress=self._progress,
             workers=self._workers,
+            readings=self._readings,
         )
 
     @staticmethod

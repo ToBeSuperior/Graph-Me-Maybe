@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from graphme.adapters.sources.imap_mail import ImapMailbox, MailRefused
-from graphme.server.jobs import Busy, CorpusBuild
+from graphme.server.jobs import BUILDING, Busy, CorpusBuild
 from graphme.server.mail_sync import MailSync
 from graphme.server.state import Demo
 from graphme.server.workspaces import FIRST
@@ -29,12 +29,19 @@ from tests.public.server.test_mail_accounts import (  # noqa: F401
 from tests.public.server.test_workspaces import BASE, home, workspace_demo  # noqa: F401
 
 
-def _connected(mail: TestClient, demo: Demo, address: str = ADDRESS) -> dict[str, Any]:
-    """An account connected and its whole mailbox read: the first-connect question answered."""
+def _connected(mail: TestClient, demo: Demo, address: str = ADDRESS, *,
+               automatic: bool = True) -> dict[str, Any]:
+    """An account connected and its whole mailbox read: the first-connect question answered.
+    `automatic`, it is set to fetch new mail by itself, as a new account is not."""
     demo._run = _read_as_their_files  # type: ignore[method-assign]
     account = mail.post("/v1/mail/accounts", json={**CONNECT, "address": address}).json()
     job = mail.post(f"/v1/mail/accounts/{account['id']}/read", json={"since": None}).json()
     assert until(lambda: mail.get(f"/v1/jobs/{job['id']}").json()["state"] == "done")
+    # The build the read handed its messages to can still be ending: a fetch waits for none.
+    assert until(lambda: demo.build.state not in BUILDING), demo.build
+    if automatic:
+        chosen = mail.put(f"/v1/watch/mail/{account['id']}", json={"mode": "on_change"})
+        assert chosen.status_code == 200, chosen.text
     return account
 
 
@@ -293,6 +300,7 @@ def test_mail_fetched_but_never_built_is_built_by_the_next_pass(
     mail: TestClient, fake: FakeImap, workspace_demo: Demo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     account = mail.post("/v1/mail/accounts", json=CONNECT).json()
+    mail.put(f"/v1/watch/mail/{account['id']}", json={"mode": "on_change"})
 
     def cancelled(docs: list[str], put: bool, embed: bool) -> None:
         workspace_demo.build.state = "cancelled"  # the store is level, nothing was built

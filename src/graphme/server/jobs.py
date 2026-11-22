@@ -173,6 +173,10 @@ class CorpusBuild:
     """Documents a cancel passed over."""
     embedded: int = 0
     """Passages embedded for questions."""
+    pages_read: int = 0
+    """Pages the model read for this build's documents."""
+    pages_reused: int = 0
+    """Pages that had not changed since an earlier reading, taken as they were read."""
     percent: int | None = None
     """How far the reading is, over every document's questions; None for a job that reads
     nothing (embedding alone)."""

@@ -199,6 +199,13 @@ class Neo4jGraphSpace:
             "MATCH (d:Document {source_path: $path}) RETURN d.id AS id", path=source_path)
         return {record["id"] for record in records}
 
+    def source_paths(self) -> dict[str, str]:
+        """Every document by the file it was read from."""
+        records, _, _ = self._query(
+            "MATCH (d:Document) WHERE d.source_path IS NOT NULL "
+            "RETURN d.id AS id, d.source_path AS path")
+        return {record["id"]: record["path"] for record in records}
+
     def relocate(self, content_hash: str, source_path: str) -> None:
         self._query(
             "MATCH (d:Document {content_hash: $hash}) SET d.source_path = $path",
@@ -320,6 +327,11 @@ class Neo4jGraphSpace:
             f"MATCH (n:DocNode) WHERE n.meta_{CROP_ASSET_KEY} IS NOT NULL "
             f"RETURN DISTINCT n.meta_{CROP_ASSET_KEY} AS h")
         return {str(record["h"]) for record in records}
+
+    def passage_texts(self) -> Iterator[str]:
+        """The text of every passage the space holds, for the sweep of kept vectors."""
+        records, _, _ = self._query(f"MATCH (c:{CHUNK_LABEL}) RETURN c.text AS t")
+        return (str(record["t"]) for record in records if record["t"] is not None)
 
     def contents(self, hashes: Sequence[str]) -> set[str]:
         """Which of these file contents (SHA-256) the space already holds."""

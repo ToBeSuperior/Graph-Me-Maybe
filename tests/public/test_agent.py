@@ -241,3 +241,22 @@ def test_the_installed_app_opens_for_the_home_its_launcher_names(
 
     assert started[0] == ["open", str(bundle)]
     assert started[1][-3:] == ["-m", "graphme.launcher", str(tmp_path / "other")]
+
+
+def test_the_menu_says_what_is_watched_when_anything_is() -> None:
+    targets = [
+        {"kind": "folder", "mode": "manual", "changed": 2, "next_build": None},
+        {"kind": "drive", "mode": "daily", "changed": 1, "next_build": "2026-05-05T02:00:00"},
+        {"kind": "mail", "mode": "on_change", "changed": 0, "next_build": None},
+        {"kind": "mail", "mode": "manual", "changed": 9, "next_build": None},  # not watched
+    ]
+
+    line = agent.watching_line(targets)
+    entries = agent.agent_menu(agent.AgentState(workspace="Invented main", mcp_enabled=True,
+                                                login=False, watching=line))
+
+    assert line == "Watching · 3 changed · next 02:00"
+    assert entries[1] == agent.MenuEntry(line, None)
+    assert agent.watching_line([targets[3]]) is None
+    unreadable = {**targets[0], "error": "an invented folder is gone"}
+    assert agent.watching_line([unreadable]) == "Watching · 2 changed · 1 cannot be read"

@@ -107,6 +107,9 @@ class FakeSpace:
     def source_path(self, document_id: str) -> str | None:
         return self.paths.get(document_id)
 
+    def source_paths(self) -> dict[str, str]:
+        return {i: path for i, path in self.paths.items() if i in self.held}
+
     def files(self, ids: Any) -> dict[str, str]:
         return {i: self.held[i] for i in ids if i in self.held}
 
@@ -149,6 +152,9 @@ class FakeSpace:
 
     def crop_hashes(self) -> set[str]:
         return set(self.crops)
+
+    def passage_texts(self) -> Any:
+        return iter(())
 
     def close(self) -> None:
         pass

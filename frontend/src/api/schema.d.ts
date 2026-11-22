@@ -414,6 +414,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/watch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Watch Targets
+         * @description The targets chosen to build by themselves -- folders, drive folders -- and every
+         *     mail account, each with what changed, what went missing and when it builds next.
+         *     Nothing else is looked at.
+         */
+        get: operations["watch_targets_v1_watch_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/watch/folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Watch Folders
+         * @description The folders a workspace (the open one) was built from: the only folders a target
+         *     can be.
+         */
+        get: operations["watch_folders_v1_watch_folders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/watch/{kind}/{target}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Watch Choose
+         * @description A target chosen, or its mode changed. A new folder or drive target names its
+         *     `path`; what it holds now is where its changes are counted from.
+         */
+        put: operations["watch_choose_v1_watch__kind___target__put"];
+        post?: never;
+        /**
+         * Watch Forget
+         * @description A folder target no longer chosen: never looked at again. A mail account is set to
+         *     `manual` instead.
+         */
+        delete: operations["watch_forget_v1_watch__kind___target__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/watch/{kind}/{target}/build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Watch Build
+         * @description A target built now, whatever its mode: what changed in its folder, or a mail
+         *     account's new mail. 409, saying why, when nothing changed, a build runs or its
+         *     workspace is not open.
+         */
+        post: operations["watch_build_v1_watch__kind___target__build_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/drives/{kind}": {
         parameters: {
             query?: never;
@@ -1420,6 +1511,16 @@ export interface components {
             skipped: number;
             /** Embedded */
             embedded: number;
+            /**
+             * Pages Read
+             * @default 0
+             */
+            pages_read: number;
+            /**
+             * Pages Reused
+             * @default 0
+             */
+            pages_reused: number;
             /** Percent */
             percent?: number | null;
             /**
@@ -2091,6 +2192,76 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WatchChoice */
+        WatchChoice: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "manual" | "on_change" | "daily";
+            /** At */
+            at?: string | null;
+            /** Path */
+            path?: string | null;
+            /** Workspace */
+            workspace?: string | null;
+        };
+        /** WatchFolder */
+        WatchFolder: {
+            /** Path */
+            path: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "folder" | "drive";
+        };
+        /** WatchMissing */
+        WatchMissing: {
+            /** Path */
+            path: string;
+            /** Document Id */
+            document_id?: string | null;
+        };
+        /** WatchTarget */
+        WatchTarget: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "folder" | "drive" | "mail";
+            /** Id */
+            id: string;
+            /** Workspace */
+            workspace: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "manual" | "on_change" | "daily";
+            /** At */
+            at?: string | null;
+            /** Path */
+            path?: string | null;
+            /** Name */
+            name: string;
+            /** Changed */
+            changed: number;
+            /**
+             * Missing
+             * @default []
+             */
+            missing: components["schemas"]["WatchMissing"][];
+            /** Next Build */
+            next_build?: string | null;
+            /**
+             * Building
+             * @default false
+             */
+            building: boolean;
+            /** Error */
+            error?: string | null;
         };
         /** Workspace */
         Workspace: {
@@ -2797,6 +2968,157 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MailAccount"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    watch_targets_v1_watch_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchTarget"][];
+                };
+            };
+        };
+    };
+    watch_folders_v1_watch_folders_get: {
+        parameters: {
+            query?: {
+                workspace?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchFolder"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    watch_choose_v1_watch__kind___target__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: "folder" | "drive" | "mail";
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WatchChoice"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchTarget"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    watch_forget_v1_watch__kind___target__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: "folder" | "drive";
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchTarget"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    watch_build_v1_watch__kind___target__build_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: "folder" | "drive" | "mail";
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildState"];
                 };
             };
             /** @description Validation Error */

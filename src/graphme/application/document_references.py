@@ -18,6 +18,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from graphme.application.corpus_links import document_numbers, generic_name, leading_number
+from graphme.application.page_readings import PageReadings, read_key, remembered
 from graphme.application.page_units import (
     RenderedPageLike,
     asked_together,
@@ -66,8 +67,10 @@ def link_references(
     page_of: Mapping[str, int] | None = None,
     workers: int = 1,
     progress: Progress | None = None,
+    readings: PageReadings | None = None,
 ) -> ExtractedDocument:
-    """Add a node for every other document this one names, and point the mention at it."""
+    """Add a node for every other document this one names, and point the mention at it; a
+    page that did not change takes what it was answered before, from `readings`."""
     by_page = units_by_page(extracted, pages, kinds=NAMING_TYPES, page_of=page_of)
     jobs: list[_Job] = [
         (page, units[at : at + UNITS_PER_ASK], at // UNITS_PER_ASK + 1)
@@ -85,9 +88,14 @@ def link_references(
             else None
         )
         try:
-            answer = vision.find_references(
-                request=request, image=page.png, unit_images=crops
-            )
+            answer, _ = remembered(
+                readings, read_key("references", page, units, crops or {}),
+                [node.id for node in units],
+                lambda: vision.find_references(
+                    request=request, image=page.png, unit_images=crops),
+                load=DocumentReferenceResult.model_validate,
+                dump=lambda found: found.model_dump(mode="json"),
+                document=extracted.document.content_hash)
         except (RuntimeError, ValueError) as error:
             # One page nobody could read for references is one page, not the document.
             _log.warning("%s: no usable references -- %s", request.scope, error)

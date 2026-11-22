@@ -136,12 +136,33 @@ and the oldest month, the attachments and their size: **Read all**, **Only the l
 or **Cancel**. Mail is read newest first, so recent mail can be asked about soon. What "only the
 last" left out is read later with **Read earlier mail**.
 
-While the app runs it checks each account every few minutes and reads new mail; a message
-deleted from the mailbox leaves the graph. Each account has a workspace of its own, named after
+A mailbox connected from 0.2.1 on is read when you ask (**Manage › Automatic builds** turns on
+reading by itself); one connected before keeps reading by itself. While the app runs it checks
+each such account every few minutes and reads new mail; a message deleted from the mailbox leaves
+the graph. Each account has a workspace of its own, named after
 the address. A mail workspace follows its mailbox alone: it takes no folder, drive or upload,
 and nothing in it is deleted or emptied from the app -- delete a message in the mail service and
 it leaves the graph at the next check. Disconnecting offers to delete that workspace. A message opens with its sender, recipients, date, body and the attachments it
 carried, which open as documents.
+
+
+## Automatic builds
+
+**Manage › Automatic builds** lists what the app keeps up to date by itself, and only that: a
+folder this workspace was built from (on this computer or in a synced cloud drive), or a mail
+account. Nothing else is ever looked at, and every target starts **Manual**.
+
+- **Manual** counts what changed and builds when you press **Build now**.
+- **When it changes** builds once nothing has changed for five minutes.
+- **Daily** builds at the time set (02:00 unless changed); a time missed while the app was closed
+  is built at the next start.
+
+The app looks every five minutes at each target's file names, sizes and dates, never their
+contents. A changed document reads again only its pages that changed. A file gone from the folder
+is listed as missing and stays in the graph until you delete it there. A folder that cannot be
+read (a drive unplugged) is said so and not built until it is back. One build runs at a time, and
+only into its own workspace while that workspace is open. The Library shows how many changed and
+when the next build is.
 
 ## Asking
 

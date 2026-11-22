@@ -162,6 +162,14 @@ class DocumentGraphBuilder:
         derived = self._hierarchy.derive(
             extracted=extracted, source_path=str(source), on_page=on_page
         )
+        # How many pages were read again and how many kept, said on the record for the build
+        # to report; the record's metadata is not put in the graph.
+        record = extracted.document.model_copy(update={"metadata": {
+            **extracted.document.metadata,
+            "pages_read": derived.pages_read, "pages_reused": derived.pages_reused,
+            # The content the readings were named under: a print is held as its original.
+            "read_as": extracted.document.content_hash}})
+        extracted = extracted.model_copy(update={"document": record})
         return note_unread_pages(
             apply_hierarchy_decisions(
                 extracted, (*derived.decisions, *figure_part_decisions(

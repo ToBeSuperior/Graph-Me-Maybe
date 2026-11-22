@@ -19,6 +19,7 @@ from graphme.application.ingest import format_of
 from graphme.application.progress import Progress
 from graphme.domain.enums import FLOW_FORMATS, DocumentFormat, EdgeType
 from graphme.domain.models import ExtractedDocument, HierarchyDecision, HierarchyDerivation
+from graphme.runtime import page_readings
 from graphme.server import state
 from graphme.server.jobs import (
     CANCELLED,
@@ -187,6 +188,7 @@ class Reading(SpaceJobs):
             assets=session.store,
             workers=state.VLM_CALLS_AT_ONCE,
             progress=session.progress,
+            readings=page_readings(self.settings),
         )
 
     def _read(self, session: Session) -> None:

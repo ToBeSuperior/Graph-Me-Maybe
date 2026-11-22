@@ -17,10 +17,12 @@ from graphme.application.corpus_build import (
     BuildReport,
     BuildStep,
     build_graph,
+    pages_said,
     relocated,
     with_origin,
 )
 from graphme.domain.models import ExtractedDocument
+from graphme.runtime import page_readings
 from graphme.server import state
 from graphme.server.jobs import (
     BUILDING,
@@ -42,15 +44,24 @@ class CorpusBuilds(Previews):
     def build_corpus(
         self, docs: list[str], source: str, *, put: bool = True, embed: bool = True,
         find: Callable[[CorpusBuild], list[str]] | None = None, empty_done: bool = False,
+        into: str | None = None,
     ) -> CorpusBuild:
         """Read every document, put them all in the graph space, then join what they name and
         -- when `embed` and an embedding key is set -- embed their passages. Not `put`, the
         build stops before the space: the files are read, and nothing else. `find` gives the
         documents instead, looked for once the build has started: a folder Box Drive lists by
-        asking Box takes minutes to walk, and a request that walked it answered nothing."""
+        asking Box takes minutes to walk, and a request that walked it answered nothing.
+        `into` is the workspace the caller decided on: Busy when another is open by the time
+        the build takes its slot, or when it is a mail workspace."""
         with self.building:
             if self.build.state in BUILDING:
                 raise Busy("a graph build is already running")
+            if into is not None:  # checked under the lock a switch holds: no switch between
+                spaces = self.workspace_registry()
+                if spaces.active != into:
+                    raise Busy("its workspace is not open -- open it to build")
+                if spaces.item(into)["kind"] == "mail":
+                    raise Busy("a mail workspace reads its own mailbox only")
             # No total until the documents are looked through for the files they carry.
             self.build = CorpusBuild(id=uuid.uuid4().hex, kind="build" if put else "read",
                                      state="reading", source=source)
@@ -287,14 +298,18 @@ class CorpusBuilds(Previews):
 
         def read_only() -> BuildReport:
             failed = []
+            pages = [0, 0]
             for path in in_turn([]):
                 try:
-                    process(path)
+                    read = process(path)
                 except RuntimeError as error:
                     failed.append((path, str(error)))
+                    continue
+                pages = [pages[0] + pages_said(read, "pages_read"),
+                         pages[1] + pages_said(read, "pages_reused")]
             build.done = counted()
             return BuildReport(processed=len(admitted) - len(failed), failed=tuple(failed),
-                               links=0)
+                               links=0, pages_read=pages[0], pages_reused=pages[1])
 
         self.putting = set()
         threading.Thread(target=feed, daemon=True).start()
@@ -302,6 +317,7 @@ class CorpusBuilds(Previews):
             # The documents arrive as they are let in and read (`in_turn`), not as a list.
             report = build_graph(
                 [], process=process, space=self.space(), on_step=step, in_turn=in_turn,
+                readings=page_readings(self.settings),
             ) if put else read_only()
         except Exception:  # noqa: BLE001 -- the build's state says what happened
             traceback.print_exc(file=sys.stderr)
@@ -323,6 +339,7 @@ class CorpusBuilds(Previews):
                          for path, reason in report.failed if not reason.endswith(CANCELLED)]
         build.skipped = sum(1 for _, reason in report.failed if reason.endswith(CANCELLED))
         build.links, build.documents = report.links, report.processed
+        build.pages_read, build.pages_reused = report.pages_read, report.pages_reused
         # What the question panel searches: the passages of every document just put in.
         if put and embed and self.settings.embeds and not self._embed(build):
             return

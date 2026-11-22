@@ -1,15 +1,22 @@
 """The embedders a graph space's passages and questions are turned into vectors with."""
 from __future__ import annotations
 
+import contextlib
+import os
+import tempfile
 import threading
 from abc import abstractmethod
+from array import array
 from collections import OrderedDict
-from collections.abc import Callable, Hashable
+from collections.abc import Callable, Hashable, Iterable
 from concurrent.futures import Future
+from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 from neo4j_graphrag.embeddings import OpenAIEmbeddings
 from neo4j_graphrag.embeddings.base import Embedder
+
+from graphme.domain.ids import sha256_bytes
 
 V = TypeVar("V")
 
@@ -85,3 +92,79 @@ class OpenAIBatchEmbeddings(OpenAIEmbeddings, BatchEmbedder):
         asked = self.query_prefix + text
         return QUERY_VECTORS.get((str(self.client.base_url), self.model, asked),
                                  lambda: self.embed_texts([asked])[0])
+
+
+
+
+class KeptVectors(BatchEmbedder):
+    """A passage's vector kept on disk by the model and the passage's text: a passage
+    embedded once is not embedded again -- an edited document's unchanged passages, put in
+    under new ids, keep the vectors they had. A question is embedded as it always is. A kept
+    vector of another size than `dimensions` is embedded again."""
+
+    def __init__(self, embedder: BatchEmbedder, folder: Path, *, model: str,
+                 dimensions: int | None = None) -> None:
+        super().__init__()
+        self._embedder = embedder
+        self._folder = Path(folder)
+        self._model = model
+        self._dimensions = dimensions
+
+    def embed_query(self, text: str, **kwargs: Any) -> list[float]:
+        return self._embedder.embed_query(text, **kwargs)
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        keys = [vector_key(self._model, text) for text in texts]
+        found = {key: vector for key in set(keys) if (vector := self._read(key)) is not None}
+        missing = list(dict.fromkeys(t for t, key in zip(texts, keys, strict=True)
+                                     if key not in found))
+        if missing:
+            for text, vector in zip(missing, self._embedder.embed_texts(missing), strict=True):
+                key = vector_key(self._model, text)
+                found[key] = vector
+                self._write(key, vector)
+        return [found[key] for key in keys]
+
+    def _read(self, key: str) -> list[float] | None:
+        try:
+            vector = list(array("d", (self._folder / f"{key}.vec").read_bytes()))
+        except (OSError, ValueError):
+            return None
+        if not vector or (self._dimensions is not None and len(vector) != self._dimensions):
+            return None
+        return vector
+
+    def _write(self, key: str, vector: list[float]) -> None:
+        with contextlib.suppress(OSError):
+            self._folder.mkdir(parents=True, exist_ok=True)
+            handle, temporary = tempfile.mkstemp(dir=self._folder, suffix=".part")
+            try:
+                with os.fdopen(handle, "wb") as stream:
+                    stream.write(array("d", vector).tobytes())
+                os.replace(temporary, self._folder / f"{key}.vec")
+            finally:
+                Path(temporary).unlink(missing_ok=True)
+
+
+def vector_key(model: str, text: str) -> str:
+    """What a passage's vector is kept under: the model and the text sent."""
+    return sha256_bytes(f"{model}\0{text}".encode())
+
+
+def sweep_vectors(folder: Path, *, model: str, texts: Iterable[str], before: float) -> int:
+    """Every kept vector but `model`'s of `texts` (the space's passages, as sent) deleted,
+    unless written since `before`, with any write cut short: how many."""
+    folder = Path(folder)
+    if not folder.is_dir():
+        return 0
+    keep = {vector_key(model, text) for text in texts}
+    removed = 0
+    for path in [*folder.glob("*.vec"), *folder.glob("*.part")]:
+        try:
+            stale = path.stat().st_mtime < before
+        except OSError:
+            continue
+        if stale and (path.suffix == ".part" or path.stem not in keep):
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed

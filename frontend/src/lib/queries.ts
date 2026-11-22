@@ -21,6 +21,8 @@ export const keys = {
   searchModels: ['searchModels'] as const,
   workspaces: ['workspaces'] as const,
   mail: ['mail'] as const,
+  watch: ['watch'] as const,
+  watchFolders: ['watchFolders'] as const,
 };
 
 /** The graph changed: what is drawn from it is asked again. A conversation's turns are not: each
@@ -157,4 +159,15 @@ export const useThread = (id: string) => useQuery({
   queryKey: keys.thread(id),
   queryFn: () => call(api.GET('/v1/threads/{thread_id}', { params: { path: { thread_id: id } } })),
   retry: false,
+});
+
+/** The targets chosen to build by themselves and every mail account, asked again each minute:
+ * what changed is counted by the server as it looks. */
+export const useWatch = () => useQuery({
+  queryKey: keys.watch, queryFn: () => call(api.GET('/v1/watch')), refetchInterval: 60_000, ...fresh,
+});
+
+/** The folders the open workspace was built from: the only folders a target can be. */
+export const useWatchFolders = () => useQuery({
+  queryKey: keys.watchFolders, queryFn: () => call(api.GET('/v1/watch/folders')), ...fresh,
 });

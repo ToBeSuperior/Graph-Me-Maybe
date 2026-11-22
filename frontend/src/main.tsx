@@ -10,6 +10,7 @@ import { DangerPage } from './features/manage/DangerPage';
 import { MailPage } from './features/manage/MailPage';
 import { driveRoutes, DrivesLayout } from './features/manage/DrivesLayout';
 import { SettingsPage } from './features/manage/SettingsPage';
+import { WatchPage } from './features/manage/WatchPage';
 import { ExportPage } from './features/manage/ExportPage';
 import { LibraryPage } from './features/manage/LibraryPage';
 import { ManageLayout } from './features/manage/ManageLayout';
@@ -75,6 +76,7 @@ const router = createBrowserRouter([
           { path: 'docs/:id', element: <DocumentRoute /> },
           { path: 'export', element: <ExportPage /> },
           { path: 'settings', element: <SettingsPage /> },
+          { path: 'watch', element: <WatchPage /> },
           { element: <DrivesLayout />, children: driveRoutes },
           { path: 'mail', element: <MailPage /> },
           { path: 'danger', element: <DangerPage /> },

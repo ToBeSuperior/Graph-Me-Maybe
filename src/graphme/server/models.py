@@ -128,6 +128,11 @@ class BuildState(_Model):
     only in the map."""
     skipped: int = 0
     embedded: int
+    pages_read: int = 0
+    """Pages the model read for this build's documents."""
+    pages_reused: int = 0
+    """Pages that had not changed since an earlier reading, taken as they were read: an
+    edited document is read again only where it changed."""
     percent: int | None = None
     """How far the reading is, over every document's questions (0-100); None for a job that
     reads nothing."""
@@ -669,3 +674,60 @@ class MailAccount(_Model):
 
 class MailRead(_Model):
     since: date | None = None
+
+
+# Automatic builds -----------------------------------------------------------------------
+
+WatchKind = Literal["folder", "drive", "mail"]
+WatchMode = Literal["manual", "on_change", "daily"]
+
+
+class WatchMissing(_Model):
+    path: str
+    document_id: str | None = None
+    """Its document in the graph, deleted with `DELETE /v1/documents/{document_id}`; None
+    when the graph cannot be asked now."""
+
+
+class WatchFolder(_Model):
+    path: str
+    kind: Literal["folder", "drive"]
+
+
+class WatchTarget(_Model):
+    kind: WatchKind
+    id: str
+    workspace: str
+    mode: WatchMode
+    """`manual` builds only when asked; `on_change` once nothing has changed for a few
+    minutes; `daily` at `at`."""
+    at: str | None = None
+    """A daily build's time, HH:MM on this machine's clock."""
+    path: str | None = None
+    """A folder target's folder."""
+    name: str
+    """What the target is called: the folder's name, the mail address."""
+    changed: int
+    """Documents added or changed since the last build (a mail account: mail held)."""
+    missing: list[WatchMissing] = []
+    """Files built before and gone from the folder since: still in the graph."""
+    next_build: str | None = None
+    """When it builds next (ISO, this machine's time); None when nothing is due."""
+    building: bool = False
+    error: str | None = None
+    """Why its folder (or a mail account's mailbox) cannot be read now; nothing is built."""
+
+
+class WatchChoice(_Model):
+    mode: WatchMode
+    at: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    path: str | None = None
+    """A new folder or drive target's folder."""
+    workspace: str | None = None
+    """The workspace a new folder target builds into; the open one when None."""
+
+    @model_validator(mode="after")
+    def _daily_has_a_time(self) -> WatchChoice:
+        if self.mode == "daily" and not self.at:
+            raise ValueError("a daily build needs its time, HH:MM")
+        return self

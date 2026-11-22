@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from PIL import Image
 
@@ -33,6 +33,13 @@ from graphme.application.page_hierarchy_scope import (
     build_placed_scope,
     build_sheet_scope,
 )
+from graphme.application.page_readings import (
+    PageReadings,
+    crop_hash,
+    page_key,
+    remembered,
+    unit_entry,
+)
 from graphme.application.page_units import flow_pages, held_by_a_visual
 from graphme.application.progress import Progress
 from graphme.application.unit_placement import (
@@ -44,6 +51,7 @@ from graphme.application.visual_crops import leads_a_figure, read_node_crop
 from graphme.domain.enums import FLOW_FORMATS, DocumentFormat, NodeType
 from graphme.domain.models import (
     ExtractedDocument,
+    FigureGroupingResult,
     GraphNode,
     HeadingLine,
     HierarchyDecision,
@@ -119,6 +127,7 @@ class RenderedHierarchyScopeProvider:
         readings: int = 1,
         workers: int = 1,
         progress: Progress | None = None,
+        kept: PageReadings | None = None,
     ) -> None:
         if readings < 1:
             raise ValueError("a scope needs at least one reading")
@@ -129,6 +138,9 @@ class RenderedHierarchyScopeProvider:
         self._renderer = renderer
         self._vision = vision
         self._asset_store = asset_store
+        self._kept = kept
+        """What each page, the headings and each page break were answered, by what they
+        hold: a page that did not change is not asked again."""
         self._readings = readings
         """How many independent readings of each page to take. More than one is put to
         the page: the readings run together, and where they differ the model is shown
@@ -171,9 +183,13 @@ class RenderedHierarchyScopeProvider:
             scope, shown, crops = asked
             request = self._request(extracted, scope)
             try:
-                answered = self._vision.group_page_figures(
-                    request=request, image=shown.png, unit_images=crops
-                )
+                answered, _ = remembered(
+                    self._kept, _key("figures", scope, page, crops, nodes), _names(scope),
+                    lambda: self._vision.group_page_figures(
+                        request=request, image=shown.png, unit_images=crops),
+                    load=FigureGroupingResult.model_validate,
+                    dump=lambda found: found.model_dump(mode="json"),
+                    document=extracted.document.content_hash)
             except RuntimeError as error:
                 # A page whose figures cannot be read keeps the territory measurement gave
                 # it. Nothing is grouped there, and the rest of the document still is.
@@ -224,9 +240,15 @@ class RenderedHierarchyScopeProvider:
                  for place, unit in enumerate(scope.units)}
         # The headings, a page each, a page break each; the breaks counted again once read.
         self._progress.plan("outline", 1 + len(scopes) + max(0, len(scopes) - 1))
-        heads = self._headings(scopes)
+        document = extracted.document.content_hash
+        by_index = {page.index: page for page in pages}
+        keys = {index: _key("outline", scope, by_index[index], found[2], nodes)
+                for index, found in asked.items() if found is not None
+                for scope in (found[0],)}
+        heads = self._headings(scopes, document)
         self._progress.step("outline")
-        read = self._read_pages(extracted, pages, asked, heads, units, order, on_page)
+        read, reused = self._read_pages(extracted, pages, asked, heads, units, order, on_page,
+                                        keys)
         root = next(node for node in extracted.nodes if node.type is NodeType.DOCUMENT)
         joining = Joining(
             root=root.id,
@@ -240,18 +262,32 @@ class RenderedHierarchyScopeProvider:
         requests = [request for index, _ in scopes
                     if (request := joining.request(index)) is not None]
         self._progress.plan("outline", 1 + len(scopes) + len(requests))
+        # A page break is kept by the two pages it joins: one beside a changed page is asked
+        # again, the rest take what they were answered.
+        before = {index: scopes[at - 1] for at, (index, _) in enumerate(scopes) if at}
+        root_id = root.id
+
+        def join(request: PageJoinRequest) -> dict[str, Answer]:
+            index = request.page_index
+            earlier, scope = before[index], asked[index]
+            assert scope is not None
+            names = (root_id, joining.top, *_names(earlier[1])[1:], *_names(scope[0])[1:])
+            key = page_key([(keys[earlier[0]],), (keys[index],)], (), (), asked="join")
+            return self._join(joining, request, key, names, document)
+
         with ThreadPoolExecutor(max_workers=min(self._workers, max(1, len(requests)))) as pool:
-            joined = dict(zip((r.page_index for r in requests),
-                              pool.map(lambda r: self._join(joining, r), requests),
+            joined = dict(zip((r.page_index for r in requests), pool.map(join, requests),
                               strict=True))
         return HierarchyDerivation(
             decisions=joining.settle(joined),
             unread_pages=tuple(sorted(
                 (*too_many, *(index for index, _ in scopes if read.get(index) is None)))),
+            pages_read=len(scopes) - len(reused),
+            pages_reused=len(reused),
         )
 
     def _headings(
-        self, scopes: Sequence[tuple[int, HierarchyScopeUnits]]
+        self, scopes: Sequence[tuple[int, HierarchyScopeUnits]], document: str
     ) -> tuple[HierarchyDecision, ...]:
         """The document's headings, read off its text, or none: past `MAX_HEADING_LINES`, or
         when the model gives no usable answer, the pages are read and joined without them."""
@@ -261,8 +297,16 @@ class RenderedHierarchyScopeProvider:
                  if unit.node_type is NodeType.TEXT_CHUNK]
         if not lines or len(lines) > MAX_HEADING_LINES:
             return ()
+        key = page_key([(line.label, line.page, line.indent) for line in lines], (), (),
+                       asked="headings")
         try:
-            answered = self._vision.outline_headings(lines=lines)
+            answered, _ = remembered(
+                self._kept, key, [line.unit_id for line in lines],
+                lambda: self._vision.outline_headings(lines=lines),
+                load=lambda said: tuple((str(u), None if p is None else str(p))
+                                        for u, p in said),
+                dump=lambda found: [list(pair) for pair in found],
+                document=document)
         except RuntimeError as error:
             _log.warning("no usable headings, joined without them -- %s", error)
             return ()
@@ -278,9 +322,13 @@ class RenderedHierarchyScopeProvider:
         units: Mapping[str, HierarchyUnit],
         order: Mapping[str, tuple[int, int]],
         on_page: Callable[[int, tuple[HierarchyDecision, ...] | None], None] | None,
-    ) -> dict[int, tuple[HierarchyDecision, ...] | None]:
+        keys: Mapping[int, str],
+    ) -> tuple[dict[int, tuple[HierarchyDecision, ...] | None], set[int]]:
         """Every page read on its own, side by side, shown the headings before it and the
-        foot of the page before. Each is heard as it lands; None is a page left unread."""
+        foot of the page before. Each is heard as it lands; None is a page left unread. A
+        page kept under its key (`keys`) is not asked: it is among the pages returned reused.
+        """
+        reused: set[int] = set()
         ordered = sorted((d for d in heads if d.subject_id in units),
                          key=lambda d: order[d.subject_id])
 
@@ -296,11 +344,18 @@ class RenderedHierarchyScopeProvider:
                 seen = {d.subject_id: units[d.subject_id] for d in before}
                 carried = placements.carried(replace(scope, units=tuple(seen.values())), seen)
             previous = asked.get(page.index - 1)
+            request = self._request(extracted, scope, carried)
             try:
-                answered = self._read(self._request(extracted, scope, carried),
-                                      shown.png, crops,
-                                      _page_tail(previous[1].png) if previous else None,
-                                      flowing=True)
+                answered, kept = remembered(
+                    self._kept, keys[page.index], _names(scope),
+                    lambda: self._read(request, shown.png, crops,
+                                       _page_tail(previous[1].png) if previous else None,
+                                       flowing=True),
+                    load=HierarchyScopeResult.model_validate,
+                    dump=lambda found: _on_page(found, scope),
+                    document=extracted.document.content_hash)
+                if kept:
+                    reused.add(page.index)
             except RuntimeError as error:
                 # One page the model cannot answer is one page's outline, not the document's.
                 _log.warning("%s: no usable answer, left as it was -- %s", scope.scope, error)
@@ -314,22 +369,35 @@ class RenderedHierarchyScopeProvider:
 
         todo = [page for page in pages if asked.get(page.index) is not None]
         with ThreadPoolExecutor(max_workers=min(self._workers, max(1, len(todo)))) as pool:
-            return dict(pool.map(read, todo))
+            return dict(pool.map(read, todo)), reused
 
-    def _join(self, joining: Joining, request: PageJoinRequest) -> dict[str, Answer]:
-        """One page break: `JOIN_READINGS` readings, a third where they differ, the vote."""
+    def _join(self, joining: Joining, request: PageJoinRequest, key: str,
+              names: Sequence[str], document: str) -> dict[str, Answer]:
+        """One page break: `JOIN_READINGS` readings, a third where they differ, the vote --
+        or the vote kept under `key`, while every place it names is still offered."""
+        failed = False
+
         def once() -> tuple[JoinPlacement, ...]:
+            nonlocal failed
             try:
                 return self._vision.join_page(request=request)
             except RuntimeError as error:
                 _log.warning("page %d: no usable join -- %s", request.page_index, error)
+                failed = True
                 return ()
 
-        readings = [once() for _ in range(JOIN_READINGS)]
-        if joining.disagree(request, readings):
-            readings.append(once())
+        def asked() -> dict[str, Answer]:
+            readings = [once() for _ in range(JOIN_READINGS)]
+            if joining.disagree(request, readings):
+                readings.append(once())
+            return joining.vote(request, readings)
+
+        voted, _ = remembered(
+            self._kept, key, names, asked, load=lambda said: _offered(said, request),
+            dump=lambda found: None if failed else {u: list(a) for u, a in found.items()},
+            document=document)
         self._progress.step("outline")
-        return joining.vote(request, readings)
+        return voted
 
     def _derive_apart(
         self,
@@ -341,6 +409,8 @@ class RenderedHierarchyScopeProvider:
         on_page: Callable[[int, tuple[HierarchyDecision, ...] | None], None] | None,
     ) -> HierarchyDerivation:
         """Pages that stand alone, read `workers` at a time and each heard as it lands."""
+        reused: set[int] = set()
+        tried: set[int] = set()
 
         def read(page: RenderedPage) -> tuple[int, tuple[HierarchyDecision, ...] | None]:
             asked = self._asked(extracted, page, home, nodes, held)
@@ -350,14 +420,21 @@ class RenderedHierarchyScopeProvider:
             result: tuple[int, tuple[HierarchyDecision, ...] | None] = (page.index, None)
             if asked != TOO_MANY:
                 scope, shown, crops = asked
+                tried.add(page.index)
                 try:
-                    answered = self._read(
-                        self._request(extracted, scope), shown.png, crops)
+                    answered, kept = remembered(
+                        self._kept, _key("outline", scope, page, crops, nodes), _names(scope),
+                        lambda: self._read(self._request(extracted, scope), shown.png, crops),
+                        load=HierarchyScopeResult.model_validate,
+                        dump=lambda found: _on_page(found, scope),
+                        document=extracted.document.content_hash)
                 except RuntimeError as error:
                     _log.warning("%s: no usable answer, left as it was -- %s",
                                  scope.scope, error)
                 else:
                     result = (page.index, answered.decisions)
+                    if kept:
+                        reused.add(page.index)
             self._progress.step("outline")
             if on_page is not None:
                 on_page(*result)
@@ -368,6 +445,8 @@ class RenderedHierarchyScopeProvider:
         return HierarchyDerivation(
             decisions=tuple(d for _, found in results for d in (found or ())),
             unread_pages=tuple(index for index, found in results if found is None),
+            pages_read=len(tried) - len(reused),
+            pages_reused=len(reused),
         )
 
     def _asked(
@@ -519,6 +598,49 @@ class RenderedHierarchyScopeProvider:
             outline_parents=carried.parents,
             outline_open=carried.open,
         )
+
+
+def _names(scope: HierarchyScopeUnits) -> tuple[str, ...]:
+    """The ids a page's reading may name, in the order its key lists them: the page's root,
+    then its units."""
+    return (scope.scope_root_id, *(unit.id for unit in scope.units))
+
+
+def _key(asked: str, scope: HierarchyScopeUnits, page: RenderedPage,
+         crops: Mapping[str, bytes] | None, nodes: Mapping[str, GraphNode]) -> str:
+    """What one page is asked with: each unit's text, kind and place, its stored crop, and the
+    page's size."""
+    return page_key(
+        [unit_entry(nodes[unit.id]) if unit.id in nodes
+         else (unit.label, unit.node_type.value, None) for unit in scope.units],
+        [crop_hash((crops or {}).get(unit.id)) for unit in scope.units],
+        (page.width, page.height), asked=asked)
+
+
+def _on_page(result: HierarchyScopeResult, scope: HierarchyScopeUnits) -> Any:
+    """A page's reading as it is kept: a parent named on another page -- a heading carried
+    in -- is the join's to decide and is not kept, so the unit stands at the root."""
+    names = set(_names(scope))
+    return HierarchyScopeResult(decisions=tuple(
+        decision.model_copy(update={"status": "root", "parent_id": None})
+        if decision.parent_id is not None and decision.parent_id not in names else decision
+        for decision in result.decisions)).model_dump(mode="json")
+
+
+def _offered(said: Any, request: PageJoinRequest) -> dict[str, Answer]:
+    """A kept page break's answer, when it answers every top this break asks about and each
+    names a place still offered or an earlier top; ValueError otherwise."""
+    tops = [top.unit_id for top in request.tops]
+    places = {place.unit_id for place in request.places}
+    if not isinstance(said, dict) or set(said) != set(tops):
+        raise ValueError("a kept join does not answer this page break")
+    answers: dict[str, Answer] = {}
+    for u, (how, at) in said.items():
+        if how not in ("under", "beside") or not (
+                at in places or at in tops[:tops.index(u)]):
+            raise ValueError("a kept join names a place no longer offered")
+        answers[u] = (how, at)
+    return answers
 
 
 _Said = frozenset[tuple[str, str, str | None]]

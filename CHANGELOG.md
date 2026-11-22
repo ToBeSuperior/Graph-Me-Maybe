@@ -5,6 +5,37 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-22
+
+### Added
+
+- **Manage › Automatic builds**: choose folders this workspace was built from, or mail accounts,
+  to be kept up to date by themselves -- manual (counts changes, **Build now**), when they change
+  (after five quiet minutes) or daily at a set time. Only chosen targets are looked at, by file
+  names, sizes and dates; a file gone from its folder is listed as missing, with a delete button,
+  and stays in the graph until deleted.
+
+### Changed
+
+- An edited document reads again only the pages that changed; the others reuse what was read,
+  and a passage whose text is unchanged keeps its embedding. The build result says how many
+  pages were read again. Changing the model or provider reads every page again.
+- A mailbox connected from now on is read when asked; mailboxes connected before keep reading by
+  themselves.
+
+### Added
+
+- **Manage › Automatic builds** lists the folders you built (on this computer or in a cloud
+  drive) and the mail accounts you choose to build by themselves: manual (the default), as soon as they stop changing, or daily at a time
+  you set. Only what you choose there is looked at. Each shows how many files changed, which went
+  missing (they stay in the graph until you delete them there) and when it builds next; the library's
+  header and the menu bar icon say the same.
+
+### Changed
+
+- A mail account connected from now on fetches new mail only when asked, unless you set it to
+  build by itself; accounts already connected keep fetching on their own.
+
 ## [0.2.0] - 2026-11-22
 
 ### Added

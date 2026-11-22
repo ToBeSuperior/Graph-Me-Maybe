@@ -317,7 +317,9 @@ def create_app(
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         demo.start_mail_sync()
+        demo.start_watching()
         yield
+        demo.stop_watching()
         demo.stop_mail_sync()
         # uvicorn raises the signal it was stopped by again once it has shut down, so no exit
         # handler runs: the search model servers started here are stopped now.
@@ -618,6 +620,48 @@ def create_app(
         with refused():
             demo.disconnect_mail(account, workspace)
             return shown_accounts()
+
+    # Automatic builds ----------------------------------------------------------------------
+
+    @v1.get("/watch", response_model=list[api.WatchTarget])
+    def watch_targets() -> list[dict[str, Any]]:
+        """The targets chosen to build by themselves -- folders, drive folders -- and every
+        mail account, each with what changed, what went missing and when it builds next.
+        Nothing else is looked at."""
+        return demo.watcher.targets() if demo.workspaces is not None else []
+
+    @v1.get("/watch/folders", response_model=list[api.WatchFolder])
+    def watch_folders(workspace: str | None = None) -> list[dict[str, str]]:
+        """The folders a workspace (the open one) was built from: the only folders a target
+        can be."""
+        with refused():
+            return demo.watcher.folders(workspace)
+
+    @v1.put("/watch/{kind}/{target}", response_model=api.WatchTarget, dependencies=[HERE])
+    def watch_choose(kind: api.WatchKind, target: str,
+                     body: api.WatchChoice) -> dict[str, Any]:
+        """A target chosen, or its mode changed. A new folder or drive target names its
+        `path`; what it holds now is where its changes are counted from."""
+        with refused():
+            return demo.watcher.choose(kind, target, body.mode, body.at, body.path,
+                                       body.workspace)
+
+    @v1.delete("/watch/{kind}/{target}", response_model=list[api.WatchTarget],
+               dependencies=[HERE])
+    def watch_forget(kind: Literal["folder", "drive"], target: str) -> list[dict[str, Any]]:
+        """A folder target no longer chosen: never looked at again. A mail account is set to
+        `manual` instead."""
+        with refused():
+            demo.watcher.forget(kind, target)
+            return demo.watcher.targets()
+
+    @v1.post("/watch/{kind}/{target}/build", status_code=202, response_model=api.BuildState)
+    def watch_build(kind: api.WatchKind, target: str, response: Response) -> dict[str, Any]:
+        """A target built now, whatever its mode: what changed in its folder, or a mail
+        account's new mail. 409, saying why, when nothing changed, a build runs or its
+        workspace is not open."""
+        with refused():
+            return started(demo.watcher.build_now(kind, target), response)
 
     # A cloud drive's desktop client --------------------------------------------------------
 

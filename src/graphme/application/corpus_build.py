@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Protocol
 
 from graphme.application.corpus_links import LINK_RULE, DocumentIdentity, Mention, relinked
+from graphme.application.page_readings import PageReadings
 from graphme.domain.enums import NodeType
 from graphme.domain.ids import sha256_file
 from graphme.domain.models import ExtractedDocument, GraphEdge
@@ -101,6 +102,10 @@ class BuildReport:
     not every link in the space."""
     known: int = 0
     """Files passed over: their content was in the space already."""
+    pages_read: int = 0
+    """Pages of the documents read whose outline the model was asked for."""
+    pages_reused: int = 0
+    """Pages that did not change since an earlier reading, and were not asked again."""
 
 
 def build_graph(
@@ -111,11 +116,15 @@ def build_graph(
     on_step: StepListener | None = None,
     again: bool = False,
     in_turn: Callable[[Sequence[Path]], Iterable[Path]] | None = None,
+    readings: PageReadings | None = None,
 ) -> BuildReport:
     """Read every document, put them all in `space`, then join the mentions there.
 
     `on_step` hears the step and how far it is ("read", done, total), so a caller can say
     which of the three a long build is in.
+
+    `readings`, when the pages were read through them, are named by each document put, so
+    the sweep keeps them while the graph holds it.
 
     `in_turn` gives the documents in the order they are to be put, for a caller reading them
     side by side: as each is read, so a short one is not held behind a long one. Without it
@@ -131,6 +140,7 @@ def build_graph(
     documents = [path for path in documents if hashes[path] not in held]
     put: set[str] = set()
     failed: list[tuple[Path, str]] = []
+    pages_read = pages_reused = 0
     for index, path in enumerate(in_turn(documents) if in_turn else documents, start=1):
         told(BuildStep.READ, index - 1, len(documents))
         # One document that cannot be read is one document, not the folder -- whatever stopped
@@ -153,6 +163,12 @@ def build_graph(
             failed.append((path, str(error)))
             continue
         put.add(extracted.document.id)
+        if readings is not None:
+            said = extracted.document.metadata.get("read_as")
+            readings.settle(said if isinstance(said, str) else extracted.document.content_hash,
+                            extracted.document.content_hash)
+        pages_read += pages_said(extracted, "pages_read")
+        pages_reused += pages_said(extracted, "pages_reused")
         # A file edited since it was read is a new document (its content, so its id, changed):
         # what was read from it before goes, or the old values answer beside the new ones.
         replaced = space.read_from(origin_of(extracted)) - {extracted.document.id}
@@ -169,7 +185,13 @@ def build_graph(
     space.mark_linked(sorted(arrived), LINK_RULE)
     told(BuildStep.LINK, 1, 1)
     return BuildReport(processed=len(put), failed=tuple(failed), links=len(links),
-                       known=len(known))
+                       known=len(known), pages_read=pages_read, pages_reused=pages_reused)
+
+
+def pages_said(extracted: ExtractedDocument, name: str) -> int:
+    """A count the reading said on the document's record (`pages_read`, `pages_reused`)."""
+    said = extracted.document.metadata.get(name)
+    return said if isinstance(said, int) else 0
 
 
 def origin_of(extracted: ExtractedDocument) -> str:

@@ -17,6 +17,7 @@ import logging
 from collections.abc import Mapping, Sequence
 
 from graphme.application.hierarchy_decisions import apply_hierarchy_decisions
+from graphme.application.page_readings import PageReadings, read_key, remembered
 from graphme.application.page_units import (
     RenderedPageLike,
     asked_together,
@@ -65,8 +66,10 @@ def caption_visuals(
     workers: int = 1,
     progress: Progress | None = None,
     page_of: Mapping[str, int] | None = None,
+    readings: PageReadings | None = None,
 ) -> ExtractedDocument:
-    """Add a caption node for every visual the pages show."""
+    """Add a caption node for every visual the pages show; a page whose visuals did not
+    change takes what it was answered before, from `readings`."""
     under = _headings_above(extracted)
     # A figure drawn in vectors is described through the words that lead it.
     by_page = {
@@ -91,9 +94,14 @@ def caption_visuals(
         page, described, crops, part = job
         request = _request_for(extracted, page, described, part, under)
         try:
-            answer = vision.caption_visuals(
-                request=request, image=page.png, unit_images=crops
-            )
+            answer, _ = remembered(
+                readings, read_key("captions", page, described, crops),
+                [node.id for node in described],
+                lambda: vision.caption_visuals(
+                    request=request, image=page.png, unit_images=crops),
+                load=VisualCaptionResult.model_validate,
+                dump=lambda found: found.model_dump(mode="json"),
+                document=extracted.document.content_hash)
         except (RuntimeError, ValueError) as error:
             # One page without captions is one page's descriptions, not the document's.
             _log.warning("%s: no usable captions -- %s", request.scope, error)

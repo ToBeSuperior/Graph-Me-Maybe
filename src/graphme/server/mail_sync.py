@@ -15,11 +15,13 @@ import threading
 import time
 import traceback
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from graphme.server.jobs import BUILDING, Busy, CorpusBuild
 from graphme.server.mail_accounts import MailAccounts
+from graphme.server.watch import MAIL_BEFORE, daily_due
 
 if TYPE_CHECKING:
     from graphme.server.state import Demo
@@ -40,12 +42,14 @@ class MailSync:
         self, accounts: MailAccounts, demo: Demo, *, every: float = MAIL_CHECK_SECONDS,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[threading.Event, float], None] = _wait,
+        now: Callable[[], datetime] = datetime.now,
     ) -> None:
         self._accounts = accounts
         self._demo = demo
         self._every = every
         self._clock = clock
         self._sleep = sleep
+        self._now = now
         self._stop = threading.Event()
         self._failures: dict[str, int] = {}
         self._retry_at: dict[str, float] = {}
@@ -60,14 +64,17 @@ class MailSync:
             self._sleep(stop, self._every)
 
     def tick(self) -> None:
-        """One pass over the accounts. Not while any build runs: skipped, not queued."""
+        """One pass over the accounts set to fetch by themselves (a `manual` one is fetched
+        when asked, a `daily` one once its time has come since it was last checked). Not
+        while any build runs: skipped, not queued."""
         with self._passing:
             for item in self._accounts.listed():
                 if self._building() or self._stop.is_set():
                     return
                 account = item["id"]
                 if (item["state"] in ASKED or item.get("count") is None
-                        or self._clock() < self._retry_at.get(account, 0)):
+                        or self._clock() < self._retry_at.get(account, 0)
+                        or not self._due(item)):
                     continue
                 try:
                     result = self._accounts.sync(account, self._stop)  # keeps its failure
@@ -81,6 +88,14 @@ class MailSync:
                     self._accounts.set_state(account, "current")
                     return
                 self._take(account)
+
+    def _due(self, item: dict[str, object]) -> bool:
+        mode = item.get("mode") or MAIL_BEFORE
+        if mode == "daily":
+            at, checked = item.get("at"), item.get("last_checked")
+            return daily_due(str(at) if at else None, str(checked) if checked else None,
+                             self._now())
+        return mode == "on_change"
 
     def opened(self, workspace: str) -> None:
         """`workspace` was switched to: what it was holding is taken, behind -- opening embeds

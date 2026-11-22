@@ -1,6 +1,6 @@
 // Managing the graph: what is in it, how its documents are tied, getting it out, and emptying
 // it -- each a page of its own under one side menu, the dangerous one last and apart.
-import { Cloud, Download, Files, KeyRound, Mail, Network, TriangleAlert } from 'lucide-react';
+import { Cloud, Download, Files, KeyRound, Mail, Network, TimerReset, TriangleAlert } from 'lucide-react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { DRIVE_PAGES } from './DrivesLayout';
 import { cn } from '../../lib/format';
@@ -35,6 +35,7 @@ export function ManageLayout() {
           )}
           <NavLink to="/manage/mail" className={item}><Mail className="size-4" />{t('mailTitle')}</NavLink>
           <NavLink to="/manage/settings" className={item}><KeyRound className="size-4" />{t('keysTitle')}</NavLink>
+          <NavLink to="/manage/watch" className={item}><TimerReset className="size-4" />{t('watchTitle')}</NavLink>
           <div className="hidden flex-1 md:block" />
           <NavLink to="/manage/danger" className={({ isActive }) => cn(item({ isActive }), 'md:mt-6', !isActive && 'text-danger-fg hover:text-danger-fg')}>
             <TriangleAlert className="size-4" />{t('dangerZone')}

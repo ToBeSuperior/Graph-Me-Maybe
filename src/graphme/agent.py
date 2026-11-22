@@ -51,6 +51,8 @@ class AgentState:
     """The workspace open in the app, by name."""
     mcp_enabled: bool
     login: bool
+    watching: str | None = None
+    """What the chosen targets wait to build (`watching_line`); None when nothing is watched."""
 
 
 @dataclass(frozen=True)
@@ -66,10 +68,27 @@ def agent_menu(state: AgentState) -> list[MenuEntry]:
     said = " · ".join(["Running", *([state.workspace] if state.workspace else []),
                        "MCP on" if state.mcp_enabled else "MCP off"])
     return [MenuEntry(said, None),
+            *([MenuEntry(state.watching, None)] if state.watching else []),
             MenuEntry("Open the app", "open"),
             MenuEntry("MCP on", "mcp", state.mcp_enabled),
             MenuEntry("Start at login", "login", state.login),
             MenuEntry("Quit completely", "quit")]
+
+
+def watching_line(targets: list[dict[str, Any]]) -> str | None:
+    """"Watching · 3 changed · next 02:00" over `GET /v1/watch`: every chosen folder and every
+    mail account not left manual, and how many of them cannot be read. None when there is
+    none."""
+    watched = [t for t in targets if t.get("kind") != "mail" or t.get("mode") != "manual"]
+    if not watched:
+        return None
+    said = ["Watching", f"{sum(int(t.get('changed') or 0) for t in watched)} changed"]
+    if unreadable := sum(1 for t in watched if t.get("error")):
+        said.append(f"{unreadable} cannot be read")
+    due = sorted(str(t["next_build"]) for t in watched if t.get("next_build"))
+    if due:
+        said.append(f"next {due[0][11:16]}")
+    return " · ".join(said)
 
 
 def _python() -> str:
@@ -300,8 +319,12 @@ class _Icon:
         except (httpx.HTTPError, ValueError):
             listed = {}
         names = {i["id"]: i["name"] for i in listed.get("items", [])}
+        try:
+            watching = watching_line(self.client.get("/v1/watch", timeout=5.0).json())
+        except (httpx.HTTPError, ValueError, AttributeError, TypeError):
+            watching = None
         return AgentState(names.get(listed.get("active")), listed.get("mcp_enabled", True),
-                          login_item.enabled())
+                          login_item.enabled(), watching)
 
     def act(self, action: str) -> None:
         try:

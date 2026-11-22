@@ -1054,3 +1054,47 @@ test('mail waiting for its closed workspace is said on the account', async ({ pa
   await page.goto('/manage/mail');
   await expect(page.getByText('2 new messages are read in; they go into the graph when the lee@invented.test workspace is opened.')).toBeVisible();
 });
+
+test('a folder chosen to build daily is listed with its time, and the library says what waits', async ({ page }) => {
+  await english(page);
+  const fake = await fakeApi(page);
+  fake.watch.push({ kind: 'mail', id: 'a1', workspace: 'm1', mode: 'manual', at: null, path: null, name: 'kim@invented.test',
+    changed: 4, missing: [], next_build: null, building: false });
+  fake.watchFolders.push({ path: '/Users/me/Invented minutes', kind: 'folder' }, { path: '/Users/me/Invented reports', kind: 'folder' });
+  await page.goto('/manage/watch');
+  await page.getByLabel('A folder built here').selectOption('/Users/me/Invented reports');
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await page.getByLabel('When: Invented reports').selectOption('daily');
+  await expect(page.getByLabel('Build time: Invented reports')).toHaveValue('02:00');
+  const row = page.getByTestId(`watch-${fake.watch[1].id as string}`);
+  await expect(row.getByText('02:00')).toBeVisible();
+  fake.watch[1].changed = 3;
+  fake.watch[1].missing = [{ path: '/Users/me/Invented reports/old plan.docx', document_id: 'proc' }];
+  await page.goto('/manage');
+  // The mail account left manual is not watched: its mail held is not counted.
+  await expect(page.getByTestId('watch-badge')).toHaveText('Watching · 3 changed · next 02:00');
+  await page.getByTestId('watch-badge').click();
+  await expect(page.getByText('1 missing')).toBeVisible();
+  await page.getByRole('button', { name: 'Build now: kim@invented.test' }).click();
+  await expect.poll(() => fake.watchBuilt).toEqual(['a1']);
+});
+
+test('a file gone from a watched folder is deleted from the graph only once confirmed', async ({ page }) => {
+  await english(page);
+  const fake = await fakeApi(page);
+  fake.watch.push({ kind: 'folder', id: 'f1', workspace: 'default', mode: 'manual', at: null, path: '/Users/me/Invented reports',
+    name: 'Invented reports', changed: 0, next_build: null, building: false, error: 'the folder is not there',
+    missing: [{ path: '/Users/me/Invented reports/old plan.docx', document_id: 'proc' }] });
+  await page.goto('/manage');
+  await expect(page.getByTestId('watch-badge')).toHaveText('Watching · 0 changed · 1 cannot be read');
+  await page.goto('/manage/watch');
+  await expect(page.getByText('Its folder cannot be read, so nothing is built: the folder is not there')).toBeVisible();
+  await page.getByText('1 missing').click();
+  await page.getByTestId('watch-f1').getByRole('button', { name: 'Delete document' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('old plan.docx')).toBeVisible();
+  expect(fake.deletedDocs).toEqual([]);  // asked first
+  await dialog.getByRole('button', { name: 'Delete document' }).click();
+  await expect.poll(() => fake.deletedDocs).toEqual(['proc']);
+  await expect(page.getByText('1 missing')).toHaveCount(0);
+});

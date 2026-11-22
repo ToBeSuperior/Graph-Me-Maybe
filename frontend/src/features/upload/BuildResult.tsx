@@ -25,6 +25,7 @@ export function BuildResult() {
   if (!ended(build)) return null;
   const counts = [t('resultPut', build.documents), build.known > 0 && t('resultKnown', build.known),
     t('resultFailed', build.failed.length), build.skipped > 0 && t('resultSkipped', build.skipped),
+    build.pages_reused > 0 && t('resultPagesRead', build.pages_read, build.pages_read + build.pages_reused),
     build.elapsed != null && t('took', build.elapsed)].filter(Boolean).join(' · ');
   return (
     <Dialog open={open} onOpenChange={setOpen}>

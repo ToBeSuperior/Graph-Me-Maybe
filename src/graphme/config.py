@@ -309,6 +309,12 @@ class Settings(BaseModel):
             return self.local_neo4j / ".graphme" / "assets"
         return self.data_dir / "assets"
 
+    @property
+    def readings_dir(self) -> Path:
+        """Where what the model said about each page is kept, and the passages' vectors: beside
+        the crops (`asset_dir`), so a workspace's go with its folder."""
+        return self.asset_dir.parent / "readings"
+
 
 def read_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():

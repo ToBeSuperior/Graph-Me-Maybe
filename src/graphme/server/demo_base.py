@@ -44,6 +44,7 @@ from graphme.server.mail_accounts import MailAccounts
 from graphme.server.mail_sync import MailSync
 from graphme.server.search_models import SearchModels
 from graphme.server.threads import ThreadStore
+from graphme.server.watch import Watcher
 from graphme.server.workspaces import Workspaces
 
 if TYPE_CHECKING:
@@ -77,6 +78,9 @@ class DemoBase:
         self._mail_sync: MailSync | None = None
         self._mail_stop = threading.Event()
         self._mail_thread: threading.Thread | None = None
+        self._watcher: Watcher | None = None
+        self._watch_stop = threading.Event()
+        self._watch_thread: threading.Thread | None = None
         self.graph = state.GraphMe(settings)
         """The graph space and its questions: one Neo4j connection for every request. Opened
         under `opening_space`, the one thing about it not safe from two threads at once, and so is
@@ -221,6 +225,27 @@ class DemoBase:
     def stop_mail_sync(self) -> None:
         self._mail_stop.set()
         self._mail_thread = None
+
+    @property
+    def watcher(self) -> Watcher:
+        """The chosen targets' automatic builds; Busy for a server without workspaces."""
+        self.workspace_registry()
+        if self._watcher is None:
+            self._watcher = Watcher(cast("Demo", self))
+        return self._watcher
+
+    def start_watching(self) -> None:
+        """The chosen targets looked at, once per server; not for one without workspaces."""
+        if self.workspaces is None or self._watch_thread is not None:
+            return
+        self._watch_stop = threading.Event()
+        self._watch_thread = threading.Thread(
+            target=self.watcher.run, args=(self._watch_stop,), daemon=True)
+        self._watch_thread.start()
+
+    def stop_watching(self) -> None:
+        self._watch_stop.set()
+        self._watch_thread = None
 
     def not_in_mail_workspace(self) -> None:
         """Busy when the workspace open reads its mailbox only: no folder, drive or upload, and no

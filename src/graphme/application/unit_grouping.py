@@ -12,8 +12,12 @@ from __future__ import annotations
 import logging
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
+from io import BytesIO
 from typing import Any
 
+from PIL import Image
+
+from graphme.application.page_readings import PageReadings, page_key, remembered, unit_entry
 from graphme.application.page_units import asked_together, held_by_a_visual
 from graphme.application.progress import Progress
 from graphme.application.reading_order import (
@@ -73,6 +77,7 @@ def group_document_units(
     page_of: Mapping[str, int] | None = None,
     progress: Progress | None = None,
     workers: int = 1,
+    readings: PageReadings | None = None,
 ) -> ExtractedDocument:
     """Ask each page, a run of pieces at a time, which pieces are one unit, and join them.
 
@@ -85,6 +90,9 @@ def group_document_units(
 
     Each ask names its groups from scratch, so a name is only the same group when it was
     carried in as settled; everything else is kept apart by the ask it came from.
+
+    An ask is kept in `readings` by what it holds (`_run_key`): a run whose pieces did not
+    change is not asked again.
     """
     units = groupable_units(extracted, page_of)
     if not units:
@@ -136,7 +144,13 @@ def group_document_units(
     def ask(job: tuple[int, UnitGroupingRequest, list[bytes]]) -> UnitGroupingResult | None:
         _, request, images = job
         try:
-            answer: UnitGroupingResult = vision.group_page_units(request=request, images=images)
+            answer: UnitGroupingResult
+            answer, _ = remembered(
+                readings, _run_key(request, images, nodes), [u.id for u in request.units],
+                lambda: vision.group_page_units(request=request, images=images),
+                load=UnitGroupingResult.model_validate,
+                dump=lambda found: found.model_dump(mode="json"),
+                document=extracted.document.content_hash)
             return answer
         except (RuntimeError, ValueError) as error:
             # One page nobody could read is one page, not the document. What the answer
@@ -150,6 +164,7 @@ def group_document_units(
             )
             return None
 
+    nodes = {node.id: node for node in extracted.nodes}
     answers = asked_together(
         jobs, ask, workers=workers, progress=progress, stage="paragraphs"
     )
@@ -180,6 +195,26 @@ def group_document_units(
         if unit.id in named:
             in_order.setdefault(named[unit.id], []).append(unit.id)
     return _joined_groups(extracted, list(in_order.values()), join)
+
+
+def _run_key(request: UnitGroupingRequest, images: Sequence[bytes],
+             nodes: Mapping[str, GraphNode]) -> str:
+    """What one run is asked with: each piece's text, kind and place -- its page counted from
+    the run's first, and whether it is carried in settled -- and the size of each page shown."""
+    first = min(unit.page_index for unit in request.units)
+    units = [(unit.text, unit.node_type.value,
+              [unit.page_index - first, unit.id in request.settled,
+               unit_entry(nodes[unit.id])[2] if unit.id in nodes else None])
+             for unit in request.units]
+    return page_key(units, (), [_size(image) for image in images], asked="paragraphs")
+
+
+def _size(image: bytes) -> tuple[int, int] | None:
+    try:
+        with Image.open(BytesIO(image)) as opened:
+            return opened.size
+    except (OSError, ValueError):
+        return None
 
 
 def _asks(

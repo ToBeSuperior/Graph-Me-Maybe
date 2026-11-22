@@ -8,10 +8,12 @@ import threading
 import time
 import traceback
 
+from graphme.adapters.embedding import sweep_vectors
 from graphme.adapters.storage.assets import LocalAssetStore
-from graphme.adapters.storage.graph_rag import GraphRag
+from graphme.adapters.storage.graph_rag import PASSAGE_CHARS, GraphRag
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
 from graphme.adapters.storage.workspace_scope import WorkspaceScope
+from graphme.application.page_readings import PageReadings
 from graphme.application.visual_crops import CROP_ASSET_KEY
 from graphme.server import state
 from graphme.server.demo_base import DemoBase
@@ -104,7 +106,8 @@ class SpaceJobs(DemoBase):
     def sweep_assets(self) -> tuple[int, int]:
         """The crops and pictures nothing names any more deleted from the open workspace's
         folder -- a document deleted or read again, the graph reset, a reading long gone:
-        how many, and how many bytes. Kept: what the graph's nodes name, what a reading this
+        how many, and how many bytes. The page readings no document in the graph names go
+        with them. Kept: what the graph's nodes name, what a reading this
         run still holds (one outside the graph is put in again at no cost), and whatever was
         written in the last `SWEEP_GRACE` seconds. Not while a build or a reading runs."""
         with self.building:
@@ -123,6 +126,16 @@ class SpaceJobs(DemoBase):
                 keep |= set(session.kept.crops.values())
         removed, size = LocalAssetStore(self.settings.asset_dir).sweep(
             keep, before=started - state.SWEEP_GRACE)
+        # What each page was answered, kept for the documents the graph holds: an edited one
+        # is read again only where it changed.
+        readings = PageReadings(self.settings.readings_dir)
+        readings.sweep(space.contents(sorted(readings.documents())),
+                       before=started - state.SWEEP_GRACE)
+        # And the passages' vectors kept by their text: those of the passages the graph holds.
+        sweep_vectors(self.settings.readings_dir / "passages",
+                      model=self.settings.embedding_model,
+                      texts=(text[:PASSAGE_CHARS] for text in space.passage_texts()),
+                      before=started - state.SWEEP_GRACE)
         for folder in [f for f in self.root.iterdir() if f.is_dir()]:
             if folder.name not in self.sessions:  # a reading's folder, left empty
                 with contextlib.suppress(OSError):

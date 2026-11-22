@@ -13,7 +13,7 @@ import neo4j
 
 from graphme import model_endpoint
 from graphme.adapters.chat import Endpoint
-from graphme.adapters.embedding import OpenAIBatchEmbeddings
+from graphme.adapters.embedding import KeptVectors, OpenAIBatchEmbeddings
 from graphme.adapters.export.neo4j_admin import LocalNeo4jAdmin
 from graphme.adapters.extractors.docx import DocxExtractor
 from graphme.adapters.extractors.excel import ExcelExtractor
@@ -39,9 +39,11 @@ from graphme.application.document_graph import DocumentGraphBuilder
 from graphme.application.embedded_documents import unpack_embedded
 from graphme.application.ingest import documents_at, format_of
 from graphme.application.page_enrichment import RenderedPageEnricher
+from graphme.application.page_readings import PageReadings
 from graphme.application.progress import Progress
 from graphme.config import Settings, app_home, load_settings
 from graphme.domain.enums import DocumentFormat
+from graphme.domain.ids import canonical_json
 from graphme.domain.models import ExtractedDocument
 from graphme.ports.vision import VisionProvider
 
@@ -168,12 +170,15 @@ def graph_parts(
     assets: Any,
     workers: int = 1,
     progress: Progress | None = None,
+    readings: PageReadings | None = None,
 ) -> dict[str, Any]:
     """What turning a document into its graph needs, wired one way for every caller.
 
     The outline is read off the page, and with it the figures, the paragraphs before the
     outline and, after it, what visuals show and which documents the pages name.
-    `workers` is how many pages are asked at once; `progress` counts every question asked.
+    `workers` is how many pages are asked at once; `progress` counts every question asked;
+    `readings` keeps what each page was answered, so a page that did not change is not asked
+    again.
     """
     return {
         "extractors": {
@@ -194,17 +199,19 @@ def graph_parts(
             readings=settings.hierarchy_readings,
             workers=workers,
             progress=progress,
+            kept=readings,
         ),
         # Between the figures and the outline: what a figure swallowed is not a paragraph,
         # and an outline drawn over half a paragraph places half a paragraph.
         "unit_grouper": RenderedUnitGrouper(
-            renderer=renderer, vision=vision, workers=workers, progress=progress),
+            renderer=renderer, vision=vision, workers=workers, progress=progress,
+            readings=readings),
         # Captions and named documents are read off the same rendering the outline is. A
         # named document stands as an empty node; which indexed document it is is said across
         # the corpus (`application/corpus_links.py`), whatever order they arrive in.
         "enricher": RenderedPageEnricher(
             renderer=renderer, vision=vision, asset_store=assets,
-            workers=workers, progress=progress,
+            workers=workers, progress=progress, readings=readings,
         ),
     }
 
@@ -261,7 +268,9 @@ def create_graph_rag(
 ) -> GraphRag:
     """Questions over the graph space, on its own connection: the embedder's vectors to find
     passages by, and the same model endpoint every other call goes to for the answer."""
-    embedder = create_embedder(settings)
+    embedder = KeptVectors(create_embedder(settings), settings.readings_dir / "passages",
+                           model=settings.embedding_model,
+                           dimensions=settings.embedding_dimensions)
     return GraphRag(
         space,
         embedder=embedder,
@@ -279,6 +288,14 @@ def create_graph_rag(
     )
 
 
+def page_readings(settings: Settings) -> PageReadings:
+    """What each page was answered, kept in the workspace's folder for this provider, model and
+    number of readings a page takes: another of any reads every page afresh."""
+    # The model named, not the endpoint: no key is asked for before the first call needs it.
+    return PageReadings(settings.readings_dir, salt=canonical_json(
+        [settings.provider, settings.model, settings.hierarchy_readings]))
+
+
 def corpus_graph_builder(settings: Settings, client: httpx.Client,
                          renderer: PageRenderer | None = None) -> DocumentGraphBuilder:
     """The graph builder every document of a corpus is read with: rendered, its outline and
@@ -288,6 +305,7 @@ def corpus_graph_builder(settings: Settings, client: httpx.Client,
         renderer=renderer or create_page_renderer(settings),
         vision=create_vision(settings, client),
         assets=LocalAssetStore(settings.asset_dir),
+        readings=page_readings(settings),
     )
 
 
@@ -320,6 +338,7 @@ def build_corpus_graph(
             space=space,
             on_step=on_step,
             again=again,
+            readings=page_readings(settings),
         )
     finally:
         if own:
