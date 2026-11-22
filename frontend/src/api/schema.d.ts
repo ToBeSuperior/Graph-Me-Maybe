@@ -637,6 +637,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/documents/{document_id}/ungroup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ungroup
+         * @description The document taken out of the family it was grouped in, as its own row and its own
+         *     search result from now on; a later build never groups it with them again.
+         */
+        post: operations["ungroup_v1_documents__document_id__ungroup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/documents/{document_id}": {
         parameters: {
             query?: never;
@@ -1737,6 +1758,8 @@ export interface components {
             modified?: number | null;
             /** Web Url */
             web_url?: string | null;
+            /** Versions */
+            versions?: components["schemas"]["VersionOf"][];
         };
         /** LinkedDocument */
         LinkedDocument: {
@@ -2098,6 +2121,8 @@ export interface components {
             /** Workspace */
             workspace?: string | null;
             promoted_from?: components["schemas"]["LinkedFrom"] | null;
+            /** Versions */
+            versions?: components["schemas"]["VersionOf"][];
         };
         /** Thread */
         Thread: {
@@ -2173,6 +2198,13 @@ export interface components {
             /** Exclude */
             exclude?: string[] | null;
         };
+        /** Ungrouped */
+        Ungrouped: {
+            /** Ungrouped */
+            ungrouped: string;
+            /** Pairs */
+            pairs: number;
+        };
         /** Uploaded */
         Uploaded: {
             /** Id */
@@ -2192,6 +2224,21 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * VersionOf
+         * @description Another document of a shown one's family -- a copy or a version of it, told by what it
+         *     says -- folded under it.
+         */
+        VersionOf: {
+            /** Document Id */
+            document_id: string;
+            /** File */
+            file: string;
+            /** Modified */
+            modified?: number | null;
+            /** Latest */
+            latest: boolean;
         };
         /** WatchChoice */
         WatchChoice: {
@@ -3327,6 +3374,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Library"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ungroup_v1_documents__document_id__ungroup_post: {
+        parameters: {
+            query?: {
+                workspace?: string | null;
+            };
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ungrouped"];
                 };
             };
             /** @description Validation Error */

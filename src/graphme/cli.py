@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any, Protocol
@@ -16,7 +17,7 @@ from graphme.application.corpus_build import (
     StepListener,
 )
 from graphme.application.embedded_documents import shown_name
-from graphme.config import app_home, load_settings
+from graphme.config import app_home, load_settings, read_dotenv, settings_folder
 from graphme.runtime import create_browser_renderer
 from graphme.xlsx_bundle import XlsxBundleOrchestrator
 
@@ -89,15 +90,64 @@ def create_app(
     def main() -> None:
         pass
 
-    @app.command("mcp", short_help="An MCP server on stdio, over the running app.")
-    def mcp_command() -> None:
+    mcp_app = typer.Typer(invoke_without_command=True, help="An MCP server on stdio.")
+    app.add_typer(mcp_app, name="mcp")
+
+    @mcp_app.callback(short_help="An MCP server on stdio, over the running app.")
+    def mcp_command(context: typer.Context) -> None:
         """For an MCP client to start: `claude mcp add graph-me-maybe -- graphme mcp`. It reaches
         the app running in the background, starting it if none runs, and reads only the
-        workspaces switched on for MCP in the app."""
+        workspaces switched on for MCP in the app. `graphme mcp install` adds it to a client."""
+        if context.invoked_subcommand is not None:
+            return
         _needs("app", "mcp")
         from graphme.mcp_server import run
 
         run(app_home())
+
+    @mcp_app.command("install", short_help="Add Graph-Me-Maybe to an MCP client's config.")
+    def mcp_install_command(
+        client: Annotated[str, typer.Option(help="claude-code, claude-desktop or cursor")],
+    ) -> None:
+        """The `graphme mcp` entry written into the client's config file, after the file is
+        copied to `<name>.bak`; run twice it leaves one entry."""
+        from graphme import mcp_install
+
+        if client not in mcp_install.CLIENTS:
+            raise typer.BadParameter(
+                f"one of {', '.join(mcp_install.CLIENTS)}", param_hint="--client")
+        try:
+            path = mcp_install.install(client)
+        except (mcp_install.ConfigError, OSError) as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(1) from error
+        entry = mcp_install.registered_entry(path) or {}
+        typer.echo(f"graph-me-maybe is in {path}; restart {client} to load it")
+        typer.echo(f"entry: {entry.get('command')} {' '.join(entry.get('args', []))}")
+
+    @app.command("doctor", short_help="What is ready and what is not, each with its fix.")
+    def doctor_command(
+        json_output: bool = typer.Option(False, "--json", help="one JSON list, for an agent"),
+    ) -> None:
+        """Checks the app, Neo4j, the search model, the model key, the viewer, a browser and each
+        MCP client, and changes nothing. Exits 1 when any check fails."""
+        from dataclasses import asdict
+
+        from graphme.doctor import checks
+
+        # The home the settings name -- a checkout's `.env` may set GRAPHME_HOME -- as they read it.
+        env = {**read_dotenv(settings_folder() / ".env"), **os.environ}
+        found = checks(app_home(env), load_settings())
+        if json_output:
+            typer.echo(json.dumps([asdict(c) for c in found], ensure_ascii=False, indent=2))
+        else:
+            for c in found:
+                typer.echo(f"ok   {c.name}" if c.ok else
+                           f"FAIL {c.name}: {c.problem}\n     fix: {c.fix}")
+                if c.note:
+                    typer.echo(f"     note: {c.note}")
+        if not all(c.ok for c in found):
+            raise typer.Exit(1)
 
     @app.command("export-corpus",
                  short_help="The graph space for Neo4j: bundle, .dump, JSON or Cypher.")

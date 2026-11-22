@@ -16,6 +16,16 @@ class _Model(BaseModel):
 # Documents --------------------------------------------------------------------------------
 
 
+class VersionOf(_Model):
+    """Another document of a shown one's family -- a copy or a version of it, told by what it
+    says -- folded under it."""
+    document_id: str
+    file: str
+    modified: float | None = None
+    latest: bool
+    """Whether it is the family's last changed file."""
+
+
 class LibraryItem(_Model):
     name: str
     format: str
@@ -30,6 +40,8 @@ class LibraryItem(_Model):
     """When its file was last changed, in seconds."""
     web_url: str | None = None
     """Where its original opens in a browser: a cloud drive's page; none for a local file."""
+    versions: list[VersionOf] = Field(default_factory=list)
+    """Its family's other documents: a family is one row, its latest file's."""
 
 
 class Library(_Model):
@@ -226,6 +238,12 @@ class Deleted(_Model):
     deleted: str
 
 
+class Ungrouped(_Model):
+    ungrouped: str
+    pairs: int
+    """How many of its pairs with its family were split."""
+
+
 class Opened(_Model):
     opened: str
     """The file's name, as it was opened."""
@@ -337,6 +355,9 @@ class Source(_Model):
     promoted_from: LinkedFrom | None = None
     """Set when this is a linked document ranked among the found ones by its own passages:
     where it was reached from, and its hop."""
+    versions: list[VersionOf] = Field(default_factory=list)
+    """Its family's other documents, folded under it: it ranked best of them, and the answer
+    read it alone."""
 
 
 class Found(_Model):

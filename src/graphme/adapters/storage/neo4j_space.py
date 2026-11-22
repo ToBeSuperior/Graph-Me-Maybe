@@ -34,6 +34,7 @@ from graphme.adapters.export.neo4j_import import (
     RelationshipRow,
 )
 from graphme.adapters.storage.workspace_scope import DEFAULT_SCOPE, WorkspaceScope
+from graphme.application import versions
 from graphme.application.corpus_build import SpaceUnavailable, origin_of
 from graphme.application.corpus_links import (
     CARRIED_NAME,
@@ -43,6 +44,7 @@ from graphme.application.corpus_links import (
 )
 from graphme.application.file_titles import stated_titles
 from graphme.application.graph_chunks import Chunk, GraphUnit
+from graphme.application.versions import VERSIONS_RULE, Member, Signed
 from graphme.application.visual_crops import CROP_ASSET_KEY
 from graphme.config import Settings
 from graphme.domain.enums import EdgeType
@@ -173,9 +175,18 @@ class Neo4jGraphSpace:
         stated = list(stated_titles(source, source.suffix))
 
         def write(tx: ManagedTransaction) -> None:
+            # A pair its owner ungrouped stays ungrouped when the document is read again.
+            split = [record["other"] for record in tx.run(self.scope.cypher(
+                "MATCH (:Document {id: $document})-[r:SIMILAR_VERSION]-(o:Document) "
+                "WHERE r.split_by_user RETURN o.id AS other"), document=extracted.document.id)]
             _forget(tx, self.scope, [extracted.document.id])
             _write_nodes(tx, self.scope, records["nodes"])
             _write_relationships(tx, self.scope, records["relationships"])
+            _run(tx, self.scope,
+                 "UNWIND $others AS other MATCH (d:Document {id: $document}), "
+                 "(o:Document {id: other}) "
+                 "MERGE (d)-[:SIMILAR_VERSION {split_by_user: true}]->(o)",
+                 document=extracted.document.id, others=split)
             _run(
                 tx, self.scope,
                 "MATCH (d:Document {id: $document}) "
@@ -420,7 +431,9 @@ class Neo4jGraphSpace:
         ]
 
     def put_chunks(self, document_id: str, chunks: Sequence[Chunk], *, rule: str) -> None:
-        """A document's passages, in place of whatever it was cut into before."""
+        """A document's passages, in place of whatever it was cut into before, and their
+        hashes (`versions.passage_hashes`) and signature on the document."""
+        keys = versions.passage_hashes(chunk.text for chunk in chunks)
 
         def write(tx: ManagedTransaction) -> None:
             _run(
@@ -448,6 +461,14 @@ class Neo4jGraphSpace:
                     for index, chunk in enumerate(chunks)
                 ],
             )
+            # What its versions are found by, kept with the passages they come from; its
+            # grouping goes with the passages it was made from.
+            _run(tx, self.scope,
+                 "MATCH (d:Document {id: $document}) "
+                 "SET d.version_keys = $keys, d.version_minhash = $signature, "
+                 "d.version_keys_rule = $keys_rule REMOVE d.versions_rule",
+                 document=document_id, keys=keys, signature=versions.signature(keys),
+                 keys_rule=versions.KEYS_RULE)
 
         with self.driver.session() as session:
             session.execute_write(write)
@@ -487,6 +508,86 @@ class Neo4jGraphSpace:
             """
         )
         return [dict(record) for record in records]
+
+    def group_versions(self) -> int:
+        """Copies and versions joined by `SIMILAR_VERSION` for each document cut since it was
+        last grouped by VERSIONS_RULE (`put_chunks` takes the stamp away); how many pairs.
+        Every cut document's signature is read, and the passage hashes of the pairs its bands
+        pick, never a passage's text -- a build costs what it changed. Only the pairs of those
+        documents are written again; a pair its owner split (`ungroup`) keeps its edge and its
+        mark. Nothing is asked of a model."""
+        records, _, _ = self._query(
+            f"""
+            MATCH (d:Document)
+            RETURN d.id AS id, d.content_hash AS hash, d.version_minhash AS signature,
+                   d.version_keys IS NOT NULL
+                     AND coalesce(d.version_keys_rule, '') = $keys_rule AS keyed,
+                   coalesce(d.versions_rule, '') = $rule AS stamped,
+                   EXISTS {{ MATCH (:{CHUNK_LABEL} {{document_id: d.id}}) }} AS cut
+            """, rule=VERSIONS_RULE, keys_rule=versions.KEYS_RULE)
+        cut = {r["id"]: r for r in records if r["cut"]}
+        fresh = sorted(i for i, r in cut.items() if not r["stamped"])
+        if not fresh:
+            return 0
+        signatures = {i: list(r["signature"] or []) for i, r in cut.items()}
+        # Passages cut before their hashes were kept on the document, or hashed another way:
+        # hashed once, from text.
+        unsigned = [i for i in fresh if not cut[i]["keyed"]
+                    or len(signatures[i]) not in (0, versions.PERMUTATIONS)]
+        if unsigned:
+            texts, _, _ = self._query(
+                f"MATCH (d:Document) WHERE d.id IN $ids "
+                f"OPTIONAL MATCH (c:{CHUNK_LABEL} {{document_id: d.id}}) "
+                "RETURN d.id AS id, collect(c.text) AS texts", ids=unsigned)
+            rows = [{"id": r["id"], "keys": keys, "signature": versions.signature(keys)}
+                    for r in texts for keys in [versions.passage_hashes(r["texts"])]]
+            self._query("UNWIND $rows AS row MATCH (d:Document {id: row.id}) "
+                        "SET d.version_keys = row.keys, d.version_minhash = row.signature, "
+                        "d.version_keys_rule = $keys_rule", rows=rows, keys_rule=versions.KEYS_RULE)
+            signatures.update({row["id"]: row["signature"] for row in rows})
+        copies, measure = versions.candidates(
+            [Signed(i, r["hash"], signatures[i]) for i, r in cut.items()], fresh)
+        ends = sorted({i for pair in measure for i in pair})
+        held: dict[str, list[int]] = {}
+        if ends:
+            keys, _, _ = self._query(
+                "MATCH (d:Document) WHERE d.id IN $ids RETURN d.id AS id, d.version_keys AS keys",
+                ids=ends)
+            held = {r["id"]: r["keys"] or [] for r in keys}
+        pairs = versions.confirmed(copies, measure, held)
+
+        def write(tx: ManagedTransaction) -> None:
+            _run(tx, self.scope,
+                 "UNWIND $fresh AS id MATCH (:Document {id: id})-[r:SIMILAR_VERSION]-(:Document) "
+                 "WHERE r.split_by_user IS NULL DELETE r", fresh=fresh)
+            _run(tx, self.scope,
+                 "UNWIND $pairs AS p MATCH (a:Document {id: p[0]}), (b:Document {id: p[1]}) "
+                 "MERGE (a)-[:SIMILAR_VERSION]-(b)", pairs=[list(p) for p in pairs])
+            _run(tx, self.scope,
+                 "UNWIND $fresh AS id MATCH (d:Document {id: id}) SET d.versions_rule = $rule",
+                 fresh=fresh, rule=VERSIONS_RULE)
+
+        with self.driver.session() as session:
+            session.execute_write(write)
+        return len(pairs)
+
+    def version_pairs(self) -> list[tuple[Member, Member]]:
+        """The documents `SIMILAR_VERSION` joins and their owner left grouped, a pair each."""
+        records, _, _ = self._query(
+            "MATCH (a:Document)-[r:SIMILAR_VERSION]->(b:Document) WHERE r.split_by_user IS NULL "
+            "RETURN a.id AS one, a.label AS one_file, a.modified_at AS one_modified, "
+            "b.id AS two, b.label AS two_file, b.modified_at AS two_modified")
+        return [(Member(r["one"], r["one_file"], r["one_modified"]),
+                 Member(r["two"], r["two_file"], r["two_modified"])) for r in records]
+
+    def ungroup(self, document_id: str) -> int:
+        """The document taken out of its family: each of its `SIMILAR_VERSION` pairs marked
+        `split_by_user`, which a later grouping keeps -- it is never paired with them directly
+        again, though another pair can still bring it into a family; how many pairs."""
+        records, _, _ = self._query(
+            "MATCH (:Document {id: $document})-[r:SIMILAR_VERSION]-(:Document) "
+            "SET r.split_by_user = true RETURN count(r) AS split", document=document_id)
+        return int(records[0]["split"]) if records else 0
 
     def document_graph(self, document_id: str) -> dict[str, list[dict[str, Any]]]:
         """One document's own graph, in the records shape the exporter writes -- without its

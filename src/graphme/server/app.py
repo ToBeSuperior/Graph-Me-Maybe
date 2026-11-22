@@ -74,6 +74,7 @@ from graphme.api import GraphMe
 from graphme.application.corpus_build import content_hash
 from graphme.application.embedded_documents import name_part
 from graphme.application.ingest import documents_at
+from graphme.application.versions import Member, by_document, latest, versions_of
 from graphme.application.visual_crops import (
     CROP_ASSET_KEY,
     crop_holder,
@@ -756,12 +757,13 @@ def create_app(
         false when the graph DB cannot be reached; the rest is still listed. Another
         workspace than the open one (`workspace`): the documents in its space alone."""
         if (side := beside(workspace)) is not None:
-            documents, _ = side.graph_space().document_map()
-            return {"space_ok": True, "items": [
+            held = side.graph_space()
+            documents, _ = held.document_map()
+            return {"space_ok": True, "items": by_family([
                 {"name": d["label"], "format": Path(d["label"]).suffix.lower().lstrip("."),
                  "in_space": True, "document_id": d["id"], "file_id": None, "state": "idle",
                  "modified": d.get("modified_at"), "web_url": d.get("web_url")}
-                for d in documents]}
+                for d in documents], held.version_pairs())}
         catalog = list(demo.catalog.items())  # other threads add to it while this reads
         reading = {str(Path(path).resolve()): doc for doc, path in catalog}
         # The same file reached by two paths -- uploaded here, built from its own folder --
@@ -779,12 +781,13 @@ def create_app(
             return session.state if session else "idle"
 
         try:
-            documents, _ = demo.space(wait=SPACE_WAIT).document_map()
-            space_ok = True
+            space = demo.space(wait=SPACE_WAIT)
+            documents, _ = space.document_map()
+            pairs, space_ok = space.version_pairs(), True
         except GraphStarting:
             raise  # asked again, like the map, until it is up
         except Exception:  # noqa: BLE001 -- the list still shows what the server holds
-            documents, space_ok = [], False
+            documents, pairs, space_ok = [], [], False
         items: list[dict[str, Any]] = []
         matched: set[str] = set()
         for d in documents:
@@ -804,7 +807,34 @@ def create_app(
              "modified": modified_at(path)}
             for doc, path in catalog if doc not in matched and doc in demo.sessions
         ]
-        return {"items": items, "space_ok": space_ok}
+        return {"items": by_family(items, pairs), "space_ok": space_ok}
+
+    def by_family(items: list[dict[str, Any]],
+                  pairs: list[tuple[Member, Member]]) -> list[dict[str, Any]]:
+        """`items` with each family (`versions.by_document`) one row, its latest file's, the
+        others folded under it (`versions`)."""
+        family = by_document(pairs)
+        listed = {item["document_id"] for item in items if item["document_id"]}
+        rows: list[dict[str, Any]] = []
+        for item in items:
+            members = [m for m in family.get(item["document_id"] or "", ())
+                       if m.document_id in listed]
+            if len(members) < 2:
+                rows.append(item)
+            elif latest(members).document_id == item["document_id"]:
+                rows.append({**item, "versions": [
+                    asdict(v) for v in versions_of(members, {item["document_id"]})]})
+        return rows
+
+    @v1.post("/documents/{document_id}/ungroup", response_model=api.Ungrouped)
+    def ungroup(document_id: str, workspace: str | None = None) -> dict[str, Any]:
+        """The document taken out of the family it was grouped in, as its own row and its own
+        search result from now on; a later build never pairs it with them directly again (it
+        can still join a family through another document it is a version of)."""
+        split = space_of(workspace).ungroup(document_id)
+        if not split:
+            raise HTTPException(404, "the document is not grouped with another")
+        return {"ungrouped": document_id, "pairs": split}
 
     @v1.delete("/documents/{document_id}", response_model=api.Deleted)
     def delete_document(document_id: str) -> dict[str, str]:

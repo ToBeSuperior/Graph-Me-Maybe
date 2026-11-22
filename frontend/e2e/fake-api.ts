@@ -4,7 +4,7 @@ import type { Page, Route } from '@playwright/test';
 
 type Kind = 'box' | 'google' | 'onedrive' | 'dropbox' | 'icloud' | 'synology';
 
-interface Fake { found: Record<Kind, boolean>; workspaces: { active: string; mcp_enabled: boolean; mcp_changes: boolean; items: { id: string; name: string; mcp: boolean }[] }; opened: string[]; originals: string[]; deletedWorkspaces: string[]; connected: Record<Kind, boolean>; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; uploaded: string[]; built: string[][]; starting: number; threads: Record<string, FakeThread>; turns: { question: string; only: string[] | null; exclude: string[] | null; documents: number | null; stamp: string | null }[]; scoped: string[][]; mail: { accounts: Record<string, unknown>[]; connected: Record<string, unknown>[]; read: unknown[]; earlier: number; left: string[] }; watch: Record<string, unknown>[]; watchBuilt: string[]; watchFolders: { path: string; kind: string }[]; deletedDocs: string[] }
+interface Fake { found: Record<Kind, boolean>; workspaces: { active: string; mcp_enabled: boolean; mcp_changes: boolean; items: { id: string; name: string; mcp: boolean }[] }; opened: string[]; originals: string[]; deletedWorkspaces: string[]; connected: Record<Kind, boolean>; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; uploaded: string[]; built: string[][]; starting: number; threads: Record<string, FakeThread>; turns: { question: string; only: string[] | null; exclude: string[] | null; documents: number | null; stamp: string | null }[]; scoped: string[][]; mail: { accounts: Record<string, unknown>[]; connected: Record<string, unknown>[]; read: unknown[]; earlier: number; left: string[] }; watch: Record<string, unknown>[]; watchBuilt: string[]; watchFolders: { path: string; kind: string }[]; deletedDocs: string[]; ungrouped: string[] }
 
 
 /** A conversation as the server keeps it. */
@@ -38,7 +38,7 @@ const BUILD_STARTED = { id: 'bx', kind: 'build', state: 'reading', done: 0, tota
 export async function fakeApi(page: Page,
   { box = true, boxDrive = true, googleDrive = true, oneDrive = true, dropbox = true, workspaces = true, empty = false, slow = 0, samples = true, jobs = [] as FakeJob[], key = '', reading = [] as Record<string, unknown>[],
     progress = null as Record<string, unknown> | null, elapsed = null as number | null, starting = 0,
-    problems = null as string[] | null, mailWorkspace = false, mailRefused = '', mailDoc = false, gone = false, pageCount = 2 } = {}): Promise<Fake> {
+    problems = null as string[] | null, mailWorkspace = false, mailRefused = '', mailDoc = false, gone = false, pageCount = 2, versions = false } = {}): Promise<Fake> {
   const fake: Fake = {
     searchModels: [
       { name: 'general', model: 'harrier-oss-v1-0.6b', size: 639448320, installed: false, chosen: true,
@@ -49,9 +49,12 @@ export async function fakeApi(page: Page,
     found: { box: boxDrive, google: googleDrive, onedrive: oneDrive, dropbox: dropbox, icloud: false, synology: false }, opened: [], originals: [], deletedWorkspaces: [],
     connected: { box: false, google: false, onedrive: false, dropbox: false, icloud: false, synology: false }, boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
     installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0,
-    uploaded: [], built: [], starting, threads: {}, turns: [], scoped: [], mail: { accounts: [], connected: [], read: [], earlier: 0, left: [] }, watch: [], watchBuilt: [], watchFolders: [], deletedDocs: [] };
+    uploaded: [], built: [], starting, threads: {}, turns: [], scoped: [], mail: { accounts: [], connected: [], read: [], earlier: 0, left: [] }, watch: [], watchBuilt: [], watchFolders: [], deletedDocs: [], ungrouped: [] };
   if (mailWorkspace) fake.workspaces.items.push({ id: 'm1', name: 'kim@invented.test', mcp: false, kind: 'mail', account: 'a1' } as never);
   if (mailWorkspace) fake.workspaces.active = 'm1';
+  // A revised version of the procedure, folded under it until it is ungrouped.
+  const revised = { document_id: 'proc-new', file: 'PROC-2_가상 절차서 개정.docx', modified: 1767398400, latest: true };
+  const folded = () => (versions && !fake.ungrouped.length ? [revised] : []);
   const json = (route: Route, body: unknown, status = 200) =>
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/v1/**', async (route) => {
@@ -253,9 +256,15 @@ export async function fakeApi(page: Page,
       return json(route, { ...jobs.find((j) => j.id === cancel[1]), state: 'cancelled' });
     }
     if (path === '/v1/documents') {
-      return json(route, { space_ok: true, items: empty || fake.reset ? [] : docs.map((d) => ({
+      const listed = versions && fake.ungrouped.length ? [...docs, { id: revised.document_id, label: revised.file, modified_at: revised.modified }] : docs;
+      return json(route, { space_ok: true, items: empty || fake.reset ? [] : listed.map((d) => ({
         name: d.label, format: d.label.split('.').pop(), in_space: true, document_id: d.id, file_id: `file-${d.id}`,
-        state: 'idle', modified: d.modified_at })).concat(reading as never[]) });
+        state: 'idle', modified: d.modified_at, versions: d.id === 'proc' ? folded() : [] })).concat(reading as never[]) });
+    }
+    const ungroup = path.match(/^\/v1\/documents\/([^/]+)\/ungroup$/);
+    if (ungroup && method === 'POST') {
+      fake.ungrouped.push(ungroup[1]);
+      return json(route, { ungrouped: ungroup[1], pairs: 1 });
     }
     // Conversations: a turn is streamed as the server streams it -- found, answered, checked, saved.
     if (path === '/v1/threads' && method === 'GET') {
@@ -282,7 +291,7 @@ export async function fakeApi(page: Page,
       // A message found first, its name carrying the digest that tells two of one subject apart.
       const message = { id: 'msg:0', score: 0.95, document_id: 'msg', file: 'Invented valve order.emb0a1b2c3d.eml',
         members: ['b1'], modified: 1767225600, context: 'Invented valve order\nPlease find the order attached.', linked: [] };
-      const found = { sources: (mailDoc ? [message, ...sources] : sources).filter((x) => (!kept.scope || kept.scope.includes(x.document_id)) && !exclude?.includes(x.document_id)), queries: [question], text_only: false };
+      const found = { sources: (mailDoc ? [message, ...sources] : sources).map((x) => (x.document_id === 'proc' ? { ...x, versions: folded() } : x)).filter((x) => (!kept.scope || kept.scope.includes(x.document_id)) && !exclude?.includes(x.document_id)), queries: [question], text_only: false };
       fake.answered += 1;
       const answer = { ...found, answer: `시험 압력은 **1.0 MPa**이다. [${docs[0].label}]\n| 항목 | 기준 |\n|---|---|\n| 압력 | 1.0 MPa |\n\n유지 시간은 5분이다. [${docs[1].label}]`, claims: [] };
       const checked = { checked: true, claims: [

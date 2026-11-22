@@ -38,6 +38,17 @@ ANSWERS: dict[str, list[dict[str, Any]]] = {
     "d.label AS name": [{"id": "ab", "name": "invented.pdf"}],
     "queryNodes($vector_index_name": [_PASSAGE],
     "count(d) AS n": [{"n": 0}],
+    # versions: a document cut since it was grouped, one grouped, one whose passages were cut
+    # before their hashes were kept; their bands alike
+    "AS stamped": [
+        {"id": "ab", "hash": "0" * 64, "signature": [1] * 128, "keyed": True,
+         "stamped": False, "cut": True},
+        {"id": "cd", "hash": "1" * 64, "signature": [1] * 128, "keyed": True,
+         "stamped": True, "cut": True},
+        {"id": "ef", "hash": "2" * 64, "signature": None, "keyed": False,
+         "stamped": False, "cut": True}],
+    "AS texts": [{"id": "ef", "texts": ["An invented passage."]}],
+    "AS keys": [{"id": "ab", "keys": [1]}, {"id": "cd", "keys": [1]}],
 }
 
 
@@ -115,6 +126,9 @@ def _ran_everything(driver: _Recording) -> None:
                      rule="rule")
     space.document_map()
     space.similar_links()
+    space.group_versions()
+    space.version_pairs()
+    space.ungroup("ab")
     space.document_graph("ab")
     space.chunk_spans("ab")
     rows = space.corpus_rows()

@@ -264,6 +264,42 @@ test('the library lists the graph with each file’s date', async ({ page }) => 
   await expect(page.getByText('그래프에 있음 · 3')).toBeVisible();
 });
 
+test('a found document folds its versions: “+1 버전” opens them with the latest marked, and closes', async ({ page }) => {
+  await fakeApi(page, { versions: true });
+  await page.goto('/');
+  await page.getByRole('textbox', { name: '문서에 대해 질문하세요' }).fill('시험 압력은?');
+  await page.keyboard.press('Enter');
+  const tree = page.getByRole('tree');
+  const more = tree.getByRole('button', { name: '+1 버전' });
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
+  await expect(tree.getByText('최신: PROC-2_가상 절차서 개정')).toBeVisible();
+  await more.click();
+  await expect(more).toHaveAttribute('aria-expanded', 'true');
+  const listed = tree.getByRole('listitem').filter({ hasText: 'PROC-2_가상 절차서 개정' });
+  await expect(listed.getByText('최신', { exact: true })).toBeVisible();
+  await expect(listed.getByRole('button', { name: '묶지 않기' })).toHaveCount(0); // ungrouped where the graph is looked after
+  await more.click();
+  await expect(listed).toHaveCount(0);
+});
+
+test('the library shows a family as one row, and an ungrouped version gets its own', async ({ page }) => {
+  const fake = await fakeApi(page, { versions: true });
+  await page.goto('/manage');
+  await expect(page.getByRole('link', { name: /PROC-2_가상 절차서 개정/ })).toHaveCount(0);
+  await expect(page.getByText('그래프에 있음 · 4')).toBeVisible(); // documents, not rows
+  await page.getByRole('button', { name: '+1 버전' }).click();
+  await page.getByRole('button', { name: '묶지 않기' }).click();
+  // asked first, in the app's own dialog naming the file
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('PROC-2_가상 절차서 개정.docx')).toBeVisible();
+  expect(fake.ungrouped).toEqual([]);
+  await dialog.getByRole('button', { name: '묶지 않기' }).click();
+  await expect.poll(() => fake.ungrouped).toEqual(['proc-new']);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('link', { name: /PROC-2_가상 절차서 개정/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: '+1 버전' })).toHaveCount(0);
+});
+
 test('a search stopped says so and can be asked again', async ({ page }) => {
   await fakeApi(page, { slow: 3000 });
   await page.goto(`/?q=${encodeURIComponent('시험 압력은?')}&k=5`);

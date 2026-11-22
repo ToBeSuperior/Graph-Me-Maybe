@@ -70,6 +70,7 @@ from graphme.application.corpus_links import documents_named
 from graphme.application.embedded_documents import shown_name
 from graphme.application.graph_chunks import CHUNK_RULE, chunks
 from graphme.application.passage_scores import IMPORTANCE_RULE, centroid, importance
+from graphme.application.versions import Member, VersionOf, by_document, family_key, versions_of
 from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop
 from graphme.config import LINK_DISCOUNT
 from graphme.domain.text_match import estimated_tokens, folded
@@ -407,6 +408,8 @@ class GraphSource:
     """The workspace it was found in, once said (`find_across`, `ask_across`, the server)."""
     promoted_from: LinkedFrom | None = None
     """Set when this is a linked document's passage ranked among the found ones (`promoted`)."""
+    versions: list[VersionOf] = field(default_factory=list)
+    """The other documents of its family, folded under it (`_once`)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -552,6 +555,7 @@ class GraphRag:
         # whenever that is -- every document just embedded is rated again.
         self._rate(document_ids)
         self._similar.relate(document_ids)
+        self._space.group_versions()
         return len(rows)
 
     def _rate(self, document_ids: Sequence[str] | None) -> None:
@@ -684,9 +688,10 @@ class GraphRag:
              only: frozenset[str] | None = None,
              exclude: frozenset[str] = frozenset()) -> list[RetrieverResultItem]:
         """What an answer reads, best first, before `within_budget` cuts it."""
+        family = self._families()
         found = self._found(question, documents, read_on=True, history=history,
-                            only=only, exclude=exclude)
-        return [_item(record) for record in _once(found)]
+                            only=only, exclude=exclude, family=family)
+        return [_item(record) for record in _once(found, family=family)]
 
     def answered(self, question: str, items: Sequence[RetrieverResultItem],
                  pictures: Sequence[tuple[str, bytes]], history: Sequence[Turn] = ()) -> str:
@@ -742,15 +747,18 @@ class GraphRag:
         written -- what the Q folder page shows: as `ask` reads them, but with
         LINKED_DOCUMENTS hop-3 documents under each hop-2 one rather than in all."""
         _checked(documents)
-        found = self._found(question, documents, history=history, only=only, exclude=exclude)
-        items = [_item(record) for record in _once(found, each_folder=True)]
+        family = self._families()
+        found = self._found(question, documents, history=history, only=only, exclude=exclude,
+                            family=family)
+        items = [_item(record) for record in _once(found, each_folder=True, family=family)]
         return promoted([_source(item) for item in items], self._link_discount,
                         _named_in(items), _closeness_in(items))
 
     def _found(self, question: str, documents: int, *, read_on: bool = False,
                history: Sequence[Turn] = (),
                only: frozenset[str] | None = None,
-               exclude: frozenset[str] = frozenset()) -> list[neo4j.Record]:
+               exclude: frozenset[str] = frozenset(),
+               family: Mapping[str, Sequence[Member]] | None = None) -> list[neo4j.Record]:
         """The fused search for each thing the question asks (`_queries`), the passages taken
         from each search in turn, best first, each once -- walked until `documents` documents
         are reached (`collected`) -- then the documents linked to each one found, walked once
@@ -760,7 +768,9 @@ class GraphRag:
         `only` searches the passages of the documents it names, and brings the linked
         documents inside it alone; a scoped search is shared by its scope.
         `only` empty finds nothing, None is every document. `exclude` leaves its documents out
-        of this question alone: their passages are not found nor are they brought as linked."""
+        of this question alone: their passages are not found nor are they brought as linked.
+        Copies and versions of one document (`family`, `_families`) fold to the best-ranked of
+        them (`fold_versions`) once `only` and `exclude` are applied."""
         queries, said, searched = self._asked(question, history)
 
         def search() -> list[neo4j.Record]:
@@ -780,6 +790,8 @@ class GraphRag:
                   if record["document_id"] not in exclude]
         every = self._named(named_phrases(searched, said))
         named = every & {record["document_id"] for record in ranked}
+        ranked = fold_versions(named_first(ranked, named), family or {}, only)
+        named &= {record["document_id"] for record in ranked}
         order = named_first(ranked, named)
         taken = collected(order, documents)
         if not read_on:  # the page shows the walk
@@ -788,6 +800,11 @@ class GraphRag:
         # into the documents found (`filled`)
         return _marked(self._linked(named_only(ranked, named) if named else filled(order, taken),
                                     searched, only, exclude), every)
+
+    def _families(self) -> dict[str, tuple[Member, ...]]:
+        """Each document of a family of copies and versions, by id, to its whole family -- read
+        for each question, so an ungrouped document stands alone at once."""
+        return by_document(self._space.version_pairs())
 
     def _named(self, phrases: Sequence[str]) -> set[str]:
         """The documents `phrases` name, found or not."""
@@ -1166,6 +1183,7 @@ def _item(record: neo4j.Record) -> RetrieverResultItem:
             "origin": mail_origin(record),
             "named": record.get("named", False),
             "closeness": record.get("closeness"),
+            "versions": record.get("versions", []),
         },
     )
 
@@ -1255,7 +1273,22 @@ _HOW = {"cites": "cites", "cited_by": "is cited by", "similar": "is similar to"}
 """How the document a link starts from stands to the one it reaches, as the model reads it."""
 
 
-def _once(records: list[neo4j.Record], *, each_folder: bool = False) -> list[neo4j.Record]:
+def fold_versions(ranked: Sequence[Any], family: Mapping[str, Sequence[Member]],
+                  only: frozenset[str] | None = None) -> list[Any]:
+    """`ranked` with each family (`versions.by_document`) shown by its best-ranked member: the
+    passages of its other members are left out, so a document's copies take no place of the
+    documents asked for and the answer reads its words once. A question scoped to documents
+    (`only`) folds nothing: every document in it was named."""
+    if only is not None:
+        return list(ranked)
+    standing: dict[str, str] = {}
+    return [passage for passage in ranked
+            if standing.setdefault(family_key(family, passage["document_id"]),
+                                   passage["document_id"]) == passage["document_id"]]
+
+
+def _once(records: list[neo4j.Record], *, each_folder: bool = False,
+          family: Mapping[str, Sequence[Member]] | None = None) -> list[neo4j.Record]:
     """Each found passage with the documents linked to its own that it brings along: at each
     hop the LINKED_DOCUMENTS whose passages come nearest the question, hop 2 before hop 3, a
     hop-3 document only from a hop-2 one it kept. A document is shown once, at the first hop
@@ -1264,11 +1297,19 @@ def _once(records: list[neo4j.Record], *, each_folder: bool = False) -> list[neo
 
     An answer takes LINKED_DOCUMENTS at hop 3 in all, so what the model reads stays short;
     `each_folder` -- the Q folder page, where every hop-2 document is a folder -- takes that
-    many under each hop-2 document instead."""
+    many under each hop-2 document instead.
+
+    A document stands for its `family` (`versions.by_document`): a version of one shown is not
+    brought along, and each found document carries its family's others not shown (`versions`)."""
+    family = family or {}
+
     def best(doc: dict[str, Any]) -> float:
         return max((p["score"] for p in doc["passages"]), default=-1.0)
 
-    shown = {record["document_id"] for record in records}
+    def key(doc: str) -> str:
+        return family_key(family, doc)
+
+    shown = {key(record["document_id"]) for record in records}
     kept: list[list[dict[str, Any]]] = [[] for _ in records]
     for hop in (2, 3):
         for record, mine in zip(records, kept, strict=True):
@@ -1280,11 +1321,19 @@ def _once(records: list[neo4j.Record], *, each_folder: bool = False) -> list[neo
             taken: dict[str | None, int] = {}
             for doc in candidates:
                 under = doc["via"] if each_folder and hop == 3 else None
-                if taken.get(under, 0) < LINKED_DOCUMENTS and doc["document_id"] not in shown:
-                    shown.add(doc["document_id"])
+                if taken.get(under, 0) < LINKED_DOCUMENTS and key(doc["document_id"]) not in shown:
+                    shown.add(key(doc["document_id"]))
                     mine.append(doc)
                     taken[under] = taken.get(under, 0) + 1
-    return [neo4j.Record({**dict(record), "linked": mine})  # type: ignore[no-untyped-call]
+    seen = {record["document_id"] for record in records} | {
+        doc["document_id"] for mine in kept for doc in mine}
+
+    def versions(doc: str) -> list[VersionOf]:
+        return versions_of(family[doc], seen) if doc in family else []
+
+    return [neo4j.Record({**dict(record),  # type: ignore[no-untyped-call]
+                          "versions": versions(record["document_id"]),
+                          "linked": mine})
             for record, mine in zip(records, kept, strict=True)]
 
 

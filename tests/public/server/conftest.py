@@ -61,6 +61,10 @@ class FakeSpace:
         """What a workspace's graph is copied into (`copy_graph`)."""
         self.dropped: list[Any] = []
         """The workspace scopes taken out of the graph DB (`drop_workspace`)."""
+        self.versions: list[tuple[Any, Any]] = []
+        """The pairs of documents `SIMILAR_VERSION` joins, as `version_pairs` gives them."""
+        self.split: list[str] = []
+        """The documents taken out of their family (`ungroup`)."""
 
     def drop_workspace(self, scope: Any) -> None:
         self.dropped.append(scope)
@@ -128,6 +132,17 @@ class FakeSpace:
 
     def similar_links(self) -> list[dict[str, Any]]:
         return self.similar
+
+    def version_pairs(self) -> list[tuple[Any, Any]]:
+        return [p for p in self.versions
+                if not {p[0].document_id, p[1].document_id} & set(self.split)]
+
+    def ungroup(self, document_id: str) -> int:
+        split = sum(1 for p in self.version_pairs()
+                    if document_id in (p[0].document_id, p[1].document_id))
+        if split:
+            self.split.append(document_id)
+        return split
 
     def document_graph(self, document_id: str) -> dict[str, list[dict[str, Any]]]:
         if document_id not in self.held:

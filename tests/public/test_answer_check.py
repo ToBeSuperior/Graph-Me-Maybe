@@ -42,7 +42,7 @@ def _rag(monkeypatch: pytest.MonkeyPatch, check: httpx.Response | str | None, *,
         return _reply(ANSWER)
 
     rag = GraphRag(
-        SimpleNamespace(driver=None), embedder=None,  # type: ignore[arg-type]
+        SimpleNamespace(driver=None, version_pairs=list), embedder=None,  # type: ignore[arg-type]
         endpoint=Endpoint("chat_completions", "https://chat.test/v1", "chat-test", None),  # type: ignore[arg-type]
         client=httpx.Client(transport=httpx.MockTransport(handle)), model="m", dimensions=3,
         relevance_floor=0.0, dense_weight=0.6, rrf_k=60, wait=lambda _: None,

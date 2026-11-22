@@ -115,6 +115,8 @@ The CLI uses the same graph as the app.
 graphme build-graph ./docs            # read a folder, put it in the graph, link and embed it
 graphme ask "What pressure does the leak test use?"
 graphme export-corpus ./out --dump    # one .dump file for Neo4j Desktop or Aura
+graphme doctor                        # what is ready and what is not, each with its fix (--json)
+graphme mcp install --client cursor   # add it to claude-code, claude-desktop or cursor
 graphme --help                        # every command
 ```
 

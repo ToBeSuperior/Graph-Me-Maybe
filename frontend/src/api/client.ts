@@ -14,6 +14,7 @@ export type CorpusMap = Schemas['CorpusMap'];
 export type DocumentGraph = Schemas['DocumentGraph'];
 export type GraphNode = Schemas['GraphNode'];
 export type Source = Schemas['Source'];
+export type VersionOf = Schemas['VersionOf'];
 export type Answer = Schemas['Answer'];
 type ExportJob = Schemas['ExportJob'];
 export type Job = BuildState | ExportJob;

@@ -5,6 +5,7 @@
 import { ChevronRight, Quote } from 'lucide-react';
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { FileIcon, HopBadge, RelationChip } from '../../components/docs';
+import { Versions } from '../../components/Versions';
 import { changedAt, cn, formatOf, ownText, shownName, stem } from '../../lib/format';
 import { useLang, useT } from '../../lib/i18n';
 import type { Trail, TrailEntry } from '../../lib/hops';
@@ -226,6 +227,7 @@ export const ResultTree = memo(function ResultTree({ trail, selected, onSelect, 
                 {holds && !opened && <span className="shrink-0 rounded bg-surface px-1 font-mono text-2xs text-muted">+{under(entry)}</span>}
               </div>
               {why && <p className="line-clamp-1 pl-[22px] text-xs text-muted">{why}</p>}
+              {doc.versions?.length ? <div className="pl-[22px]"><Versions versions={doc.versions} /></div> : null}
             </div>
           </div>
         );

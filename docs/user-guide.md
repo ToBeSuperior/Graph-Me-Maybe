@@ -300,6 +300,13 @@ part of it, looks at a page, and can add a folder. Connect Claude Code once, in 
 claude mcp add graph-me-maybe -- graphme mcp
 ```
 
+`graphme mcp install --client claude-code|claude-desktop|cursor` writes that entry into the
+client's own config file for you: it copies the file to `.bak` first, keeps every other entry, and
+leaves one entry however often it runs. `graphme doctor` (`--json` for an agent) lists what is
+ready and what is not -- the app, Neo4j, the search model, the model key, the viewer, a browser
+and each client -- with one fix for each, and changes nothing. A coding agent can follow
+`skills/graph-me-maybe/SKILL.md` to do all of it.
+
 Claude Desktop (`claude_desktop_config.json`) and Cursor (`~/.cursor/mcp.json`) take the same
 command:
 
@@ -348,6 +355,8 @@ graphme xlsx-bundle WORKBOOK OUT    # draw one workbook into pages and their cel
 graphme serve                       # the HTTP API and the web app
 graphme app                         # the app in a browser tab
 graphme mcp                         # an MCP server on stdio, over the running app
+graphme mcp install --client NAME   # add it to claude-code, claude-desktop or cursor
+graphme doctor [--json]             # what is ready, what is not, and the fix for each
 ```
 
 ## The HTTP API

@@ -86,6 +86,8 @@ def test_mail_for_a_closed_workspace_waits_until_it_opens(
 ) -> None:
     account = _connected(mail, workspace_demo)
     workspace_demo.switch_workspace(FIRST)
+    # Opening a workspace embeds what it holds, behind: a pass meanwhile fetches nothing.
+    assert until(lambda: workspace_demo.build.state not in BUILDING), workspace_demo.build
     before = workspace_demo.build.id
     fake.add("INBOX", _raw("later"), day=date(2026, 4, 1))
 

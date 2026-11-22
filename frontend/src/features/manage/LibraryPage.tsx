@@ -8,13 +8,18 @@ import { useDeferredValue, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, call, READING, type LibraryItem } from '../../api/client';
 import { FileIcon } from '../../components/docs';
+import { Versions } from '../../components/Versions';
 import { Badge, Button, Empty, Input, Skeleton } from '../../components/ui';
 import { changedAt, shownName, stem } from '../../lib/format';
 import { useLang, useT, type WordKey } from '../../lib/i18n';
 import { keys, useLibrary, useWatch } from '../../lib/queries';
 import { watching } from '../../lib/watch';
 import { FolderDrop } from '../upload/FolderDrop';
+import { UngroupVersion } from './UngroupVersion';
 import { PageHeader } from './ManageLayout';
+
+/** How many documents rows stand for: a family's row stands for each of its files. */
+const documentsIn = (rows: LibraryItem[]) => rows.reduce((n, i) => n + 1 + (i.versions?.length ?? 0), 0);
 
 function stateOf(item: LibraryItem): { word: WordKey; tone: 'accent' | 'ok' | 'danger' | 'neutral' } {
   if (READING.includes(item.state)) return { word: 'stateReading', tone: 'accent' };
@@ -66,7 +71,8 @@ export function LibraryPage() {
   const deferred = useDeferredValue(filter);
   const items = useMemo(() => {
     const f = deferred.trim().toLowerCase();
-    return (data?.items ?? []).filter((i) => !f || i.name.toLowerCase().includes(f));
+    // a family's row is found by any of its files' names
+    return (data?.items ?? []).filter((i) => !f || [i.name, ...(i.versions ?? []).map((v) => v.file)].some((n) => n.toLowerCase().includes(f)));
   }, [data, deferred]);
   const groups = [
     { title: t('groupSpace'), rows: items.filter((i) => i.in_space) },
@@ -75,7 +81,7 @@ export function LibraryPage() {
 
   return (
     <div>
-      <PageHeader title={t('library')} description={data ? t('libraryCount', data.items.filter((i) => i.in_space).length, data.items.filter((i) => !i.in_space).length) : undefined}
+      <PageHeader title={t('library')} description={data ? t('libraryCount', documentsIn(data.items.filter((i) => i.in_space)), data.items.filter((i) => !i.in_space).length) : undefined}
         actions={<>
           {watched && (
             <Link to="/manage/watch" className="flex h-8 items-center gap-1.5 rounded-md border border-line px-2.5 text-xs text-muted hover:bg-hover hover:text-fg" data-testid="watch-badge">
@@ -102,7 +108,7 @@ export function LibraryPage() {
         ) : (
           groups.map((g) => (
             <section key={g.title} className="mb-6">
-              <h2 className="mb-2 text-xs font-medium tracking-wide text-faint uppercase">{g.title} · {g.rows.length}</h2>
+              <h2 className="mb-2 text-xs font-medium tracking-wide text-faint uppercase">{g.title} · {documentsIn(g.rows)}</h2>
               <div className="overflow-hidden rounded-xl border border-line bg-panel">
                 <div className="grid grid-cols-[minmax(0,1fr)_100px_120px_40px] gap-2 border-b border-line bg-subtle px-3 py-2 text-2xs font-medium text-faint uppercase max-sm:hidden">
                   <span>{t('colName')}</span><span>{t('colState')}</span><span>{t('colModified')}</span><span />
@@ -131,6 +137,8 @@ export function LibraryPage() {
                             ? <Link to={docLink(item)} className="text-faint hover:text-fg" aria-label={t('openInManage')} title={t('openInManage')}><ChevronRight className="size-4" /></Link>
                             : <OutsideActions item={item} />}
                         </span>
+                        {/* a family is one row: its other files fold under it, on a line of their own */}
+                        {item.versions?.length ? <div className="col-span-full pl-6"><Versions versions={item.versions} action={(v) => <UngroupVersion version={v} />} /></div> : null}
                       </li>
                     );
                   })}

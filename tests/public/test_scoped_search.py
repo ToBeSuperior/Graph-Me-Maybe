@@ -29,7 +29,7 @@ def test_only_naming_nothing_in_the_graph_finds_nothing() -> None:
 
     from graphme.adapters.storage.graph_rag import GraphRag
 
-    rag = GraphRag(SimpleNamespace(driver=None), embedder=None,  # type: ignore[arg-type]
+    rag = GraphRag(SimpleNamespace(driver=None, version_pairs=list), embedder=None,  # type: ignore[arg-type]
                    endpoint=None, client=None, model="m", dimensions=3,  # type: ignore[arg-type]
                    relevance_floor=0.0, dense_weight=0.6, rrf_k=60, wait=lambda _: None)
     rag._asked = lambda question, history=(): (("q",), (), "q")  # type: ignore[method-assign]
@@ -82,7 +82,7 @@ def test_a_document_left_out_has_no_passage_found() -> None:
 
     from graphme.adapters.storage.graph_rag import GraphRag
 
-    rag = GraphRag(SimpleNamespace(driver=None), embedder=None,  # type: ignore[arg-type]
+    rag = GraphRag(SimpleNamespace(driver=None, version_pairs=list), embedder=None,  # type: ignore[arg-type]
                    endpoint=None, client=None, model="m", dimensions=3,  # type: ignore[arg-type]
                    relevance_floor=0.0, dense_weight=0.6, rrf_k=60, wait=lambda _: None)
     rag._asked = lambda question, history=(): (("q",), (), "q")  # type: ignore[method-assign]

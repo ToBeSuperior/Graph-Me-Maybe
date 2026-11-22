@@ -1,6 +1,6 @@
 // What a question found, in documents: the documents of the passages found (hop 1), the
 // documents linked to them (hop 2), and the documents linked to those (hop 3).
-import type { Source } from '../api/client';
+import type { Source, VersionOf } from '../api/client';
 
 export type Direction = 'cites' | 'cited_by' | 'similar';
 
@@ -14,6 +14,8 @@ export interface TrailDoc {
   score?: number;
   modified?: number | null;
   passages: Passage[];
+  /** Its copies and versions, folded under it: it ranked best of them. */
+  versions?: VersionOf[];
 }
 
 export interface TrailEntry { doc: TrailDoc; via?: string; direction?: Direction; next: TrailEntry[] }
@@ -43,7 +45,7 @@ export function hopTrail(sources: Source[]): Trail {
       const hop = (hit.promoted_from?.hop ?? 1) as 1 | 2 | 3;
       rows.set(hit.document_id, {
         doc: { id: hit.document_id, label: hit.file, hop, rank: rows.size + 1, score: hit.score,
-          modified: hit.modified, passages: [] },
+          modified: hit.modified, passages: [], versions: hit.versions },
         via: hit.promoted_from?.via, direction: hit.promoted_from?.direction as Direction | undefined,
         next: [],
       });

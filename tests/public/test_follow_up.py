@@ -51,7 +51,7 @@ def _rag(split: dict[str, Any], sent: list[httpx.Request]) -> tuple[GraphRag, _R
         return httpx.Response(200, json={"choices": [{"message": {"content": said}}]})
 
     rag = GraphRag(
-        SimpleNamespace(driver=None, identities=lambda: []),  # type: ignore[arg-type]
+        SimpleNamespace(driver=None, identities=lambda: [], version_pairs=list),  # type: ignore[arg-type]
         embedder=None,  # type: ignore[arg-type]
         endpoint=Endpoint("chat_completions", "https://follow.test/v1", "invented-chat", None),
         client=httpx.Client(transport=httpx.MockTransport(handle)), model="m", dimensions=3,
