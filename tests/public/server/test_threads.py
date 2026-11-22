@@ -35,6 +35,7 @@ class StagedRag:
         self.only: list[frozenset[str] | None] = []
         self.exclude: list[frozenset[str]] = []
         self.stages: list[str] = []
+        self.looked: list[bool] = []  # each scope lookup, and whether inside a turn
 
     def find(self, question: str, *, documents: int, history: Any = (),
              only: Any = None, exclude: Any = frozenset()) -> list[GraphSource]:
@@ -57,6 +58,13 @@ class StagedRag:
 
     def last_queries(self, question: str, history: Any = ()) -> tuple[str, ...]:
         return (question,)
+
+    rebuilt: dict[str, str] = {}
+    """Documents edited and built again: the id chosen to the id the graph holds now."""
+
+    def current(self, ids: frozenset[str]) -> dict[str, str]:
+        self.looked.append(graph_rag._TURN.get() is not None)
+        return {i: self.rebuilt.get(i, i) for i in ids}
 
 
 def _events(body: str) -> list[tuple[str, Any]]:
@@ -148,7 +156,23 @@ def test_a_turn_without_a_document_leaves_it_out_of_that_turn_alone(
     client.post(turns, json={"question": "And after?"}, headers=json_only)
     assert rag.exclude == [frozenset({"e"}), frozenset()]
     assert rag.only == [frozenset({"d", "e"})] * 2  # the scope is the thread's, untouched
-    assert client.get(f"/v1/threads/{thread['id']}").json()["scope"] == ["d", "e"]
+    kept = client.get(f"/v1/threads/{thread['id']}").json()
+    assert kept["scope"] == ["d", "e"]
+    # each turn says what it left out, so asking it again leaves it out again
+    assert [turn["exclude"] for turn in kept["turns"]] == [["e"], None]
+
+
+def test_a_thread_scoped_to_a_document_still_finds_it_after_the_file_is_rebuilt(
+        demo: Demo, client: TestClient, rag: StagedRag) -> None:
+    thread = client.post("/v1/threads", json={"scope": ["d", "e"]}).json()
+    rag.rebuilt = {"d": "d2"}  # memo.docx (d) edited and built again as d2
+    turns = f"/v1/threads/{thread['id']}/turns"
+    client.post(turns, json={"question": "Hold time?"}, headers={"Accept": "application/json"})
+
+    kept = client.get(f"/v1/threads/{thread['id']}").json()
+    assert kept["scope"] == ["d2", "e"]
+    assert kept["turns"][0]["scope"] == ["d2", "e"]
+    assert rag.looked == [True]  # looked up once, inside the turn
 
 
 def test_a_failed_turn_is_said_and_kept_with_why(demo: Demo, client: TestClient,

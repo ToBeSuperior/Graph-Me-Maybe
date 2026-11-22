@@ -39,7 +39,7 @@ SETTLE_MINUTES = 5
 KINDS = ("folder", "drive", "mail")
 MODES = ("manual", "on_change", "daily")
 MAIL_BEFORE = "on_change"
-"""The mode of a mail account connected before accounts had one: it fetched by itself."""
+"""The mode of an account with none: it fetches by itself."""
 MAIL_NEW = "manual"
 
 Seen = dict[str, tuple[int, float]]
@@ -168,6 +168,10 @@ class Watcher:
         self._failed: dict[str, frozenset[str]] = {}
         """target -> what had changed when its last build did not finish: not built again
         until something else changes."""
+        self._in_graph: dict[str, tuple[tuple[str, str], dict[str, str]]] = {}
+        """workspace -> the files its graph was read from, as the last look (or read) found
+        them, with the build they were read under (`_build_now`): the page's poll reads this,
+        not the graph."""
 
     def run(self, stop: threading.Event) -> None:
         while not stop.is_set():
@@ -186,13 +190,15 @@ class Watcher:
         graphs: dict[str, dict[str, str] | None] = {}
         for target in self._read():
             if target.workspace not in graphs:
-                graphs[target.workspace] = self._graph_paths(target.workspace)
+                graphs[target.workspace] = self._kept_paths(target.workspace)
             in_graph = graphs[target.workspace]
-            changed = self._changed.get(target.id, [])
+            started = self._started.get(target.id)
+            # a finished build of the changes built them: none is left, before the next look
+            done = started is not None and started[0].state == "done"
+            changed = [] if done else self._changed.get(target.id, [])
             missing = [{"path": p, "document_id": in_graph.get(p) if in_graph else None}
                        for p in self._missing.get(target.id, [])
                        if in_graph is None or p in in_graph]
-            started = self._started.get(target.id)
             said.append({
                 "kind": target.kind, "id": target.id, "workspace": target.workspace,
                 "mode": target.mode, "at": target.at, "path": target.path,
@@ -238,6 +244,25 @@ class Watcher:
                             "kind": "drive" if self._in_drive(folder) else "folder"})
         return offered
 
+    def _kept_paths(self, workspace: str) -> dict[str, str] | None:
+        """`_graph_paths` as the last look found them; asked again only when none is kept, or
+        a build began or ended since."""
+        kept = self._in_graph.get(workspace)
+        if kept is not None and kept[0] == self._build_now():
+            return kept[1]
+        paths = self._graph_paths(workspace)
+        self._keep_paths(workspace, paths)
+        return paths
+
+    def _keep_paths(self, workspace: str, paths: dict[str, str] | None) -> None:
+        if paths is not None:  # one the graph could not give is asked again
+            self._in_graph[workspace] = (self._build_now(), paths)
+
+    def _build_now(self) -> tuple[str, str]:
+        """The build the app runs or ran last, and its state: what the graph's files change by."""
+        build = self._demo.build
+        return build.id, build.state
+
     def _graph_paths(self, workspace: str) -> dict[str, str] | None:
         """Each file `workspace`'s graph was read from, and its document; None when the graph
         cannot be asked now. Never under the watcher's lock: it asks the graph DB."""
@@ -276,6 +301,7 @@ class Watcher:
             target.ran = self._now().isoformat()  # a daily time from now on, not one past
             self._write(targets)
             self._quiet_since.pop(id, None)
+            self._in_graph.clear()
 
     def _new(self, kind: str, id: str, path: str | None, workspace: str | None,
              targets: list[WatchTarget]) -> WatchTarget:
@@ -350,6 +376,7 @@ class Watcher:
             self._quiet_since.pop(id, None)
             self._started.pop(id, None)
             self._failed.pop(id, None)
+            self._in_graph.clear()
 
     def build_now(self, kind: str, id: str) -> CorpusBuild:
         """A target built at once, whatever its mode: its changed files, or a mail account's
@@ -392,6 +419,7 @@ class Watcher:
         walk = _walk(target)
         if walk.error is None:
             walk.in_graph = self._graph_paths(target.workspace)
+            self._keep_paths(target.workspace, walk.in_graph)  # what the page reads till the next
         return walk
 
     def _take(self, target: WatchTarget, walk: _Walk) -> None:

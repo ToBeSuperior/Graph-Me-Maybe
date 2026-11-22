@@ -53,6 +53,8 @@ SPLIT_SYSTEM = (
     "codes kept as written. Leave `translated` empty when every sample is in the question's "
     "language or no samples follow."
 )
+"""How a question asking several things -- a problem and how competitors handled it -- is
+cut into one search each: one search for both finds what the nearer part is about."""
 FOLLOW_UP_SYSTEM = SPLIT_SYSTEM + (
     "\n\nEarlier turns of the conversation come before the question. The question may lean "
     "on them -- \"it\", \"that procedure\", \"and for the other one?\". Write in "
@@ -60,8 +62,8 @@ FOLLOW_UP_SYSTEM = SPLIT_SYSTEM + (
     "and document it refers to taken from the earlier turns, and split that rather than the "
     "words as written. When the question already reads on its own, `standalone` is empty."
 )
-"""The split of a question asked after earlier turns: a question asked without them is split
-by SPLIT_SYSTEM alone, as it always was."""
+"""The split of a question asked after earlier turns: a question with no earlier turns is split
+by SPLIT_SYSTEM alone."""
 HISTORY_TURNS = 3
 """How many of the latest turns a follow-up is read beside."""
 HISTORY_ANSWER_CHARS = 600
@@ -95,8 +97,6 @@ class _Claims(BaseModel):
     claims: list[_Claim] = Field(default_factory=list)
 
 
-"""How a question asking several things -- a problem and how competitors handled it -- is
-cut into one search each: one search for both finds what the nearer part is about."""
 MAX_QUERIES = 3
 
 

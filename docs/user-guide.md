@@ -178,7 +178,8 @@ A turn asked before the graph changed says so, with **Ask again**.
 stage shown (finding → writing → checking) and a **Stop**.
 
 **The scope.** Above the box, chips say what the conversation asks about: all documents, or the
-documents chosen. Files dropped on the box become the scope; in the app's own window a file no graph
+documents chosen; a chosen file edited and built again stays chosen. Files dropped on the box
+become the scope; in the app's own window a file no graph
 holds is built into the workspace open first, and the question waits for it; one another workspace
 holds is offered to be asked there. A chip's × takes it off.
 
@@ -211,6 +212,15 @@ its original.
 - When no passage survives the evidence check, the result is **No related documents** and no answer
   is written (see [retrieval](retrieval.md)).
 
+**Versions.** Copies and versions of one document — the same file under another name, or an
+edited version whose passages are mostly the same — are one group, told by what they say, never
+by their names. A search shows a group once, by its best-ranked file, with **+N versions**
+opening the others, their dates and the latest marked; the answer reads that one file. A document
+the question is scoped to is never folded away, and **ask again without this** leaves the whole
+group out. In **Manage › Documents** a group is one row under its latest file; **Ungroup** (asked
+first) takes a file out of its group, and later builds never pair it with those files directly
+again — also after the file is edited and built again.
+
 **Right — the preview.** The path (question › document › linked document), the matching passages one
 at a time (‹ ›), and the page each is on; a page holding a match has a dot on its tab. On a narrow
 screen this slides in from the side.
@@ -222,7 +232,8 @@ Turn on **Right-click menu** in **Manage › Keys and model › Advanced setting
 files or folders in Finder (macOS: under **Quick Actions** or **Services**) or Explorer (Windows)
 and choose **Ask Graph-Me-Maybe**. A small window opens above the others on a conversation about
 those files: a file no graph holds is read into the workspace open first (never into a mail
-workspace), and one another workspace holds is offered to be asked there.
+workspace), and one another workspace holds is offered to be asked there. Up to 500 files at
+once: for more, pick fewer, or ask in the workspace a folder already built is in.
 
 - The pin keeps the window above the others or lets it go behind.
 - The slider makes the whole window see-through, from 100% down to 40%; the next window opens the

@@ -587,3 +587,56 @@ def test_a_mail_account_says_when_it_is_building(
     said = next(t for t in mail.get("/v1/watch").json() if t["id"] == account["id"])
 
     assert said["building"] is True
+
+
+def test_the_poll_reads_the_last_look_not_the_graph(
+    watched: tuple[TestClient, Watcher], workspace_demo: Demo, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, watcher = watched
+    folder = _folder(workspace_demo, tmp_path)
+    _choose(client, folder, "manual")
+    asked: list[str] = []
+    paths = watcher._graph_paths
+    monkeypatch.setattr(watcher, "_graph_paths",
+                        lambda workspace: asked.append(workspace) or paths(workspace))
+
+    watcher.tick()
+    for _ in range(5):
+        client.get("/v1/watch")
+
+    assert len(asked) == 1  # the look's; the menu bar's polls read what it found
+
+
+def test_a_finished_build_clears_what_it_built_at_once(
+    watched: tuple[TestClient, Watcher], workspace_demo: Demo, clock: Clock, tmp_path: Path
+) -> None:
+    client, watcher = watched
+    folder = _folder(workspace_demo, tmp_path)
+    _choose(client, folder, "manual")
+    before = workspace_demo.build.id
+    (folder / "price.xlsx").write_bytes(b"an invented price list")
+    watcher.tick()
+    assert _target(client)["changed"] == 1
+
+    client.post("/v1/watch/folder/t1/build")
+
+    assert until(lambda: _built(workspace_demo, before)), workspace_demo.build
+    assert _target(client)["changed"] == 0  # not waiting for the next look
+
+
+def test_another_sites_page_cannot_start_a_watched_build(
+    watched: tuple[TestClient, Watcher], workspace_demo: Demo, tmp_path: Path
+) -> None:
+    client, _ = watched
+    _choose(client, _folder(workspace_demo, tmp_path), "manual")
+    before = workspace_demo.build.id
+    workspace_demo.settings = workspace_demo.settings.model_copy(
+        update={"server_key": "invented-server-key"})
+    keyed = TestClient(create_app(workspace_demo), base_url=BASE)
+
+    told = keyed.post("/v1/watch/folder/t1/build",  # the key is no licence from another site
+                      headers={"origin": "https://elsewhere.invented",
+                               "Authorization": "Bearer invented-server-key"})
+
+    assert told.status_code == 403 and workspace_demo.build.id == before

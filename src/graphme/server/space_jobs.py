@@ -114,7 +114,9 @@ class SpaceJobs(DemoBase):
             if self.build.state in BUILDING or any(s.being_read for s in self.sessions.values()):
                 return 0, 0
             started = time.time()
-            space = self.graph.opened_space
+            # the workspace's graph and its folders taken together: a switch after this
+            # sweeps the next one on its own turn
+            space, settings = self.graph.opened_space, self.settings
         if space is None:
             return 0, 0  # swept once it is opened
         keep = space.crop_hashes()
@@ -124,16 +126,16 @@ class SpaceJobs(DemoBase):
                          if isinstance(h := n.metadata.get(CROP_ASSET_KEY), str)}
             if session.kept is not None:
                 keep |= set(session.kept.crops.values())
-        removed, size = LocalAssetStore(self.settings.asset_dir).sweep(
+        removed, size = LocalAssetStore(settings.asset_dir).sweep(
             keep, before=started - state.SWEEP_GRACE)
         # What each page was answered, kept for the documents the graph holds: an edited one
         # is read again only where it changed.
-        readings = PageReadings(self.settings.readings_dir)
+        readings = PageReadings(settings.readings_dir)
         readings.sweep(space.contents(sorted(readings.documents())),
                        before=started - state.SWEEP_GRACE)
         # And the passages' vectors kept by their text: those of the passages the graph holds.
-        sweep_vectors(self.settings.readings_dir / "passages",
-                      model=self.settings.embedding_model,
+        sweep_vectors(settings.readings_dir / "passages",
+                      model=settings.embedding_model,
                       texts=(text[:PASSAGE_CHARS] for text in space.passage_texts()),
                       before=started - state.SWEEP_GRACE)
         for folder in [f for f in self.root.iterdir() if f.is_dir()]:

@@ -19,6 +19,8 @@ export interface TurnShape {
   answer?: Answer | null;
   error?: string | null;
   stamp?: string | null;
+  /** The documents this turn left out: asked again, they are left out again. */
+  exclude?: string[] | null;
 }
 
 const STAGES = ['searching', 'answering', 'checking'] as const;
@@ -35,7 +37,7 @@ export function Turn({ turn, stage, now, compact = false, selected = null, onOpe
   /** A document picked -- `cited` when picked from the answer. */
   onOpenDocument: (row: Row, cited: boolean) => void;
   onStop?: () => void;
-  onAskAgain: (question: string, documents?: number) => void;
+  onAskAgain: (question: string, documents?: number, exclude?: string[]) => void;
   onOnly?: (doc: TrailDoc) => void;
   onWithout?: (doc: TrailDoc) => void;
 }) {
@@ -49,7 +51,8 @@ export function Turn({ turn, stage, now, compact = false, selected = null, onOpe
   const pick = useCallback((row: Row) => onOpenDocument(row, false), [onOpenDocument]);
   const cite = useCallback((doc: TrailDoc) => { const row = firstRow(trail, doc.id); if (row) onOpenDocument(row, true); }, [trail, onOpenDocument]);
   const hover = useCallback((doc: TrailDoc | null) => setLit(doc?.id ?? null), []);
-  const again = () => onAskAgain(question);
+  const exclude = turn.exclude ?? undefined;
+  const again = () => onAskAgain(question, undefined, exclude);
   const live = stage === 'searching' || stage === 'answering' || stage === 'checking';
   const stale = !live && !!turn.stamp && !!now && turn.stamp !== now;
 
@@ -97,7 +100,7 @@ export function Turn({ turn, stage, now, compact = false, selected = null, onOpe
             <li>{t('tipFewerWords')}</li>
             <li>{t('tipNumbers')}</li>
           </ul>
-          <Button className="mt-3" onClick={() => onAskAgain(question, 20)}>{t('searchWider')}</Button>
+          <Button className="mt-3" onClick={() => onAskAgain(question, 20, exclude)}>{t('searchWider')}</Button>
         </Empty>
       ) : (
         <>

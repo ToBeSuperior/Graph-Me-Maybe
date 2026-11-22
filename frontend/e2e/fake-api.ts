@@ -297,7 +297,7 @@ export async function fakeApi(page: Page,
       const checked = { checked: true, claims: [
         { text: '시험 압력은 **1.0 MPa**이다.', supported: true, correction: null, files: [docs[0].label] },
         { text: '유지 시간은 5분이다.', supported: false, correction: '유지 시간은 10분이다.', files: [docs[1].label] }] };
-      const saved = { question, scope: kept.scope, found, answer: { ...answer, ...checked }, stamp: stamp ?? null, asked_at: 2, error: null };
+      const saved = { question, scope: kept.scope, exclude: exclude ?? null, found, answer: { ...answer, ...checked }, stamp: stamp ?? null, asked_at: 2, error: null };
       const event = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
       const body = found.sources.length
         ? event('searched', found) + event('answered', answer) + event('checked', checked) + event('saved', saved)

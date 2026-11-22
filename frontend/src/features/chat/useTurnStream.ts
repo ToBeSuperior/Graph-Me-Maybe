@@ -36,7 +36,7 @@ export type Stage = 'searching' | 'answering' | 'checking' | 'stopped' | 'failed
 /** The turn being asked, before the thread has it. `after` is how many turns the thread had
  * when it was asked: once the thread holds more, the saved one is shown instead. A failure with
  * no `error` is a reply that could not be read. */
-export interface Live { question: string; found?: Found; answer?: Answer; stage: Stage; error?: string; after: number }
+export interface Live { question: string; found?: Found; answer?: Answer; stage: Stage; error?: string; after: number; exclude?: string[] }
 
 export function useTurnStream(threadId: string) {
   const client = useQueryClient();
@@ -51,8 +51,8 @@ export function useTurnStream(threadId: string) {
     const control = new AbortController();
     running.current = control;
     const after = client.getQueryData<Thread>(keys.thread(threadId))?.turns?.length ?? 0;
-    const change = (next: Partial<Live>) => setLive((now) => (running.current === control ? { ...(now ?? { question, stage: 'searching', after }), ...next } : now));
-    setLive({ question, stage: 'searching', after });
+    const change = (next: Partial<Live>) => setLive((now) => (running.current === control ? { ...(now ?? { question, stage: 'searching', after, exclude }), ...next } : now));
+    setLive({ question, stage: 'searching', after, exclude });
     try {
       const response = await fetch(`/v1/threads/${encodeURIComponent(threadId)}/turns`, {
         method: 'POST', signal: control.signal,
@@ -68,7 +68,7 @@ export function useTurnStream(threadId: string) {
       const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
       let buffer = '';
       let ended = false; // `saved` or `error` said: the turn came to its end
-      for (;;) {
+      reading: for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
         const got = sseEvents(buffer + value);
@@ -80,7 +80,7 @@ export function useTurnStream(threadId: string) {
           } catch {
             void reader.cancel();
             change({ stage: 'failed', error: undefined });
-            return;
+            break reading; // the turn the server kept is read below
           }
           if (event === 'saved' || event === 'error') ended = true;
           // nothing found: no answer is written, so there is no stage after the search

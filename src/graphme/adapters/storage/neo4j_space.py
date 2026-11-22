@@ -174,26 +174,42 @@ class Neo4jGraphSpace:
         source = extracted.document.source_path
         stated = list(stated_titles(source, source.suffix))
 
+        document, path = extracted.document.id, origin_of(extracted)
+
         def write(tx: ManagedTransaction) -> None:
-            # A pair its owner ungrouped stays ungrouped when the document is read again.
+            # The documents read from its file before -- an edited file is a new id, and
+            # those go once it is put (`build_graph`) -- and the ones they replaced: a scope
+            # or an ungroup naming any of them follows the file (`replaces`, `current`).
+            before = list(tx.run(self.scope.cypher(
+                "MATCH (d:Document) WHERE d.id = $document OR d.source_path = $path "
+                "RETURN d.id AS id, coalesce(d.replaces, []) AS replaces"),
+                document=document, path=path))
+            ids = sorted({document, *(record["id"] for record in before)})
+            replaces = sorted({record["id"] for record in before}
+                              | {old for record in before for old in record["replaces"]}
+                              - {document})
+            # A pair its owner ungrouped stays ungrouped when the document is read again, or
+            # edited and read as a new one.
             split = [record["other"] for record in tx.run(self.scope.cypher(
-                "MATCH (:Document {id: $document})-[r:SIMILAR_VERSION]-(o:Document) "
-                "WHERE r.split_by_user RETURN o.id AS other"), document=extracted.document.id)]
-            _forget(tx, self.scope, [extracted.document.id])
+                "UNWIND $ids AS id MATCH (:Document {id: id})-[r:SIMILAR_VERSION]-(o:Document) "
+                "WHERE r.split_by_user AND NOT o.id IN $ids RETURN DISTINCT o.id AS other"),
+                ids=ids)]
+            _forget(tx, self.scope, [document])
             _write_nodes(tx, self.scope, records["nodes"])
             _write_relationships(tx, self.scope, records["relationships"])
             _run(tx, self.scope,
                  "UNWIND $others AS other MATCH (d:Document {id: $document}), "
                  "(o:Document {id: other}) "
                  "MERGE (d)-[:SIMILAR_VERSION {split_by_user: true}]->(o)",
-                 document=extracted.document.id, others=split)
+                 document=document, others=split)
             _run(
                 tx, self.scope,
                 "MATCH (d:Document {id: $document}) "
                 "SET d.source_path = $path, d.title = $title, d.stated_titles = $stated, "
-                "d.modified_at = $modified",
-                document=extracted.document.id,
-                path=origin_of(extracted),
+                "d.modified_at = $modified, d.replaces = $replaces",
+                document=document,
+                path=path,
+                replaces=replaces or None,
                 title=identity_of(extracted).title,
                 stated=stated,
                 modified=modified_at(source),
@@ -229,6 +245,23 @@ class Neo4jGraphSpace:
             document=document_id,
         )
         return records[0]["path"] if records else None
+
+    def current(self, document_ids: Sequence[str]) -> dict[str, str]:
+        """Each of `document_ids` to the document the graph holds for it now: itself, or the
+        one read from its file since it was edited (`replaces`); one deleted since is left
+        out."""
+        # ponytail: every document's `replaces` read for a scoped question; index the old ids
+        # (a node per id) if a space of tens of thousands makes this slow.
+        records, _, _ = self._query(
+            "MATCH (d:Document) WHERE d.id IN $ids OR any(old IN d.replaces WHERE old IN $ids) "
+            "RETURN d.id AS id, [old IN coalesce(d.replaces, []) WHERE old IN $ids] AS was",
+            ids=list(document_ids))
+        asked = set(document_ids)
+        now: dict[str, str] = {}
+        for record in records:
+            now.update(dict.fromkeys(record["was"], record["id"]))
+        now.update({record["id"]: record["id"] for record in records if record["id"] in asked})
+        return now
 
     def delete_documents(self, document_ids: Sequence[str]) -> None:
         """The documents gone from the space, with every node and passage of theirs and every

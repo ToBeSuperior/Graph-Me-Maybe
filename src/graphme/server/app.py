@@ -125,6 +125,10 @@ def default_web() -> Path | None:
 MAX_QUESTION_CHARS = 1000
 """The longest question asked: a page of text is not a question, and it is what is embedded."""
 
+MAX_SCOPE_FILES = 500
+"""The most files a scope is found for: each is read whole to know its content, and a file kept
+online only is downloaded for that."""
+
 T = TypeVar("T")
 U = TypeVar("U")
 
@@ -656,7 +660,8 @@ def create_app(
             demo.watcher.forget(kind, target)
             return demo.watcher.targets()
 
-    @v1.post("/watch/{kind}/{target}/build", status_code=202, response_model=api.BuildState)
+    @v1.post("/watch/{kind}/{target}/build", status_code=202, response_model=api.BuildState,
+             dependencies=[HERE])
     def watch_build(kind: api.WatchKind, target: str, response: Response) -> dict[str, Any]:
         """A target built now, whatever its mode: what changed in its folder, or a mail
         account's new mail. 409, saying why, when nothing changed, a build runs or its
@@ -1204,7 +1209,7 @@ def create_app(
 
     def excluded(request: api.Question) -> dict[str, frozenset[str]]:
         """The documents left out of a question, as the search is handed them: nothing when
-        none is, so a question without them is asked as before."""
+        none is, so a question without them is asked with no exclusion at all."""
         return {"exclude": frozenset(request.exclude)} if request.exclude else {}
 
     @v1.post("/scope", response_model=api.Scope)
@@ -1213,7 +1218,8 @@ def create_app(
         content. `workspace` is the one holding most of the files (the open one wins a tie),
         `document_ids` those it holds; `missing` the files no workspace holds, `elsewhere`
         those another workspace holds (never built), and `build_into` where a missing file
-        may be built: that workspace, else the open one, never a mail workspace."""
+        may be built: that workspace, else the open one, never a mail workspace. More than
+        MAX_SCOPE_FILES files is a 400."""
         files: list[Path] = []
         missing: list[str] = []
         for each in request.paths:
@@ -1222,6 +1228,10 @@ def create_app(
             except (OSError, ValueError):  # not there, not a format read here
                 missing.append(each)
         files = list(dict.fromkeys(files))  # a file and its folder both given
+        if len(files) > MAX_SCOPE_FILES:  # turned away before any is read
+            raise HTTPException(
+                400, f"these paths hold {len(files):,} files, more than {MAX_SCOPE_FILES} -- "
+                     "choose fewer files, or ask in the workspace a folder already built is in")
         hashes = {str(f): h for f in files if (h := content_hash(f))}
         spaces = demo.workspaces
         # no registry: the one open graph, under the id the settings give it
@@ -1458,12 +1468,29 @@ def create_app(
                 return False
             return True
 
+        def rescoped() -> list[str] | None:
+            """The thread's scope as the graph holds it now: a document edited and built again
+            since it was chosen is named by its new reading, and the thread keeps that. Looked
+            up as the turn's search looks it up (`GraphRag._found`), so once a turn."""
+            if not kept.scope:
+                return kept.scope
+            now = rag_of(kept.workspace)[0].current(
+                frozenset(kept.scope) | frozenset(body.exclude or ()))
+            scope = list(dict.fromkeys(now.get(i, i) for i in kept.scope))
+            if scope != kept.scope:
+                with contextlib.suppress(KeyError):  # deleted meanwhile: the turn says so
+                    store.patch(thread_id, scope=scope, scope_given=True)
+            return scope
+
         def turn(said: Said) -> api.ThreadTurn:
             made = api.ThreadTurn(question=request.question.strip(), scope=kept.scope,
-                                  stamp=body.stamp, asked_at=time.time())
+                                  exclude=body.exclude or None, stamp=body.stamp,
+                                  asked_at=time.time())
             got: dict[str, Any] = {}
             try:
-                staged(request, said, got)
+                with one_search():  # the scope's lookup and the turn's search are one turn's
+                    made.scope = rescoped()
+                    staged(request, said, got)
             except Stopped:
                 kept_with(made, got)  # the client left: what was paid for is kept, not said
                 raise

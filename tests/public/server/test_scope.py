@@ -186,3 +186,21 @@ def test_a_file_held_in_two_other_workspaces_names_the_first_listed(
 
     assert said["workspace"] == FIRST
     assert said["elsewhere"] == [{"path": str(both), "workspace": first}]
+
+
+def test_a_scope_of_too_many_files_is_turned_away_before_any_is_read(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from graphme.server import app as server_app
+
+    for n in range(3):
+        _file(tmp_path, f"invented-{n}.docx", b"invented %d" % n)
+    monkeypatch.setattr(server_app, "MAX_SCOPE_FILES", 2, raising=False)
+    read: list[Path] = []
+    monkeypatch.setattr(server_app, "content_hash", lambda path: read.append(path))
+
+    said = client.post("/v1/scope", json={"paths": [str(tmp_path)]})
+
+    assert said.status_code == 400
+    assert "3 files" in said.json()["detail"] and "fewer" in said.json()["detail"]
+    assert read == []

@@ -97,7 +97,7 @@ def test_no_history_asks_as_today() -> None:
 
     rag.find("What is the invented hold time?", documents=1)
 
-    # The split request this question made before follow-ups existed, byte for byte.
+    # The split request of a question with no earlier turns, byte for byte.
     assert hashlib.sha256(_split_body(sent)).hexdigest() == TODAY
     assert retriever.searched == ["What is the invented hold time?"]
 
@@ -116,4 +116,24 @@ def test_the_answer_reads_the_earlier_turns() -> None:
     assert prompt.index("What does WO-1 follow?") < prompt.index("Context:")
     assert prompt.rstrip().endswith("Answer in English:")
     assert "How long is its hold time?" in prompt  # answered in the user's own words
-    assert answer.queries == ("QP-9 hold time",)
+    assert answer.text and rag.last_queries(
+        "How long is its hold time?", EARLIER) == ("QP-9 hold time",)
+
+
+def test_an_empty_history_or_a_nothing_found_turn_asks_the_question_as_written() -> None:
+    from graphme.adapters.storage.answer_prompt import _nothing_found
+
+    question = "What is the invented hold time?"
+    sent: list[httpx.Request] = []
+    rag, retriever = _rag({"queries": ["invented hold time"]}, sent)
+    rag.find(question, documents=1, history=[])
+    assert hashlib.sha256(_split_body(sent)).hexdigest() == TODAY  # as with no history at all
+    assert retriever.searched == [question]
+
+    SPLITS._kept.clear()
+    sent.clear()
+    rag, retriever = _rag({"queries": ["invented hold time"], "standalone": ""}, sent)
+    nothing = [Turn("What is the invented rest time?",
+                    _nothing_found("What is the invented rest time?"))]
+    answer = rag.ask(question, documents=1, history=nothing)
+    assert retriever.searched == [question] and answer.text == "Ten minutes."

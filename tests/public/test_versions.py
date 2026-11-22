@@ -100,11 +100,11 @@ def test_a_shown_member_carries_the_others_with_the_latest_marked() -> None:
     assert walked[1]["linked"] == [], "a version of a shown document is not brought along"
 
 
-def test_a_question_scoped_to_several_members_shows_each_and_an_excluded_one_gives_way() -> None:
+def test_a_question_scoped_to_several_members_shows_each() -> None:
     ranked = [_passage("v1"), _passage("v2")]
 
     assert fold_versions(ranked, _FAMILY, only=frozenset({"v1", "v2"})) == ranked
-    # `exclude` took v1 out before the fold: its version stands for the family.
+    # one member alone in the passages stands for its family
     assert fold_versions([_passage("v2")], _FAMILY) == [_passage("v2")]
 
 
@@ -115,11 +115,11 @@ def test_an_ungrouped_pair_stays_split_when_regrouped_or_read_again() -> None:
 
     driver = _Recording()
     space = Neo4jGraphSpace(driver, scope=SCOPE)  # type: ignore[arg-type]
-    ANSWERS["WHERE r.split_by_user RETURN o.id AS other"] = [{"other": "cd"}]
+    ANSWERS["RETURN DISTINCT o.id AS other"] = [{"other": "cd"}]
     try:
         space.put_document(named_document("ab", "invented.pdf"))
     finally:
-        del ANSWERS["WHERE r.split_by_user RETURN o.id AS other"]
+        del ANSWERS["RETURN DISTINCT o.id AS other"]
     kept = [p for q, p in driver.sent if "{split_by_user: true}" in q]
     assert kept and kept[0]["others"] == ["cd"], "read again, the split is written back"
 
@@ -127,3 +127,28 @@ def test_an_ungrouped_pair_stays_split_when_regrouped_or_read_again() -> None:
     space.group_versions()
     cleared = [q for q, _ in driver.sent if "SIMILAR_VERSION" in q and "DELETE" in q]
     assert cleared and all("split_by_user IS NULL" in q for q in cleared)
+
+
+def test_an_ungrouped_pair_stays_apart_after_one_side_is_rebuilt() -> None:
+    # rules-2026.docx (c1, ungrouped from c0) is edited: its new reading (c2) replaces c1
+    from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
+    from tests.fakes.documents import named_document
+    from tests.public.test_scoped_queries import ANSWERS, SCOPE, _Recording
+
+    driver = _Recording()
+    space = Neo4jGraphSpace(driver, scope=SCOPE)  # type: ignore[arg-type]
+    held = {"AS replaces": [{"id": "c1", "replaces": ["c-older"]}],
+            "RETURN DISTINCT o.id AS other": [{"other": "c0"}]}
+    ANSWERS.update(held)
+    try:
+        space.put_document(named_document("c2", "rules-2026.docx"))
+    finally:
+        for key in held:
+            del ANSWERS[key]
+
+    asked = [p for q, p in driver.sent if "RETURN DISTINCT o.id AS other" in q]
+    assert asked and sorted(asked[0]["ids"]) == ["c1", "c2"], "the old reading's splits are read"
+    kept = [p for q, p in driver.sent if "{split_by_user: true}" in q]
+    assert kept and kept[0]["others"] == ["c0"], "and written for the new one"
+    lineage = [p for q, p in driver.sent if "d.replaces = $replaces" in q]
+    assert lineage and lineage[0]["replaces"] == ["c-older", "c1"]

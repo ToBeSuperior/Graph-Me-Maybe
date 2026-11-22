@@ -135,3 +135,21 @@ def test_a_build_gives_back_to_the_cloud_only_what_was_online_only_before_it_rea
 
     assert until(lambda: build.state == "done" and given_back), build
     assert given_back == [online]  # a file the user keeps here is left as it is
+
+
+def test_a_switch_during_a_sweep_leaves_the_new_workspace_s_files_alone(
+    demo: Demo, space: FakeSpace, monkeypatch: Any
+) -> None:
+    _demo_store(demo)
+    opened = demo.settings.model_copy(update={"data_dir": demo.root / "other"})
+    theirs = _aged(LocalAssetStore(opened.asset_dir), b"the other workspace's crop")
+    held = space.crop_hashes
+
+    def switched() -> set[str]:  # the workspace switched while the graph was asked
+        demo.settings = opened
+        return held()
+    monkeypatch.setattr(space, "crop_hashes", switched)
+
+    demo.sweep_assets()
+
+    assert LocalAssetStore(opened.asset_dir).path_for(theirs, ".png").exists()

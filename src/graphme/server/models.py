@@ -407,6 +407,8 @@ class ThreadTurn(_Model):
     question: str
     scope: list[str] | None = None
     """The documents the turn was asked about; None for every document."""
+    exclude: list[str] | None = None
+    """The documents left out of this turn alone; asked again, they are left out again."""
     found: Found | None = None
     answer: Answer | None = None
     stamp: str | None = None

@@ -258,3 +258,20 @@ def test_ask_window_runs_on_the_home_the_settings_name(
 
     assert result.exit_code == 0, result.output
     assert homes == [dev]
+
+
+def test_a_write_cut_short_leaves_the_kept_place_whole(tmp_path: Path,
+                                                        monkeypatch: Any) -> None:
+    import pytest
+
+    ask_window._keep(tmp_path, opacity=0.8)
+
+    def cut_short(self: Path, *_: Any, **__: Any) -> int:
+        self.open("w").close()  # emptied, then the disk filled
+        raise OSError("no space left")
+    monkeypatch.setattr(Path, "write_text", cut_short)
+    with pytest.raises(OSError):
+        ask_window._keep(tmp_path, opacity=0.5)
+    monkeypatch.undo()
+
+    assert ask_window.kept_opacity(tmp_path) == 0.8

@@ -107,6 +107,13 @@ last build's result (how many went in, and why each failure failed) stays in its
 workspace open is named in the top bar, where another is opened or made. A tour of every screen is in
 [docs/user-guide.md](docs/user-guide.md).
 
+> [!TIP]
+> On macOS, **Ask Graph-Me-Maybe** first shows under **Finder › Services** (also at the bottom of a
+> folder's right-click menu). To have it in every file's right-click menu, right-click a file, choose
+> **Quick Actions › Customize…**, and tick **Ask Graph-Me-Maybe** (System Settings › Extensions ›
+> Finder). On Windows it is in the right-click menu as soon as it is turned on (on Windows 11, under
+> **Show more options**).
+
 ### Command line
 
 The CLI uses the same graph as the app.

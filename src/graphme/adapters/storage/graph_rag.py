@@ -130,7 +130,11 @@ _TURN: ContextVar[Remembered[Any] | None] = ContextVar("graphme_turn", default=N
 def one_search() -> Iterator[None]:
     """A turn whose stages each search: inside it, every search a reader makes is made once and
     kept until it ends, so an answer started after its search finished still reads the passages
-    the search showed. A thread the turn starts takes it along with `contextvars.copy_context`."""
+    the search showed. A thread the turn starts takes it along with `contextvars.copy_context`.
+    Inside a turn already, it is that turn."""
+    if _TURN.get() is not None:
+        yield
+        return
     token = _TURN.set(Remembered(TURN_SEARCHES))
     try:
         yield
@@ -430,8 +434,6 @@ class GraphAnswer:
     claims: list[Claim] = field(default_factory=list)
     checked: bool = False
     """Whether the claims were checked; false when the check was off or failed."""
-    queries: tuple[str, ...] = ()
-    """What was searched for it (`GraphRag.last_queries`)."""
 
 
 class GraphRag:
@@ -646,8 +648,7 @@ class GraphRag:
         # A graph_chunk holding a table, a picture or a chart says it in words a model wrote
         # once; the picture goes too, so the answer reads it, not the description.
         pictures = [picture for each in self.pictures(items) for picture in each]
-        return replace(self.written(question, items, pictures, history, shown=shown),
-                       queries=self.last_queries(question, history))
+        return self.written(question, items, pictures, history, shown=shown)
 
     def written(self, question: str, items: Sequence[RetrieverResultItem],
                 pictures: Sequence[tuple[str, bytes]],
@@ -765,13 +766,23 @@ class GraphRag:
         a document. A document the question names, where the search found it, comes first
         (`named_first`). An answer and its folder page ask side by side: the search runs once
         for both, and asking for fewer documents takes the front of the same passages.
+        `only` and `exclude` name documents as they were when chosen: each is read as the one
+        the graph holds for it now (`current`), so an edited file's new reading answers.
         `only` searches the passages of the documents it names, and brings the linked
         documents inside it alone; a scoped search is shared by its scope.
-        `only` empty finds nothing, None is every document. `exclude` leaves its documents out
-        of this question alone: their passages are not found nor are they brought as linked.
+        `only` empty finds nothing, None is every document. `exclude` leaves its documents, and
+        their copies and versions, out of this question alone: their passages are not found
+        nor are they brought as linked.
         Copies and versions of one document (`family`, `_families`) fold to the best-ranked of
         them (`fold_versions`) once `only` and `exclude` are applied."""
         queries, said, searched = self._asked(question, history)
+        if asked := (only or frozenset()) | exclude:  # each as the graph holds it now
+            now = self.current(asked)
+            only = None if only is None else frozenset(now[i] for i in only if i in now)
+            exclude = frozenset(now[i] for i in exclude if i in now)
+        # a document left out takes its copies and versions with it, save one the scope names
+        exclude = exclude | {m.document_id for d in exclude for m in (family or {}).get(d, ())
+                             if only is None or m.document_id not in only}
 
         def search() -> list[neo4j.Record]:
             retriever = self._retriever()
@@ -800,6 +811,13 @@ class GraphRag:
         # into the documents found (`filled`)
         return _marked(self._linked(named_only(ranked, named) if named else filled(order, taken),
                                     searched, only, exclude), every)
+
+    def current(self, ids: frozenset[str]) -> dict[str, str]:
+        """Each of `ids` to the document the graph holds for it now: itself, or the one read
+        from its file since it was edited; one deleted since is left out
+        (`Neo4jGraphSpace.current`). Looked up once a turn, however many of its stages ask."""
+        return cast(dict[str, str], self._shared(
+            ("current", ids), lambda: self._space.current(sorted(ids))))
 
     def _families(self) -> dict[str, tuple[Member, ...]]:
         """Each document of a family of copies and versions, by id, to its whole family -- read
@@ -894,14 +912,14 @@ class GraphRag:
 
     def _split_question(self, question: str, asked: str,
                         history: Sequence[Turn] = ()) -> _Asked | None:
-        # A question asked with no turns before it is split as it always was.
+        # A question with no earlier turns is split by SPLIT_SYSTEM alone.
         system, shape = (FOLLOW_UP_SYSTEM, _FollowUp) if history else (SPLIT_SYSTEM, _Split)
         try:
             reply = self._complete(
                 system=system, content=asked,
                 schema=strict_response_schema(shape), name="question_split")
             written = shape.model_validate_json(reply)
-        except Exception as error:  # noqa: BLE001 -- unsplit is how every question was asked
+        except Exception as error:  # noqa: BLE001 -- a question unsplit is asked as written
             _log.warning("question not split -- %s", str(error)[:200])
             return None  # not kept: the next ask tries the model again
         # The question as it reads on its own is what is searched for and what names a document.

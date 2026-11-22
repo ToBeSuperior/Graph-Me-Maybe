@@ -51,7 +51,9 @@ def _kept(home: Path) -> dict[str, Any]:
 
 
 def _keep(home: Path, **changed: Any) -> None:
-    (home / PLACE).write_text(json.dumps({**_kept(home), **changed}), encoding="utf-8")
+    fresh = home / f"{PLACE}.tmp"
+    fresh.write_text(json.dumps({**_kept(home), **changed}), encoding="utf-8")
+    fresh.replace(home / PLACE)  # whole: a write cut short leaves the last place
 
 
 def clamped(value: float) -> float:

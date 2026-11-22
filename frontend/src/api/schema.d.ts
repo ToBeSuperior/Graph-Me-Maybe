@@ -649,7 +649,8 @@ export interface paths {
         /**
          * Ungroup
          * @description The document taken out of the family it was grouped in, as its own row and its own
-         *     search result from now on; a later build never groups it with them again.
+         *     search result from now on; a later build never pairs it with them directly again (it
+         *     can still join a family through another document it is a version of).
          */
         post: operations["ungroup_v1_documents__document_id__ungroup_post"];
         delete?: never;
@@ -1038,7 +1039,8 @@ export interface paths {
          *     content. `workspace` is the one holding most of the files (the open one wins a tie),
          *     `document_ids` those it holds; `missing` the files no workspace holds, `elsewhere`
          *     those another workspace holds (never built), and `build_into` where a missing file
-         *     may be built: that workspace, else the open one, never a mail workspace.
+         *     may be built: that workspace, else the open one, never a mail workspace. More than
+         *     MAX_SCOPE_FILES files is a 400.
          */
         post: operations["scope_v1_scope_post"];
         delete?: never;
@@ -2168,6 +2170,8 @@ export interface components {
             question: string;
             /** Scope */
             scope?: string[] | null;
+            /** Exclude */
+            exclude?: string[] | null;
             found?: components["schemas"]["Found"] | null;
             answer?: components["schemas"]["Answer"] | null;
             /** Stamp */

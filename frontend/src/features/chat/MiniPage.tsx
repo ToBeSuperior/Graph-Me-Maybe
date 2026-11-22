@@ -96,8 +96,8 @@ export function MiniPage({ id }: { id: string }) {
     void bridge.paths().then((paths) => (paths.length ? askPaths(paths) : undefined));
   }, [bridge, kept, workspaces.data, askPaths]);
 
-  const askNow = useCallback((question: string, documents?: number) => {
-    void ask(question, { documents, stamp });
+  const askNow = useCallback((question: string, documents?: number, exclude?: string[]) => {
+    void ask(question, { documents, stamp, exclude });
   }, [ask, stamp]);
   useEffect(() => {
     if (queued && !scoped.waiting) { askNow(queued.question, queued.documents); setQueued(null); }

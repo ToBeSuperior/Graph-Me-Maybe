@@ -109,6 +109,7 @@ def _ran_everything(driver: _Recording) -> None:
     space.read_from("invented.pdf")
     space.relocate("0" * 64, "invented.pdf")
     space.source_path("ab")
+    space.current(["ab"])
     space.delete_documents(["ab"])
     space.carried_only_by(["ab"])
     space.identities()
@@ -155,6 +156,7 @@ def _ran_everything(driver: _Recording) -> None:
     rag._rag = retriever
     rag.ask("an invented question", documents=1)
     rag.find("an invented question", documents=1)
+    rag.find("an invented question", documents=1, only=frozenset({"ab"}))
     documents_with_message_ids(driver, ["<a@invented.test>"], scope=SCOPE)  # type: ignore[arg-type]
     SimilarDocuments(driver, index=SCOPE.vector_index, vector_property="embedding",  # type: ignore[arg-type]
                      scope=SCOPE).relate(None)

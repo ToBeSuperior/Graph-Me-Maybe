@@ -25,6 +25,24 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
   pair it with those files directly again. A document you scope a
   question to, or leave out of it, is never folded away.
 
+### Fixed
+
+- **Ask again without this** leaves out the whole group: the other versions of the file no
+  longer stand in its place.
+- A file edited and built again keeps what you attached to it: a conversation scoped to it
+  still asks it (and now names its new reading), and a file you ungrouped stays apart from
+  that group.
+- **Ask Graph-Me-Maybe** on a folder of more than 500 files says so at once, rather than reading
+  every file (and downloading every online-only one) before the window opens.
+- The menu-bar icon no longer reads the whole graph every 3 seconds: it shows what the last look
+  at the watched folders found. A finished build of a watched folder's changes shows nothing
+  changed at once.
+- A turn asked again -- **Ask again**, **Retry**, **Search wider** -- leaves out what that turn
+  left out; a saved turn records it (`ThreadTurn.exclude`).
+- A turn whose reply arrives cut off shows the turn the server kept, without a reload.
+- `POST /v1/watch/{kind}/{target}/build` takes requests from this machine's own pages only, as
+  the other watch and mail routes do.
+
 ## [0.2.1] - 2026-11-22
 
 ### Added

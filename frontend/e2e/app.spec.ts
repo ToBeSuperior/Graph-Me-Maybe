@@ -133,6 +133,21 @@ test('“ask only this” puts the document in the scope, and the next turn asks
   await expect(scope).toContainText('모든 문서');
 });
 
+test('a reply that cannot be read still shows the turn the server kept', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto(`/?q=${encodeURIComponent('시험 압력은?')}&k=5`);
+  await expect(page.getByRole('tree')).toBeVisible();
+  // The server keeps the turn; what reaches the page is cut off mid-word.
+  await page.route('**/v1/threads/t1/turns', async (route) => {
+    fake.threads.t1.turns.push({ question: '유지 시간은?', scope: null, exclude: null, answer: null, stamp: null, asked_at: 3, error: null,
+      found: { sources: [], queries: ['유지 시간은?'], text_only: false } });
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'event: searched\ndata: {"sources": [\n\n' });
+  });
+  await page.getByRole('textbox', { name: '문서에 대해 질문하세요' }).fill('유지 시간은?');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('관련 문서 없음')).toBeVisible();
+});
+
 test('“ask again without this” leaves the document out of that turn alone', async ({ page }) => {
   const fake = await fakeApi(page);
   await page.goto(`/?q=${encodeURIComponent('시험 압력은?')}&k=5`);
@@ -144,9 +159,13 @@ test('“ask again without this” leaves the document out of that turn alone', 
   // The conversation still asks about every document.
   await expect(page.getByRole('group', { name: '질문 범위' })).toContainText('모든 문서');
   expect(fake.threads.t1.scope).toBeNull();
+  // That turn asked again still leaves the document out.
+  await page.getByRole('button', { name: '더 넓게 찾기' }).click();
+  await expect.poll(() => fake.turns[2]?.exclude).toEqual(['proc']);
+  await expect(page.getByText('관련 문서 없음')).toHaveCount(2);
   await page.getByRole('textbox', { name: '문서에 대해 질문하세요' }).fill('유지 시간은?');
   await page.keyboard.press('Enter');
-  await expect.poll(() => fake.turns[2]?.exclude).toBeNull();
+  await expect.poll(() => fake.turns[3]?.exclude).toBeNull();
 });
 
 test('a file dropped in a mail workspace is asked in another, opened first', async ({ page }) => {
