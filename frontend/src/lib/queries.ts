@@ -9,9 +9,8 @@ export const keys = {
   build: ['build'] as const,
   library: ['library'] as const,
   map: ['map'] as const,
-  // Under the graph it was asked of: a graph changed is a new key, never the old answer.
-  search: (question: string, topK: number, stamp: string | null) => ['search', question, topK, stamp] as const,
-  ask: (question: string, topK: number, stamp: string | null) => ['ask', question, topK, stamp] as const,
+  threads: ['threads'] as const,
+  thread: (id: string) => ['thread', id] as const,
   document: (id: string) => ['document', id] as const,
   pagesOf: (id: string) => ['pagesOf', id] as const,
   sheets: (doc: string) => ['sheets', doc] as const,
@@ -24,9 +23,8 @@ export const keys = {
   mail: ['mail'] as const,
 };
 
-/** The graph changed: what is drawn from it is asked again. A question's search and answer are
- * not: their keys carry the graph's fingerprint, so the new map makes them new questions --
- * asking the old ones again would only buy a model call the page then throws away. */
+/** The graph changed: what is drawn from it is asked again. A conversation's turns are not: each
+ * keeps the fingerprint of the graph it was asked of, and says when that is not the graph now. */
 export function graphChanged(client: QueryClient) {
   for (const key of [keys.library, keys.map, ['document'], ['pagesOf'], ['desktopDriveUsage']]) {
     client.invalidateQueries({ queryKey: key });
@@ -150,3 +148,13 @@ export function useMailWorkspace() {
   const { data } = useWorkspaces();
   return data?.items?.find((i) => i.id === data.active)?.kind === 'mail';
 }
+
+/** The conversations kept for the workspace open, the latest changed first. */
+export const useThreads = () => useQuery({ queryKey: keys.threads, queryFn: () => call(api.GET('/v1/threads')) });
+
+/** One conversation and its turns. */
+export const useThread = (id: string) => useQuery({
+  queryKey: keys.thread(id),
+  queryFn: () => call(api.GET('/v1/threads/{thread_id}', { params: { path: { thread_id: id } } })),
+  retry: false,
+});

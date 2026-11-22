@@ -6,20 +6,24 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { api, call } from '../../api/client';
 import { Button } from '../../components/ui';
-import { useT } from '../../lib/i18n';
+import { useT, type T } from '../../lib/i18n';
+
+/** The document's file opened by the server; a failure said in a toast. */
+export async function openOriginal(id: string, t: T) {
+  try {
+    await call(api.POST('/v1/documents/{document_id}/open', { params: { path: { document_id: id } } }));
+  } catch (error) {
+    toast.error(t('cannotOpenOriginal'), { description: (error as Error).message });
+  }
+}
 
 export function OpenOriginal({ id }: { id: string }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
   const open = async () => {
     setBusy(true);
-    try {
-      await call(api.POST('/v1/documents/{document_id}/open', { params: { path: { document_id: id } } }));
-    } catch (error) {
-      toast.error(t('cannotOpenOriginal'), { description: (error as Error).message });
-    } finally {
-      setBusy(false);
-    }
+    await openOriginal(id, t);
+    setBusy(false);
   };
   return (
     <Button variant="secondary" size="sm" busy={busy} onClick={() => void open()} title={t('openOriginalTip')}>

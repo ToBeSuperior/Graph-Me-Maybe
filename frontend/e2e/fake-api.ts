@@ -4,8 +4,11 @@ import type { Page, Route } from '@playwright/test';
 
 type Kind = 'box' | 'google' | 'onedrive' | 'dropbox' | 'icloud' | 'synology';
 
-interface Fake { found: Record<Kind, boolean>; workspaces: { active: string; mcp_enabled: boolean; mcp_changes: boolean; items: { id: string; name: string; mcp: boolean }[] }; opened: string[]; originals: string[]; deletedWorkspaces: string[]; connected: Record<Kind, boolean>; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; uploaded: string[]; built: string[][]; starting: number; mail: { accounts: Record<string, unknown>[]; connected: Record<string, unknown>[]; read: unknown[]; earlier: number; left: string[] } }
+interface Fake { found: Record<Kind, boolean>; workspaces: { active: string; mcp_enabled: boolean; mcp_changes: boolean; items: { id: string; name: string; mcp: boolean }[] }; opened: string[]; originals: string[]; deletedWorkspaces: string[]; connected: Record<Kind, boolean>; boxDrive: string[][]; box: { configured: boolean; connected: boolean; picked: Record<string, string>[]; built: number }; searchModels: Record<string, unknown>[]; installed: string[]; removed: string[]; reset: number; asked: string[]; answered: number; topK: number[]; saved: Record<string, string>[]; cancelled: string[]; refused: number; uploaded: string[]; built: string[][]; starting: number; threads: Record<string, FakeThread>; turns: { question: string; only: string[] | null; exclude: string[] | null; documents: number | null; stamp: string | null }[]; scoped: string[][]; mail: { accounts: Record<string, unknown>[]; connected: Record<string, unknown>[]; read: unknown[]; earlier: number; left: string[] } }
 
+
+/** A conversation as the server keeps it. */
+interface FakeThread { id: string; title: string; scope: string[] | null; workspace: string; turns: Record<string, unknown>[]; created_at: number; updated_at: number }
 
 /** A job as `GET /v1/jobs` lists it, newest first. */
 type FakeJob =Record<string, unknown> & { id: string; kind: string; state: string };
@@ -46,7 +49,7 @@ export async function fakeApi(page: Page,
     found: { box: boxDrive, google: googleDrive, onedrive: oneDrive, dropbox: dropbox, icloud: false, synology: false }, opened: [], originals: [], deletedWorkspaces: [],
     connected: { box: false, google: false, onedrive: false, dropbox: false, icloud: false, synology: false }, boxDrive: [], box: { configured: box, connected: box, picked: [], built: 0 },
     installed: [], removed: [], reset: 0, asked: [], answered: 0, topK: [], saved: [], cancelled: [], refused: 0,
-    uploaded: [], built: [], starting, mail: { accounts: [], connected: [], read: [], earlier: 0, left: [] } };
+    uploaded: [], built: [], starting, threads: {}, turns: [], scoped: [], mail: { accounts: [], connected: [], read: [], earlier: 0, left: [] } };
   if (mailWorkspace) fake.workspaces.items.push({ id: 'm1', name: 'kim@invented.test', mcp: false, kind: 'mail', account: 'a1' } as never);
   if (mailWorkspace) fake.workspaces.active = 'm1';
   const json = (route: Route, body: unknown, status = 200) =>
@@ -233,18 +236,60 @@ export async function fakeApi(page: Page,
         name: d.label, format: d.label.split('.').pop(), in_space: true, document_id: d.id, file_id: `file-${d.id}`,
         state: 'idle', modified: d.modified_at })).concat(reading as never[]) });
     }
-    if (path === '/v1/search') {
-      fake.asked.push(route.request().postDataJSON().question);
-      fake.topK.push(route.request().postDataJSON().documents);
+    // Conversations: a turn is streamed as the server streams it -- found, answered, checked, saved.
+    if (path === '/v1/threads' && method === 'GET') {
+      return json(route, Object.values(fake.threads).reverse().map((t) => ({ id: t.id, title: t.title, updated_at: t.updated_at, turns: t.turns.length })));
+    }
+    if (path === '/v1/threads' && method === 'POST') {
+      const body = route.request().postDataJSON() ?? {};
+      const id = `t${Object.keys(fake.threads).length + 1}`;
+      fake.threads[id] = { id, title: '', scope: body.scope ?? null, workspace: body.workspace ?? fake.workspaces.active, turns: [], created_at: 1, updated_at: 1 };
+      return json(route, fake.threads[id]);
+    }
+    const thread = path.match(/^\/v1\/threads\/([^/]+)(\/turns)?$/);
+    if (thread) {
+      const kept = fake.threads[thread[1]];
+      if (!kept) return json(route, { detail: 'this conversation cannot be found' }, 404);
+      if (!thread[2] && method === 'GET') return json(route, kept);
+      if (!thread[2] && method === 'PATCH') { Object.assign(kept, route.request().postDataJSON()); return json(route, kept); }
+      if (!thread[2] && method === 'DELETE') { delete fake.threads[kept.id]; return json(route, { deleted: kept.id }); }
+      const { question, documents, stamp, exclude } = route.request().postDataJSON();
+      fake.turns.push({ question, only: kept.scope, exclude: exclude ?? null, documents: documents ?? null, stamp: stamp ?? null });
+      fake.asked.push(question);
+      fake.topK.push(documents);
       if (slow) await new Promise((r) => setTimeout(r, slow));
       // A message found first, its name carrying the digest that tells two of one subject apart.
       const message = { id: 'msg:0', score: 0.95, document_id: 'msg', file: 'Invented valve order.emb0a1b2c3d.eml',
         members: ['b1'], modified: 1767225600, context: 'Invented valve order\nPlease find the order attached.', linked: [] };
-      return json(route, { sources: mailDoc ? [message, ...sources] : sources });
-    }
-    if (path === '/v1/ask') {
+      const found = { sources: (mailDoc ? [message, ...sources] : sources).filter((x) => (!kept.scope || kept.scope.includes(x.document_id)) && !exclude?.includes(x.document_id)), queries: [question], text_only: false };
       fake.answered += 1;
-      return json(route, { answer: `시험 압력은 **1.0 MPa**이다. [${docs[0].label}]\n| 항목 | 기준 |\n|---|---|\n| 압력 | 1.0 MPa |`, sources });
+      const answer = { ...found, answer: `시험 압력은 **1.0 MPa**이다. [${docs[0].label}]\n| 항목 | 기준 |\n|---|---|\n| 압력 | 1.0 MPa |\n\n유지 시간은 5분이다. [${docs[1].label}]`, claims: [] };
+      const checked = { checked: true, claims: [
+        { text: '시험 압력은 **1.0 MPa**이다.', supported: true, correction: null, files: [docs[0].label] },
+        { text: '유지 시간은 5분이다.', supported: false, correction: '유지 시간은 10분이다.', files: [docs[1].label] }] };
+      const saved = { question, scope: kept.scope, found, answer: { ...answer, ...checked }, stamp: stamp ?? null, asked_at: 2, error: null };
+      const event = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+      const body = found.sources.length
+        ? event('searched', found) + event('answered', answer) + event('checked', checked) + event('saved', saved)
+        : event('searched', found) + event('saved', { ...saved, answer: null });
+      try {
+        await route.fulfill({ status: 200, contentType: 'text/event-stream', body });
+      } catch { return; } // the page stopped it
+      kept.turns.push(found.sources.length ? saved : { ...saved, answer: null });
+      kept.title ||= question;
+      return;
+    }
+    // Files on this computer as documents of the graph: a path naming "New" is in none until built.
+    if (path === '/v1/scope' && method === 'POST') {
+      const { paths } = route.request().postDataJSON() as { paths: string[] };
+      fake.scoped.push(paths);
+      // "Audit" is held by the other workspace, "New" by none until a build; the rest is the spec.
+      const audit = paths.filter((p) => p.includes('Audit'));
+      if (audit.length === paths.length) return json(route, { document_ids: ['proc'], missing: [], elsewhere: [], workspace: 'w2', build_into: 'w2' });
+      const missing = paths.filter((p) => p.includes('New') && !fake.boxDrive.length);
+      const held = paths.filter((p) => !audit.includes(p) && !missing.includes(p));
+      return json(route, { document_ids: held.map((p) => (p.includes('New') ? 'deck' : 'spec')), missing,
+        elsewhere: audit.map((p) => ({ path: p, workspace: 'w2' })), workspace: fake.workspaces.active, build_into: fake.workspaces.active });
     }
     if (path === '/v1/graph/reset' && method === 'POST') {
       fake.reset += 1;

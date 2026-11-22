@@ -2,7 +2,9 @@
 the contract at `/docs`, and the web app for every other path."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import contextvars
 import hmac
 import html
 import json
@@ -10,8 +12,11 @@ import logging
 import math
 import shutil
 import sys
+import threading
+import time
 import traceback
 from collections.abc import AsyncIterator, Callable, Iterator
+from concurrent import futures
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -32,13 +37,20 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from neo4j.exceptions import Neo4jError, ServiceUnavailable, SessionExpired
+from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from graphme import __version__, processes, runtime
+from graphme import __version__, context_menu, processes, runtime
 from graphme.adapters.chat import picture_type
 from graphme.adapters.export.neo4j import graph_records, records_cypher, to_cypher
 from graphme.adapters.export.neo4j_admin import AURA_URI
@@ -48,14 +60,18 @@ from graphme.adapters.sources.box import Picked as BoxPicked
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import (
     MAX_DOCUMENTS,
+    GraphAnswer,
     GraphNotEmbedded,
     GraphRag,
     GraphSource,
+    Turn,
     ask_across,
     find_across,
+    one_search,
 )
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, modified_at
 from graphme.api import GraphMe
+from graphme.application.corpus_build import content_hash
 from graphme.application.embedded_documents import name_part
 from graphme.application.ingest import documents_at
 from graphme.application.visual_crops import (
@@ -79,8 +95,9 @@ from graphme.server.jobs import (
     Undrawn,
     elapsed,
 )
-from graphme.server.settings import changed, described, from_here, preflight_behind
+from graphme.server.settings import changed, described, from_here, home_of, preflight_behind
 from graphme.server.state import SPACE_WAIT, Demo
+from graphme.server.threads import ThreadStore
 
 WEB = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 """The web app as a checkout builds it (`npm run build` in `frontend/`); an installed package
@@ -120,6 +137,16 @@ MAP_LIMIT = 300
 """The most documents the map draws: past it, the ones with the fewest links are left off."""
 
 
+UNHANDLED = f"the server could not handle this {IN_LOG}"
+"""What a failure no handler names says: the whole of it is in the log."""
+
+UNREACHABLE = f"cannot connect to the graph DB {IN_LOG}"
+"""What a graph DB reached once and lost since says."""
+
+THREAD_DELETED = "the conversation was deleted while it was asked"
+"""What a turn says when its thread was deleted before the turn could be kept."""
+
+
 def errors(app: FastAPI) -> None:
     """Every answer that is not a success said as `{"detail": str}`: a request that cannot be
     read (400), this project's own refusals (`Busy`, `GraphNotEmbedded` 409, `Undrawn` 503,
@@ -152,12 +179,76 @@ def errors(app: FastAPI) -> None:
     async def unreachable(_: Request, error: Exception) -> JSONResponse:
         # Reached once and lost since: `opened()` says it only when the space is first opened.
         logging.warning("the graph DB cannot be reached: %s", error)
-        return JSONResponse({"detail": f"cannot connect to the graph DB {IN_LOG}"}, 503)
+        return JSONResponse({"detail": UNREACHABLE}, 503)
 
     @app.exception_handler(Exception)
     async def failed(_: Request, error: Exception) -> JSONResponse:
         # Logged again by the server once this answer is sent, with its traceback.
-        return JSONResponse({"detail": f"the server could not handle this {IN_LOG}"}, 500)
+        return JSONResponse({"detail": UNHANDLED}, 500)
+
+
+Said = Callable[[str, BaseModel], None]
+"""How a streamed question says a stage: the event's name and what it carries."""
+
+class Stopped(BaseException):
+    """The client of a streamed question is gone. Not an `Exception`: it passes every handler
+    that turns a failure into an answer on its way out, as a cancel does."""
+
+
+def told(error: BaseException) -> str:
+    """What a failure says to a client, as the error handlers would; never this machine's
+    paths."""
+    if isinstance(error, HTTPException):
+        return str(error.detail)
+    if isinstance(error, (Busy, GraphNotEmbedded, GraphStarting, Undrawn)):
+        return str(error)
+    if isinstance(error, (ServiceUnavailable, SessionExpired)):
+        return UNREACHABLE
+    return UNHANDLED
+
+
+def streamed(work: Callable[[Said], object]) -> StreamingResponse:
+    """`work` run behind the response, each stage it says sent as a server-sent event, a
+    failure once they began as an `error` event. A client gone stops it at its next stage:
+    what runs then (a model call) finishes, and nothing after it starts."""
+    gone = threading.Event()
+
+    async def events() -> AsyncIterator[str]:
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+        def put(text: str | None) -> None:
+            with contextlib.suppress(RuntimeError):  # the loop closed with the server
+                loop.call_soon_threadsafe(queue.put_nowait, text)
+
+        def said(name: str, data: BaseModel) -> None:
+            if gone.is_set():
+                raise Stopped
+            put(f"event: {name}\ndata: {data.model_dump_json()}\n\n")
+
+        def run() -> None:
+            try:
+                work(said)
+            except Stopped:
+                pass
+            except Exception as error:  # noqa: BLE001 -- said to the client, not a crash
+                message = told(error)
+                if message == UNHANDLED:  # none of the refusals said above: a bug's
+                    logging.getLogger(__name__).exception("a streamed question failed")
+                put(f"event: error\ndata: "
+                    f"{api.StreamError(message=message).model_dump_json()}\n\n")
+            finally:
+                put(None)
+
+        threading.Thread(target=run, name="streamed", daemon=True).start()
+        try:
+            while (text := await queue.get()) is not None:
+                yield text
+        finally:
+            gone.set()
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
 
 
 @contextmanager
@@ -337,8 +428,15 @@ def create_app(
     def change_settings(change: api.SettingsChange) -> dict[str, Any]:
         """Settings written to `.env` and taken up at once, each key tried first (no model is
         called). Only from this machine's own page (`only_here`)."""
+        values = dict(change.values)
+        menu = values.pop(context_menu.SETTING, "").strip()
         with refused():
-            new = changed(demo, change.values, settings_folder() / ".env", load)
+            # The menu switched once the rest of the save holds, for the home this server
+            # runs on.
+            new = changed(demo, values, settings_folder() / ".env", load) if values \
+                else demo.settings
+            if menu:
+                context_menu.switch(menu, home_of(new))
         return {**described(new), "samples": has_samples()}
 
     # Search models run on this machine ---------------------------------------------------
@@ -969,27 +1067,21 @@ def create_app(
 
     def asked(request: api.Question, run: Callable[[GraphRag, str, int], T],
               across: Callable[[GraphRag, str, int], U],
-              fuse: Callable[[list[tuple[str, GraphRag, U]], str, int], T]) -> tuple[T, bool]:
+              fuse: Callable[[list[tuple[str, GraphRag, U]], str, int], T]
+              ) -> tuple[T, bool, tuple[str, ...]]:
         """A question and how many documents it asks for checked, then `run` on the graph
-        space's GraphRAG -- and whether it searched by words alone (`GraphRag.text_only`).
-        Several workspaces named: `across` on each one's GraphRAG side by side, and `fuse` of
-        what they gave."""
-        question = request.question.strip()
-        if not question:
-            raise HTTPException(400, "the question is empty")
-        if len(question) > MAX_QUESTION_CHARS:
-            raise HTTPException(
-                400, f"the question is too long -- at most {MAX_QUESTION_CHARS:,} characters"
-            )
-        documents = (request.documents if request.documents is not None
-                     else demo.settings.retrieval_documents)
-        if not 1 <= documents <= MAX_DOCUMENTS:
-            raise HTTPException(400, f"documents must be between 1 and {MAX_DOCUMENTS}")
+        space's GraphRAG -- whether it searched by words alone (`GraphRag.text_only`), and what
+        it searched for (`GraphRag.last_queries`). Several workspaces named: `across` on each
+        one's GraphRAG side by side, and `fuse` of what they gave; the queries are the first
+        workspace's, each split beside its own documents' languages."""
+        question, documents = validated(request)
         several = list(dict.fromkeys(request.workspaces or []))
         if len(several) < 2:  # one named is asked as `workspace` is
             one = several[0] if several else request.workspace
             rag, side = rag_of(one)
-            return guarded(lambda: tried(rag, side, lambda: run(rag, question, documents)))
+            got, text_only = guarded(
+                lambda: tried(rag, side, lambda: run(rag, question, documents)))
+            return got, text_only, rag.last_queries(question, turns(request))
         rags = [(ws, *rag_of(ws)) for ws in several]
 
         def each(ws: str, rag: GraphRag, side: bool) -> tuple[U, bool]:
@@ -1002,10 +1094,95 @@ def create_app(
 
         def fused() -> tuple[T, bool]:
             with ThreadPoolExecutor(len(rags)) as pool:  # each workspace searched side by side
-                done = list(pool.map(lambda r: each(*r), rags))
+                # each in the caller's context: a turn's searches are kept for it (`one_search`)
+                done = list(pool.map(lambda r, held: held.run(each, *r), rags,
+                                     [contextvars.copy_context() for _ in rags]))
             found = [(ws, rag, got) for (ws, rag, _), (got, _) in zip(rags, done, strict=True)]
             return fuse(found, question, documents), any(text_only for _, text_only in done)
-        return guarded(fused)
+        got, text_only = guarded(fused)
+        return got, text_only, rags[0][1].last_queries(question, turns(request))
+
+    def validated(request: api.Question) -> tuple[str, int]:
+        """The question as asked and how many documents it asks for; 400 for one that is
+        empty, too long, or asks for too few or too many."""
+        question = request.question.strip()
+        if not question:
+            raise HTTPException(400, "the question is empty")
+        earlier = (turn.question for turn in request.history)
+        if any(len(asked) > MAX_QUESTION_CHARS for asked in (question, *earlier)):
+            raise HTTPException(
+                400, f"the question is too long -- at most {MAX_QUESTION_CHARS:,} characters"
+            )
+        documents = (request.documents if request.documents is not None
+                     else demo.settings.retrieval_documents)
+        if not 1 <= documents <= MAX_DOCUMENTS:
+            raise HTTPException(400, f"documents must be between 1 and {MAX_DOCUMENTS}")
+        return question, documents
+
+    def turns(request: api.Question) -> list[Turn]:
+        """The conversation's earlier turns, as a follow-up is asked after them."""
+        return [Turn(turn.question, turn.answer) for turn in request.history]
+
+    def scoped(request: api.Question) -> frozenset[str] | None:
+        """The documents a question is about; None for all of them. Each workspace is asked
+        with the same ids: they come from content, so one may be in several."""
+        return None if request.only is None else frozenset(request.only)
+
+    def excluded(request: api.Question) -> dict[str, frozenset[str]]:
+        """The documents left out of a question, as the search is handed them: nothing when
+        none is, so a question without them is asked as before."""
+        return {"exclude": frozenset(request.exclude)} if request.exclude else {}
+
+    @v1.post("/scope", response_model=api.Scope)
+    def scope(request: api.ScopeRequest) -> dict[str, Any]:
+        """Files and folders on this machine as documents of the graph, found by their
+        content. `workspace` is the one holding most of the files (the open one wins a tie),
+        `document_ids` those it holds; `missing` the files no workspace holds, `elsewhere`
+        those another workspace holds (never built), and `build_into` where a missing file
+        may be built: that workspace, else the open one, never a mail workspace."""
+        files: list[Path] = []
+        missing: list[str] = []
+        for each in request.paths:
+            try:
+                files += documents_at(Path(each).expanduser().resolve())
+            except (OSError, ValueError):  # not there, not a format read here
+                missing.append(each)
+        files = list(dict.fromkeys(files))  # a file and its folder both given
+        hashes = {str(f): h for f in files if (h := content_hash(f))}
+        spaces = demo.workspaces
+        # no registry: the one open graph, under the id the settings give it
+        kinds: dict[str, str] = {demo.settings.workspace: "documents"}
+        names: list[str] = [demo.settings.workspace]
+        if spaces is not None:
+            active = spaces.active
+            items = spaces.listed()["items"]
+            kinds = {i["id"]: i.get("kind", "documents") for i in items}
+            names = [active, *(i["id"] for i in items if i["id"] != active)]
+        held: dict[str, dict[str, str]] = {}
+        for name in names:
+            try:
+                held[name] = space_of(name if spaces else None).documents_of(
+                    sorted(set(hashes.values())))
+            except (HTTPException, Neo4jError, ServiceUnavailable, SessionExpired):
+                if name == names[0]:
+                    raise
+                continue  # a workspace beside that will not open holds nothing here
+        counts = {n: sum(h in held[n] for h in hashes.values()) for n in held}
+        best = max(counts, key=lambda n: counts[n])  # the first of equals: the open one
+        has = counts[best] > 0
+        here = held[best] if has else {}
+        elsewhere = [{"path": p, "workspace": next(n for n in held if n != best and h in held[n])}
+                     for p, h in hashes.items()
+                     if h not in here and any(h in held[n] for n in held if n != best)]
+        gone = [p for p, h in hashes.items() if not any(h in x for x in held.values())]
+        base: str | None = best if has else names[0]
+        if kinds.get(base or "") == "mail":  # read from its mailbox, never built
+            base = names[0] if kinds.get(names[0]) != "mail" else None
+        return {"document_ids": list(dict.fromkeys(here[h] for h in hashes.values() if h in here)),
+                "missing": list(dict.fromkeys(
+                    [*missing, *(str(f) for f in files if str(f) not in hashes), *gone])),
+                "elsewhere": elsewhere,
+                "workspace": best if has else None, "build_into": base}
 
     def rag_of(workspace: str | None) -> tuple[GraphRag, bool]:
         """The GraphRAG a workspace is asked through, and whether it is one beside the open."""
@@ -1048,28 +1225,188 @@ def create_app(
     def search(request: api.Question) -> dict[str, Any]:
         """What a question finds -- the passages and the documents linked to theirs, hop by
         hop -- with no answer written."""
-        found, text_only = asked(
-            request, lambda rag, question, n: rag.find(question, documents=n),
-            lambda rag, question, n: rag.find(question, documents=n),
+        return found_of(request)
+
+    def found_of(request: api.Question) -> dict[str, Any]:
+        history, only, exclude = turns(request), scoped(request), excluded(request)
+        found, text_only, queries = asked(
+            request,
+            lambda rag, question, n: rag.find(question, documents=n, history=history, only=only,
+                                              **exclude),
+            lambda rag, question, n: rag.find(question, documents=n, history=history, only=only,
+                                              **exclude),
             lambda each, _, n: find_across([(ws, got) for ws, _, got in each], n,
                                            rrf_k=demo.settings.rrf_k))
-        return {"sources": named(request, found), "text_only": text_only}
+        return {"sources": named(request, found), "text_only": text_only,
+                "queries": list(queries)}
 
     @v1.post("/ask", response_model=api.Answer)
-    def ask(request: api.Question) -> dict[str, Any]:
-        """A question answered from the graph space, with the passages it was answered from."""
-        answer, text_only = asked(
-            request, lambda rag, question, n: rag.ask(question, documents=n),
-            lambda rag, question, n: rag.read(question, documents=n),
-            lambda each, question, n: ask_across(each, question, n, rrf_k=demo.settings.rrf_k))
+    def ask(request: api.Question, http: Request) -> dict[str, Any] | Response:
+        """A question answered from the graph space, with the passages it was answered from.
+        With `Accept: text/event-stream`, its stages as they finish (`staged`): `searched`
+        (Found), `answered` (Answer, its claims not checked yet), `checked` (Checked), or
+        `error` (StreamError) once they began."""
+        if "text/event-stream" not in http.headers.get("accept", ""):
+            return answer_of(request)
+        validated(request)  # turned away as a plain 400 before anything is streamed
+        return streamed(lambda said: staged(request, said))
+
+    def answer_of(request: api.Question,
+                  shown: Callable[[GraphAnswer], None] | None = None) -> dict[str, Any]:
+        """`request` answered; `shown` is handed the answer before its claims are checked."""
+        history, only, exclude = turns(request), scoped(request), excluded(request)
+        answer, text_only, queries = asked(
+            request,
+            lambda rag, question, n: rag.ask(question, documents=n, history=history, only=only,
+                                             shown=shown, **exclude),
+            lambda rag, question, n: rag.read(question, documents=n, history=history, only=only,
+                                              **exclude),
+            lambda each, question, n: ask_across(each, question, n, rrf_k=demo.settings.rrf_k,
+                                                 history=history, shown=shown))
         return {"answer": answer.text, "sources": named(request, answer.sources),
-                "text_only": text_only}
+                "queries": list(queries),
+                "text_only": text_only, "claims": [asdict(c) for c in answer.claims],
+                "checked": answer.checked}
 
     def named(request: api.Question, sources: list[GraphSource]) -> list[dict[str, Any]]:
         """The sources, each naming its workspace: one searched alone is the one asked."""
         alone = (request.workspaces[0] if request.workspaces else request.workspace) or (
             demo.workspaces.active if demo.workspaces is not None else None)
         return [{**asdict(source), "workspace": source.workspace or alone} for source in sources]
+
+    def staged(request: api.Question, said: Said,
+               got: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+        """`request` searched and answered side by side, as the page asks `/search` and `/ask`,
+        inside one turn (`one_search`): the search runs once and the answer reads the passages
+        the search shows. Each stage is said as it finishes -- `searched`, `answered` before
+        the claim check, `checked` -- always in that order. `got` is handed what is done as
+        it is done (`found`, then `answer`), so a turn whose client left keeps it."""
+        got = {} if got is None else got
+        pool = ThreadPoolExecutor(2, thread_name_prefix="turn")
+
+        def searched() -> dict[str, Any]:
+            got["found"] = found = found_of(request)
+            said("searched", api.Found.model_validate(found))
+            return found
+
+        def shown(answer: GraphAnswer) -> None:
+            got["answer"] = {"answer": answer.text, "sources": named(request, answer.sources)}
+            found = finding.result()  # `searched` said first; its failure stops the answer
+            said("answered", api.Answer(**got["answer"], queries=found["queries"],
+                                        text_only=found["text_only"]))
+
+        with one_search():  # each stage in a context of its own, the turn's search shared
+            finding = pool.submit(contextvars.copy_context().run, searched)
+            answering = pool.submit(contextvars.copy_context().run, answer_of, request, shown)
+        try:
+            found = finding.result()
+            got["answer"] = answer = answering.result()
+        except Stopped:
+            futures.wait([answering])  # an answer being written is kept, unchecked
+            raise
+        finally:
+            pool.shutdown(wait=False)  # a failed search leaves the answer to stop on its own
+        said("checked", api.Checked(claims=answer["claims"], checked=answer["checked"]))
+        return found, answer
+
+    # Threads: conversations kept on this computer ----------------------------------------
+
+    def threads_of(workspace: str | None) -> ThreadStore:
+        try:
+            return demo.threads(workspace)
+        except LookupError as error:
+            raise HTTPException(404, f"no workspace {workspace!r}") from error
+
+    def thread_of(thread_id: str) -> tuple[ThreadStore, api.Thread]:
+        try:
+            store = demo.thread_store(thread_id)
+            return store, store.get(thread_id)
+        except KeyError as error:
+            raise HTTPException(404, "this conversation cannot be found") from error
+
+    @v1.get("/threads", response_model=list[api.ThreadSummary])
+    def threads(workspace: str | None = None) -> list[api.ThreadSummary]:
+        """The conversations kept for `workspace` (the open one when not given), the latest
+        changed first; a file that cannot be read is left out."""
+        return threads_of(workspace).list()
+
+    @v1.post("/threads", response_model=api.Thread)
+    def thread_create(body: api.NewThread) -> api.Thread:
+        """A conversation begun, with no turns: every turn asks `workspace` (the open one when
+        not given) about the documents `scope` names (every one when None)."""
+        workspace = body.workspace or demo.settings.workspace
+        return threads_of(workspace).create(body.scope, workspace)
+
+    @v1.get("/threads/{thread_id}", response_model=api.Thread)
+    def thread(thread_id: str) -> api.Thread:
+        return thread_of(thread_id)[1]
+
+    @v1.patch("/threads/{thread_id}", response_model=api.Thread)
+    def thread_change(thread_id: str, body: api.ThreadPatch) -> api.Thread:
+        """A conversation renamed, or its scope replaced for the turns after."""
+        store, _ = thread_of(thread_id)
+        return store.patch(thread_id, title=body.title, scope=body.scope,
+                           scope_given="scope" in body.model_fields_set)
+
+    @v1.delete("/threads/{thread_id}", response_model=api.Deleted)
+    def thread_delete(thread_id: str) -> dict[str, str]:
+        store, _ = thread_of(thread_id)
+        store.delete(thread_id)
+        return {"deleted": thread_id}
+
+    @v1.post("/threads/{thread_id}/turns", response_model=api.ThreadTurn)
+    def thread_turn(thread_id: str, body: api.TurnRequest,
+                    http: Request) -> api.ThreadTurn | Response:
+        """A question asked in a conversation: after its earlier turns, about its scope, in its
+        workspace. Its stages are streamed as `/ask`'s are, then `saved` (ThreadTurn) once the
+        turn is kept -- one that failed is kept too, saying why. With `Accept:
+        application/json`, the finished turn alone."""
+        store, kept = thread_of(thread_id)
+        request = api.Question(
+            question=body.question, documents=body.documents, workspace=kept.workspace,
+            only=kept.scope, exclude=body.exclude,
+            history=[api.Turn(question=t.question, answer=t.answer.answer)
+                     for t in kept.turns if t.answer is not None])
+        validated(request)  # turned away as a plain 400 before anything is streamed
+
+        def kept_with(made: api.ThreadTurn, got: dict[str, Any]) -> bool:
+            """`made` with what the turn got, added to the thread; False when the thread was
+            deleted meanwhile."""
+            if "found" in got:
+                made.found = api.Found.model_validate(got["found"])
+            if "answer" in got:  # an answer cut off before its check is kept unchecked
+                made.answer = api.Answer.model_validate({
+                    **(made.found.model_dump(include={"queries", "text_only"})
+                       if made.found else {}), **got["answer"]})
+            try:
+                store.append(thread_id, made)
+            except KeyError:
+                return False
+            return True
+
+        def turn(said: Said) -> api.ThreadTurn:
+            made = api.ThreadTurn(question=request.question.strip(), scope=kept.scope,
+                                  stamp=body.stamp, asked_at=time.time())
+            got: dict[str, Any] = {}
+            try:
+                staged(request, said, got)
+            except Stopped:
+                kept_with(made, got)  # the client left: what was paid for is kept, not said
+                raise
+            except Exception as error:
+                made.error = told(error)
+                if kept_with(made, got):
+                    said("saved", made)
+                raise  # the failure said, never the deletion in its place
+            if not kept_with(made, got):
+                raise HTTPException(404, THREAD_DELETED)
+            said("saved", made)
+            return made
+
+        accept = http.headers.get("accept", "")
+        if "application/json" in accept and "text/event-stream" not in accept:
+            return turn(lambda _name, _data: None)
+        return streamed(turn)
 
     # Jobs -----------------------------------------------------------------------------------
 

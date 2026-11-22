@@ -29,6 +29,12 @@ from graphme import agent_file, login_item, processes
 from graphme.agent_file import pid_alive, read_server_file
 
 NOTICES = "notices.json"
+GOTO = "goto"
+"""Where the app's window is asked to go next: a page of the app, written by another process
+(the small window's "open in the main window")."""
+GOTO_EVERY_SECONDS = 0.5
+GOTO_STALE_SECONDS = 30.0
+"""A page asked for longer ago than this was for a window that never came: not followed."""
 STATE_EVERY_SECONDS = 3.0
 APP_BUNDLE = Path.home() / "Applications" / "Graph-Me-Maybe.app"
 BACKGROUND_NOTICE = (
@@ -161,6 +167,48 @@ def _front_windows(pid: int) -> bool:  # pragma: no cover -- Windows only
     return bool(user32.SetForegroundWindow(found[0]))
 
 
+def ask_goto(home: Path, path: str) -> None:
+    """The app's window asked to show `path` (`/c/<id>`): at once if it is open, else when it
+    opens."""
+    fresh = home / f"{GOTO}.{os.getpid()}"
+    fresh.write_text(path, encoding="utf-8")
+    fresh.replace(home / GOTO)  # whole: the window never reads half of it
+
+
+def take_goto(home: Path) -> str | None:
+    """The page the window was asked to go to, taken once; None when none was asked for."""
+    try:
+        stale = time.time() - (home / GOTO).stat().st_mtime > GOTO_STALE_SECONDS
+        path = (home / GOTO).read_text(encoding="utf-8")
+        (home / GOTO).unlink()
+    except OSError:
+        return None
+    return path if path.startswith("/") and not stale else None
+
+
+def follow_goto_once(home: Path, url: str, webview: Any) -> None:
+    """The window sent to the page it was asked to go to -- taken only once a window is there
+    to go, so one asked for while the window is starting is not lost."""
+    if webview.windows and (path := take_goto(home)):
+        webview.windows[0].load_url(url + path)
+
+
+def _follow_goto(home: Path, url: str, webview: Any) -> None:
+    """The open window sent to each page it is asked to go to, for as long as it is open."""
+    # ponytail: a file looked at twice a second; a socket from the agent if that ever lags.
+    while True:
+        time.sleep(GOTO_EVERY_SECONDS)
+        follow_goto_once(home, url, webview)
+
+
+def _start_following(home: Path, url: str) -> None:
+    try:
+        import webview  # type: ignore[import-not-found,unused-ignore]  # not on Linux
+    except ImportError:
+        return  # no window to send anywhere: the browser opens instead
+    threading.Thread(target=_follow_goto, args=(home, url, webview), daemon=True).start()
+
+
 def _show(home: Path) -> Callable[[str], bool]:
     from graphme.launcher import show_window
 
@@ -207,20 +255,33 @@ def open_window(
         return
     url = f"http://127.0.0.1:{said.port}"
     agent_file.set_window_pid(home, os.getpid())
+    if show is None:
+        _start_following(home, url)
+    at = url + (take_goto(home) or "")
     try:
-        shown = (show or _show(home))(url)
+        shown = (show or _show(home))(at)
         if not shown:
-            processes.open_in_browser(url)  # no webview here (Linux): the browser, once
+            processes.open_in_browser(at)  # no webview here (Linux): the browser, once
     finally:
         agent_file.set_window_pid(home, None)
     if shown and first_close(home):
         tell(BACKGROUND_NOTICE)
 
 
-def _open_app(home: Path) -> None:
-    """The window, from the icon: the installed app on macOS so the Dock shows its own icon."""
-    if sys.platform == "darwin" and APP_BUNDLE.is_dir():
-        processes.popen(["open", str(APP_BUNDLE)])
+def _opens(bundle: Path, home: Path) -> bool:
+    """Whether the installed app `bundle` opens on `home`: its launcher names the home."""
+    try:
+        launcher = (bundle / "Contents" / "MacOS" / "Graph-Me-Maybe").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return f'GRAPHME_HOME="{home}"' in launcher
+
+
+def _open_app(home: Path, *, bundle: Path = APP_BUNDLE) -> None:
+    """The window: the installed app on macOS, so the Dock shows its own icon -- when it is
+    the app for `home`; any other home's window is this Python's."""
+    if sys.platform == "darwin" and _opens(bundle, home):
+        processes.popen(["open", str(bundle)])
     else:
         processes.popen([_python(), "-m", "graphme.launcher", str(home)])
 

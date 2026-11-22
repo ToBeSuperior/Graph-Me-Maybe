@@ -22,7 +22,7 @@ test('a question gathers folders and the answer opens what it cites', async ({ p
   await page.goto('/');
   await page.getByRole('textbox', { name: '문서에 대해 질문하세요' }).fill('시험 압력은?');
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/\?q=/);
+  await expect(page).toHaveURL(/\/c\/t1$/);
   await expect.poll(() => fake.asked).toEqual(['시험 압력은?']);
 
   const tree = page.getByRole('tree');
@@ -70,14 +70,14 @@ test('a citation takes the preview back to its passage, however far the reader m
   await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
 });
 
-test('a passage count changed on a results page searches and answers again with it', async ({ page }) => {
+test('a passage count chosen in the box is what the next turn asks with', async ({ page }) => {
   const fake = await fakeApi(page);
   await page.goto(`/?q=${encodeURIComponent('시험 압력은?')}&k=5`);
   await expect(page.getByRole('tree')).toBeVisible();
   await page.getByRole('combobox').selectOption('10');
-  await expect(page).toHaveURL(/k=10/);
+  await page.getByRole('textbox', { name: '문서에 대해 질문하세요' }).fill('유지 시간은?');
+  await page.keyboard.press('Enter');
   await expect.poll(() => fake.topK).toEqual([5, 10]);
-  await expect.poll(() => fake.answered).toBe(2);
 });
 
 test('a reload shows what was found and answered without asking again', async ({ page }) => {
@@ -89,6 +89,162 @@ test('a reload shows what was found and answered without asking again', async ({
   await expect(page.getByRole('button', { name: 'SPEC-1_가상 규격서.docx' })).toBeVisible();
   await expect(page.getByRole('tree')).toBeVisible();
   expect([fake.asked.length, fake.answered]).toEqual([1, 1]);
+});
+
+test('a conversation goes on: a follow-up is its next turn, and each citation moves the preview', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto(`/?q=${encodeURIComponent('시험 압력은?')}&k=5`);
+  await expect(page.getByRole('tree')).toBeVisible();
+  await page.getByRole('textbox', { name: '문서에 대해 질문하세요' }).fill('유지 시간은?');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('article')).toHaveCount(2);
+  expect(fake.turns.map((turn) => turn.question)).toEqual(['시험 압력은?', '유지 시간은?']);
+  // Each turn keeps the graph's fingerprint it was asked of.
+  expect(fake.turns.every((turn) => !!turn.stamp)).toBe(true);
+  // The conversation is listed under its first question.
+  await expect(page.getByRole('list', { name: '대화' }).getByRole('link', { name: '시험 압력은?' })).toBeVisible();
+
+  const first = page.getByRole('article').first();
+  await first.getByRole('button', { name: 'PROC-2_가상 절차서.docx' }).click();
+  await expect(page.getByRole('heading', { name: 'PROC-2_가상 절차서' })).toBeVisible();
+  await first.getByRole('button', { name: 'SPEC-1_가상 규격서.docx' }).click();
+  await expect(page.getByRole('heading', { name: 'SPEC-1_가상 규격서' })).toBeVisible();
+
+  // The check's marks: ✓ beside what the sources bear out, ⚠ opening what they say instead.
+  await expect(first.getByRole('img', { name: '근거가 받쳐 줍니다' })).toBeVisible();
+  await first.getByRole('button', { name: '근거와 다릅니다' }).click();
+  await expect(first.getByText('근거가 말하는 것')).toBeVisible();
+  await expect(first.locator('dd', { hasText: '유지 시간은 10분이다.' })).toBeVisible();
+});
+
+test('“ask only this” puts the document in the scope, and the next turn asks about it alone', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto(`/?q=${encodeURIComponent('시험 압력은?')}&k=5`);
+  await page.getByRole('treeitem').first().getByRole('button', { name: '문서 작업' }).click();
+  await page.getByRole('menuitem', { name: '이 문서만 계속 묻기' }).click();
+  const scope = page.getByRole('group', { name: '질문 범위' });
+  await expect(scope).toContainText('PROC-2_가상 절차서');
+  await expect(scope).not.toContainText('모든 문서');
+  await page.getByRole('textbox', { name: '문서에 대해 질문하세요' }).fill('유지 시간은?');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => fake.turns.map((turn) => turn.only)).toEqual([null, ['proc']]);
+  // Its × gives the conversation every document again.
+  await scope.getByRole('button', { name: /범위에서 빼기/ }).click();
+  await expect(scope).toContainText('모든 문서');
+});
+
+test('“ask again without this” leaves the document out of that turn alone', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto(`/?q=${encodeURIComponent('시험 압력은?')}&k=5`);
+  await page.getByRole('treeitem').first().getByRole('button', { name: '문서 작업' }).click();
+  await page.getByRole('menuitem', { name: '이 문서를 빼고 다시 묻기' }).click();
+  await expect.poll(() => fake.turns.map((turn) => [turn.question, turn.exclude])).toEqual(
+    [['시험 압력은?', null], ['시험 압력은?', ['proc']]]);
+  await expect(page.getByText('관련 문서 없음')).toBeVisible();
+  // The conversation still asks about every document.
+  await expect(page.getByRole('group', { name: '질문 범위' })).toContainText('모든 문서');
+  expect(fake.threads.t1.scope).toBeNull();
+  await page.getByRole('textbox', { name: '문서에 대해 질문하세요' }).fill('유지 시간은?');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => fake.turns[2]?.exclude).toBeNull();
+});
+
+test('a file dropped in a mail workspace is asked in another, opened first', async ({ page }) => {
+  const fake = await fakeApi(page, { mailWorkspace: true });
+  await page.goto(`/?q=${encodeURIComponent('시험 압력은?')}&k=5`);
+  await expect(page).toHaveURL(/\/c\/t1$/);
+  const dropped = await page.evaluateHandle(() => {
+    const data = new DataTransfer();
+    const file = new File(['x'], 'Spec.docx');
+    Object.defineProperty(file, 'pywebviewFullPath', { value: '/Users/me/Spec.docx' });
+    data.items.add(file);
+    return data;
+  });
+  await page.getByRole('form', { name: '질문 입력' }).dispatchEvent('drop', { dataTransfer: dropped });
+  await page.getByRole('button', { name: '‘Default’에서 묻기' }).click();
+  await expect(page).toHaveURL(/\/c\/t2$/);
+  expect(fake.opened).toEqual(['default']);
+  expect(fake.threads.t2).toMatchObject({ workspace: 'default', scope: ['spec'] });
+});
+
+test('files dropped in the app window are found, built when no graph holds them, then asked about', async ({ page }) => {
+  const fake = await fakeApi(page);
+  await page.goto(`/?q=${encodeURIComponent('시험 압력은?')}&k=5`);
+  await expect(page.getByRole('tree')).toBeVisible();
+  const drop = async (paths: string[]) => {
+    const dropped = await page.evaluateHandle((all) => {
+      const data = new DataTransfer();
+      for (const full of all) {
+        const file = new File(['x'], full.split('/').pop()!);
+        Object.defineProperty(file, 'pywebviewFullPath', { value: full });
+        data.items.add(file);
+      }
+      return data;
+    }, paths);
+    await page.getByRole('form', { name: '질문 입력' }).dispatchEvent('drop', { dataTransfer: dropped });
+  };
+  await drop(['/Users/me/New Report.pptx']);
+  await expect.poll(() => fake.boxDrive).toEqual([['/Users/me/New Report.pptx']]);
+  const scope = page.getByRole('group', { name: '질문 범위' });
+  await expect(scope).toContainText('가상 보고', { timeout: 10_000 });
+  expect(fake.scoped.length).toBe(2); // found again once built
+
+  // One held by another workspace is asked there, in a conversation of its own.
+  await drop(['/Users/me/Spec.docx', '/Users/me/Audit.docx']);
+  await expect(scope).toContainText('SPEC-1_가상 규격서');
+  await page.getByRole('button', { name: '거기서 묻기' }).click();
+  await expect(page).toHaveURL(/\/c\/t2$/);
+  await expect(page.getByText('이 대화는 ‘Invented audits’ 워크스페이스에 묻습니다')).toBeVisible();
+});
+
+test('the right-click window builds the picked file, asks about it, fades, pins and hands over', async ({ page }) => {
+  const fake = await fakeApi(page);
+  fake.threads.t9 = { id: 't9', title: '', scope: [], workspace: 'default', turns: [], created_at: 1, updated_at: 1 };
+  // The window's own bridge (graphme/ask_window.py MiniApi): the picked paths never in the address.
+  await page.addInitScript(() => {
+    const said: unknown[] = [];
+    (window as unknown as { said: unknown[] }).said = said;
+    (window as unknown as { pywebview: unknown }).pywebview = { api: {
+      paths: async () => ['/Users/me/New Report.pptx'],
+      pin: async (on: boolean) => { said.push(['pin', on]); },
+      opacity: async () => 0.9,
+      set_opacity: async (value: number) => { said.push(['opacity', value]); },
+      open_main: async (id: string) => { said.push(['main', id]); },
+    } };
+  });
+  await page.goto('/mini/t9');
+  await expect.poll(() => fake.boxDrive).toEqual([['/Users/me/New Report.pptx']]);
+  const scope = page.getByRole('group', { name: '질문 범위' });
+  await expect(scope).toContainText('가상 보고', { timeout: 10_000 });
+  expect(fake.threads.t9.scope).toEqual(['deck']);
+  await page.getByRole('textbox').fill('시험 압력은?');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => fake.turns.at(-1)?.only).toEqual(['deck']);
+  const slider = page.getByRole('slider', { name: '창 불투명도' });
+  await expect(slider).toHaveValue('90'); // as the window kept it
+  await slider.fill('60');
+  await page.getByRole('button', { name: '다른 창 위에 떠 있기' }).click();
+  await page.getByRole('button', { name: '메인 창에서 열기' }).click();
+  expect(await page.evaluate(() => (window as unknown as { said: unknown[] }).said)).toEqual([['opacity', 0.6], ['pin', false], ['main', 't9']]);
+});
+
+test('a file the right-click window finds in another workspace is asked there, once', async ({ page }) => {
+  const fake = await fakeApi(page);
+  fake.threads.t9 = { id: 't9', title: '', scope: [], workspace: 'default', turns: [], created_at: 1, updated_at: 1 };
+  // The window hands the same paths to every page it loads.
+  await page.addInitScript(() => {
+    (window as unknown as { pywebview: unknown }).pywebview = { api: {
+      paths: async () => ['/Users/me/Spec.docx', '/Users/me/Audit.docx'],
+      pin: async () => {}, opacity: async () => 1, set_opacity: async () => {}, open_main: async () => {},
+    } };
+  });
+  await page.goto('/mini/t9');
+  await page.getByRole('button', { name: '거기서 묻기' }).click();
+  await expect(page).toHaveURL(/\/mini\/t2$/);
+  await expect(page.getByText('이 대화는 ‘Invented audits’ 워크스페이스에 묻습니다')).toBeVisible();
+  await page.waitForTimeout(1000); // a page that asked its paths again would move on by now
+  await expect(page).toHaveURL(/\/mini\/t2$/);
+  expect(Object.keys(fake.threads)).toEqual(['t9', 't2']);
 });
 
 test('the graph is reset only once the word is typed', async ({ page }) => {
@@ -114,7 +270,7 @@ test('a search stopped says so and can be asked again', async ({ page }) => {
   await page.getByRole('button', { name: '중지' }).click();
   await expect(page.getByText('찾기를 멈췄습니다')).toBeVisible();
   await page.getByRole('button', { name: '다시 찾기' }).click();
-  await expect(page.getByRole('tree')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('tree').last()).toBeVisible({ timeout: 10_000 });
 });
 
 test('a passage count out of range is asked with the default', async ({ page }) => {

@@ -14,10 +14,10 @@ from urllib.parse import urlsplit
 
 from fastapi import Request
 
-from graphme import model_endpoint
+from graphme import context_menu, model_endpoint
 from graphme.adapters.chat import auth_headers
 from graphme.adapters.local_models import LocalModels
-from graphme.config import ENV_FIELDS, LOOPBACK, Settings, read_dotenv, read_yaml
+from graphme.config import ENV_FIELDS, LOOPBACK, Settings, app_home, read_dotenv, read_yaml
 from graphme.server.jobs import BUILDING, Busy
 from graphme.server.state import Demo
 
@@ -41,6 +41,7 @@ _CHOICES = (
     ("GRAPHME_MODEL_BASE_URL", False),
     ("GRAPHME_MODEL", False),
     ("GRAPHME_HIERARCHY_READINGS", False),
+    ("GRAPHME_CHECK_ANSWERS", False),
     ("GRAPHME_PREVIEW_CACHE_MB", False),
     ("GRAPHME_BOX_CLIENT_ID", False),
     ("GRAPHME_BOX_CLIENT_SECRET", True),
@@ -85,6 +86,12 @@ def _field(settings: Settings, env: str) -> str:
     return ENV_FIELDS[env]
 
 
+def home_of(settings: Settings) -> Path:
+    """The app home the server runs on, as its settings name it (`.env` included) -- a
+    checkout's own home, not the installed app's."""
+    return settings.local_models or app_home()
+
+
 def described(settings: Settings) -> dict[str, Any]:
     fields = []
     for env, secret in editable(settings):
@@ -94,6 +101,8 @@ def described(settings: Settings) -> dict[str, Any]:
                        "value": None if secret else text,
                        "hint": text[-4:] if secret and text and len(text) > 8 else None,
                        **({"choices": choices} if (choices := _choices(env)) else {})})
+    if menu := context_menu.setting(home_of(settings)):  # not in .env: whether it is there
+        fields.append(menu)
     return {"endpoint": settings.provider, "fields": fields, "problems": preflight(settings)}
 
 

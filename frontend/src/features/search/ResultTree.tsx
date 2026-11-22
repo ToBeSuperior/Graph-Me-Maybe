@@ -3,7 +3,7 @@
 // theirs (hop 3). Each row says how it is tied to the one above it and why it is here, and the
 // tree is a tree to the keyboard too (WAI-ARIA tree: arrows, Home/End, Enter).
 import { ChevronRight, Quote } from 'lucide-react';
-import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { FileIcon, HopBadge, RelationChip } from '../../components/docs';
 import { changedAt, cn, formatOf, ownText, shownName, stem } from '../../lib/format';
 import { useLang, useT } from '../../lib/i18n';
@@ -67,7 +67,7 @@ const under = (entry: TrailEntry): number => entry.next.reduce((n, e) => n + 1 +
 
 /** Drawn again only when what it shows changes -- the selection, the folders, a citation
  * hovered (`lit`) -- not when the results around it are redrawn for anything else. */
-export const ResultTree = memo(function ResultTree({ trail, selected, onSelect, cited, lit, places, formats, expandAll }: {
+export const ResultTree = memo(function ResultTree({ trail, selected, onSelect, cited, lit, places, formats, expandAll, actions }: {
   trail: Trail;
   selected: string | null;
   onSelect: (row: Row) => void;
@@ -80,6 +80,9 @@ export const ResultTree = memo(function ResultTree({ trail, selected, onSelect, 
   formats: Set<string>;
   /** Bumped to open (+n) or close (-n) every folder. */
   expandAll: number;
+  /** What can be done with a row's document, at the end of its first line; `tabbable` on the
+   * one row Tab stops at, so the tree stays one stop. */
+  actions?: (row: Row, tabbable: boolean) => ReactNode;
 }) {
   const t = useT();
   const { lang } = useLang();
@@ -202,9 +205,17 @@ export const ResultTree = memo(function ResultTree({ trail, selected, onSelect, 
                 <span className="shrink-0 pl-2 text-2xs text-faint" title={changedAt(doc.modified, lang, true)}>
                   {changedAt(doc.modified, lang)}
                 </span>
+                {actions && (
+                  // its own clicks and keys, not the row's
+                  <span className="shrink-0" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{actions(row, row.key === tabStop)}</span>
+                )}
               </div>
               <div className="flex min-w-0 flex-wrap items-center gap-1.5 pl-[22px]">
-                {entry.direction && row.parent && <RelationChip direction={entry.direction} of={row.parent.entry.doc.label} />}
+                {entry.direction && (row.parent || entry.via) && (
+                  // a linked document ranked among the found ones still says what it is linked to
+                  <RelationChip direction={entry.direction}
+                    of={row.parent?.entry.doc.label ?? trail.nodes.find((n) => n.id === entry.via)?.label ?? ''} />
+                )}
                 <span className="shrink-0 font-mono text-2xs text-muted uppercase">{formatOf(doc.label)}</span>
                 {cited.has(doc.id) && (
                   <span title={t('citedInAnswer')} className="inline-flex shrink-0 items-center gap-0.5 rounded bg-accent-soft px-1 text-2xs font-medium text-accent-fg">

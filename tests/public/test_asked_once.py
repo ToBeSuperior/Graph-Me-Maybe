@@ -8,11 +8,17 @@ from types import SimpleNamespace
 from typing import Any
 
 import httpx
+import neo4j
 from neo4j_graphrag.types import RetrieverResultItem
 
 from graphme.adapters.chat import Endpoint
 from graphme.adapters.embedding import OpenAIBatchEmbeddings
-from graphme.adapters.storage.graph_rag import ANSWER_PICTURES, GraphRag, ask_across
+from graphme.adapters.storage.graph_rag import (
+    ANSWER_PICTURES,
+    GraphRag,
+    ask_across,
+    one_search,
+)
 
 
 def _embedder(calls: list[httpx.Request]) -> OpenAIBatchEmbeddings:
@@ -76,7 +82,12 @@ class _Reader:
         return [[(f"{i.metadata['id']} picture {n}", b"png")  # type: ignore[index]
                  for n in range(self.held[i.metadata["id"]])] for i in items]  # type: ignore[index]
 
-    def answered(self, question: str, items: Any, pictures: list[tuple[str, bytes]]) -> str:
+    _check_answers = False
+    written = GraphRag.written
+    _link_discount = 0.85  # what `written` ranks linked documents with (`promoted`)
+
+    def answered(self, question: str, items: Any, pictures: list[tuple[str, bytes]],
+                 history: Any = ()) -> str:
         self.sent = pictures
         return "invented answer"
 
@@ -98,3 +109,31 @@ def test_an_answers_pictures_follow_how_their_passages_ranked_not_the_workspaces
     # Fused: a:0, b:0, a:1 -- the second workspace's picture goes ahead of a:1's.
     assert first.sent[0] == ("b:0 picture 0", b"png")
     assert len(first.sent) == ANSWER_PICTURES
+
+
+class _Retriever:
+    """Searches by words alone (no links to walk), counting each fused search."""
+    text_only = True
+
+    def __init__(self) -> None:
+        self.fused_for: list[str] = []
+
+    def fused(self, query: str, only: Any) -> list[Any]:
+        self.fused_for.append(query)
+        return [neo4j.Record({"id": f"memo:{len(self.fused_for)}", "document_id": "memo"})]  # type: ignore[no-untyped-call]
+
+
+def test_a_turn_searches_once_even_when_its_answer_starts_after_the_search() -> None:
+    rag = _rag([])
+    rag._samples = []
+    retriever = _Retriever()
+    rag._retriever = lambda: retriever  # type: ignore[method-assign,assignment,return-value]
+
+    with one_search():
+        shown = rag._found("a lantern and a kettle, invented", 1)
+        read = rag._found("a lantern and a kettle, invented", 1, read_on=True)
+
+    assert retriever.fused_for == ["a lantern", "a kettle"]  # once a query, for both stages
+    assert {r["id"] for r in shown} <= {r["id"] for r in read}  # the answer reads on past them
+    rag._found("a lantern and a kettle, invented", 1)  # another question's turn searches again
+    assert len(retriever.fused_for) == 4

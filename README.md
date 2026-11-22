@@ -94,8 +94,13 @@ model key in **Manage › Keys and model**. Try it with **Try sample documents**
 ### The app
 
 Drop a folder of documents on the **Ask** tab (or use the sample documents), wait for it to be read,
-and ask a question. The answer cites its documents; the documents found are shown as folders by how
-they were reached — found by the question, linked to those, linked to those in turn — with the
+and ask a question. A question begins a conversation kept on this computer, and a follow-up is asked
+after the turns before it. The answer cites its documents and marks each statement the passages bear
+out ✓ or not ⚠; files dropped on the box, or a found document's **Ask only this**, narrow the
+conversation to them. Right-click a file in Finder or Explorer and choose **Ask Graph-Me-Maybe** to
+ask about it in a small window kept above the others (turned on in **Manage › Keys and model ›
+Advanced settings**). The documents found are
+shown as folders by how they were reached — found by the question, linked to those, linked to those in turn — with the
 matching passage highlighted on the rendered page. **Manage** holds the document list, the map of
 links, each document's outline, the cloud drives, export, keys and model, and the danger zone; the
 last build's result (how many went in, and why each failure failed) stays in its side menu. The
@@ -193,6 +198,8 @@ then the environment. The installed app keeps its `.env` in its own folder; the 
 | `GRAPHME_HOME` | the app's folder (settings, graph, viewer) |
 | `GRAPHME_RETRIEVAL_DOCUMENTS` | how many documents a question finds when it does not say (5; `GRAPHME_RETRIEVAL_TOP_K` is its old name) |
 | `GRAPHME_HIERARCHY_READINGS` | how many times each page is read (more readings, steadier outlines, more cost) |
+| `GRAPHME_CHECK_ANSWERS` | check each statement of an answer against the passages found and mark it (`true`, default) |
+| `GRAPHME_LINK_DISCOUNT` | how much a linked document's passage counts per hop when it competes with the documents found (`0.85`) |
 | `GRAPHME_NEO4J_HEAP` / `GRAPHME_NEO4J_PAGECACHE` | memory of the app's Neo4j, for large graphs |
 | `GRAPHME_API_KEY` | required by `graphme serve` before it opens beyond this machine |
 | `GRAPHME_BOX_CLIENT_ID` / `GRAPHME_BOX_CLIENT_SECRET` | your own Box app, to sign in to Box directly (Box Drive needs none) |

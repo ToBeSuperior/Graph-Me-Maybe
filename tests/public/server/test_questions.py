@@ -8,10 +8,12 @@ from fastapi.testclient import TestClient
 
 from graphme.adapters.storage.graph_rag import (
     MAX_DOCUMENTS,
+    Claim,
     GraphAnswer,
     GraphNotEmbedded,
     GraphSource,
     LinkedDocument,
+    Turn,
 )
 from graphme.server import app as server_app
 from graphme.server.state import Demo
@@ -24,7 +26,8 @@ class FakeRag:
         self.asked: list[int] = []
         self.failure = failure
 
-    def ask(self, question: str, *, documents: int) -> GraphAnswer:
+    def ask(self, question: str, *, documents: int,
+           history: Any = (), only: Any = None, shown: Any = None) -> GraphAnswer:
         if self.failure:
             raise self.failure
         self.asked.append(documents)
@@ -34,13 +37,17 @@ class FakeRag:
                                  members=["n1"], context="spec.docx\n합격")],
         )
 
-    def find(self, question: str, *, documents: int) -> list[GraphSource]:
+    def find(self, question: str, *, documents: int,
+             history: Any = (), only: Any = None) -> list[GraphSource]:
         if self.failure:
             raise self.failure
         return [GraphSource(id="d:0", score=0.9, document_id="d", file="memo.docx",
                             members=["n1"], context="memo", linked=[LinkedDocument(
                                 document_id="s", file="spec.docx", hop=2, via="d",
                                 direction="cites", passages=[])])][:documents]
+
+    def last_queries(self, question: str, history: Any = ()) -> tuple[str, ...]:
+        return (question,)
 
 
 def _asking(demo: Demo, rag: Any) -> None:
@@ -67,6 +74,22 @@ def test_a_question_is_answered_with_its_sources_and_a_bad_one_is_told_why(
     assert client.post("/v1/ask", json={"question": " "}).status_code == 400
 
 
+def test_an_answer_carries_its_checked_claims(demo: Demo, client: TestClient) -> None:
+    class CheckedRag(FakeRag):
+        def ask(self, question: str, *, documents: int,
+               history: Any = (), only: Any = None, shown: Any = None) -> GraphAnswer:
+            return GraphAnswer(text="합격 [spec.docx]", sources=[], checked=True, claims=[
+                Claim("합격", False, "불합격", ["spec.docx"])])
+
+    _asking(demo, CheckedRag())
+
+    said = client.post("/v1/ask", json={"question": "판정은?"}).json()
+
+    assert said["checked"] is True
+    assert said["claims"] == [{"text": "합격", "supported": False, "correction": "불합격",
+                               "files": ["spec.docx"]}]
+
+
 def test_a_search_finds_documents_with_no_answer_written(demo: Demo, client: TestClient) -> None:
     _asking(demo, FakeRag())
 
@@ -79,11 +102,41 @@ def test_a_search_finds_documents_with_no_answer_written(demo: Demo, client: Tes
     assert client.post("/v1/search", json={"question": ""}).status_code == 400
 
 
+def test_found_says_its_queries_and_a_follow_up_takes_its_turns(
+    demo: Demo, client: TestClient
+) -> None:
+    class SplitRag(FakeRag):
+        history: list[Turn] = []
+
+        def find(self, question: str, *, documents: int,
+                 history: Any = (), only: Any = None) -> list[GraphSource]:
+            self.history = list(history)
+            return super().find(question, documents=documents)
+
+        def last_queries(self, question: str, history: Any = ()) -> tuple[str, ...]:
+            return ("QP-9 hold time", "QP-9 유지 시간") if history else (question,)
+
+    rag = SplitRag()
+    _asking(demo, rag)
+    turns = [{"question": "What does WO-1 follow?", "answer": "QP-9 [WO-1.docx]."}]
+
+    found = client.post("/v1/search", json={"question": "Its hold time?", "history": turns})
+    alone = client.post("/v1/search", json={"question": "Its hold time?"})
+
+    assert found.status_code == 200, found.text
+    assert found.json()["queries"] == ["QP-9 hold time", "QP-9 유지 시간"]
+    assert alone.json()["queries"] == ["Its hold time?"]
+    assert rag.history == []  # the last search was asked with no turns
+    client.post("/v1/search", json={"question": "Its hold time?", "history": turns})
+    assert rag.history == [Turn("What does WO-1 follow?", "QP-9 [WO-1.docx].")]
+
+
 def test_a_mail_source_says_which_mail_it_came_from(demo: Demo, client: TestClient) -> None:
     origin = "from mail: Kim <kim@invented.test>, 견적, on 2026-10-12"
 
     class MailRag(FakeRag):
-        def find(self, question: str, *, documents: int) -> list[GraphSource]:
+        def find(self, question: str, *, documents: int,
+             history: Any = (), only: Any = None) -> list[GraphSource]:
             return [GraphSource(id="m:0", score=0.9, document_id="m", file="m.eml",
                                 members=["n1"], context="견적", origin=origin)]
 

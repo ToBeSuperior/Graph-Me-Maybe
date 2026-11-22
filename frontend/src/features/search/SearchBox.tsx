@@ -1,5 +1,5 @@
-// The question box, and asking: a question goes into the address (`?q=&k=`), which is what the
-// results page reads -- so a search can be kept, reloaded and shared.
+// The home page's question box, and asking: a question goes into the address (`?q=&k=`), where
+// a conversation is begun for it (AskPage).
 import { ArrowRight, CornerDownLeft, Search } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -7,10 +7,10 @@ import { Button, Kbd } from '../../components/ui';
 import { cn } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 
-const TOP_K = [5, 10, 15, 20];
-const DEFAULT_K = 5;
+export const TOP_K = [5, 10, 15, 20];
+export const DEFAULT_K = 5;
 /** The longest question the demo takes (`MAX_QUESTION_CHARS` in app.py). */
-const QUESTION_CHARS = 1000;
+export const QUESTION_CHARS = 1000;
 
 /** The passage count a page was asked with, or the default when it is none of the choices. */
 export const topKOf = (value: string | null) => (TOP_K.includes(Number(value)) ? Number(value) : DEFAULT_K);
@@ -23,13 +23,11 @@ export function useAsk() {
   }, [navigate]);
 }
 
-export function SearchBox({ initial = '', topK = DEFAULT_K, large = false, autoFocus = false }: {
-  initial?: string; topK?: number; large?: boolean; autoFocus?: boolean;
-}) {
+export function SearchBox({ large = false, autoFocus = false }: { large?: boolean; autoFocus?: boolean }) {
   const t = useT();
   const ask = useAsk();
-  const [text, setText] = useState(initial);
-  const [k, setK] = useState(topK);
+  const [text, setText] = useState('');
+  const [k, setK] = useState(DEFAULT_K);
   const box = useRef<HTMLInputElement>(null);
   // ⌘K / Ctrl+K anywhere puts the cursor in the question box.
   useEffect(() => {
@@ -58,13 +56,7 @@ export function SearchBox({ initial = '', topK = DEFAULT_K, large = false, autoF
       />
       <label className="flex shrink-0 items-center gap-1 text-xs text-faint" title={t('topKTip')}>
         <span className="hidden sm:inline">{t('topK')}</span>
-        <select value={k} onChange={(e) => {
-          setK(Number(e.target.value));
-          // On a results page the open question is asked again with it at once: the search is
-          // run here again (the question's split is kept), and the answer, its evidence changed,
-          // is written again.
-          if (initial && text.trim()) ask(text, Number(e.target.value));
-        }}
+        <select value={k} onChange={(e) => setK(Number(e.target.value))}
           className="rounded border border-line bg-subtle px-1 py-0.5 font-mono text-xs text-muted outline-none">
           {TOP_K.map((n) => <option key={n} value={n}>{n}</option>)}
         </select>

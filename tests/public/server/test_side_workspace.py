@@ -28,10 +28,14 @@ class _Rag:
     def __init__(self) -> None:
         self.text_only = False
 
-    def find(self, question: str, *, documents: int) -> list[Any]:
+    def find(self, question: str, *, documents: int,
+            history: Any = (), only: Any = None) -> list[Any]:
         if not self.text_only:
             raise GraphNotEmbedded("passages were embedded with another model")
         return []
+
+    def last_queries(self, question: str, history: Any = ()) -> tuple[str, ...]:
+        return (question,)
 
 
 class _Graph:

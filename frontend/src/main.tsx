@@ -13,6 +13,8 @@ import { SettingsPage } from './features/manage/SettingsPage';
 import { ExportPage } from './features/manage/ExportPage';
 import { LibraryPage } from './features/manage/LibraryPage';
 import { ManageLayout } from './features/manage/ManageLayout';
+import { ChatPage } from './features/chat/ChatPage';
+import { MiniPage } from './features/chat/MiniPage';
 import { AskPage } from './features/search/AskPage';
 import { UploadProvider } from './features/upload/upload';
 import { LangProvider } from './lib/i18n';
@@ -42,16 +44,27 @@ function OldDocLink() {
   const doc = new URLSearchParams(location.search).get('doc');
   return doc ? <Navigate to={`/manage/docs/${encodeURIComponent(doc)}`} replace /> : <AskPage />;
 }
+function ChatRoute() {
+  const { id = '' } = useParams();
+  return <ChatPage key={id} id={id} />;
+}
+function MiniRoute() {
+  const { id = '' } = useParams();
+  return <MiniPage key={id} id={id} />;
+}
 function DocumentRoute() {
   const { id = '' } = useParams();
   return later(<DocumentPage key={id} id={id} />);
 }
 
 const router = createBrowserRouter([
+  // The right-click "Ask" window: a conversation alone, without the app's header and menus.
+  { path: '/mini/:id', element: <MiniRoute /> },
   {
     element: <AppShell />,
     children: [
       { path: '/', element: <OldDocLink /> },
+      { path: '/c/:id', element: <ChatRoute /> },
       { path: '/qfolder', element: <Navigate to={`/${location.search}`} replace /> },
       {
         path: '/manage',

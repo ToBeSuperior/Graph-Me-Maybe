@@ -434,3 +434,72 @@ def test_a_settings_save_keeps_the_graph_db_the_app_runs(
 
     assert demo.settings.model == "new-model"
     assert demo.settings.local_neo4j == home and demo.settings.data_dir == data
+
+
+def test_the_right_click_menu_is_switched_on_and_off_and_never_written_to_env(
+    page: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from graphme import context_menu
+
+    client, demo, env, _ = page
+    on: list[list[str]] = []
+    homes: list[Path] = []
+    demo.settings = demo.settings.model_copy(update={"local_models": Path("/invented/dev-home")})
+    monkeypatch.setattr(context_menu, "supported", lambda: True)
+    monkeypatch.setattr(context_menu, "installed", lambda home: bool(on))
+    monkeypatch.setattr(context_menu, "install",
+                        lambda command, home: (on.append(command), homes.append(home)))
+    monkeypatch.setattr(context_menu, "remove", lambda home: on.clear())
+    before = env.read_text()
+
+    said = client.put("/v1/settings", json={"values": {"GRAPHME_CONTEXT_MENU": "on"}})
+
+    assert said.status_code == 200, said.text
+    [command] = on
+    # The home the server runs on -- its settings' -- never the installed app's by default.
+    assert command[-3:] == ["ask-window", "--home", str(demo.settings.local_models)]
+    assert homes == [demo.settings.local_models]
+    fields = {f["env"]: f for f in said.json()["fields"]}
+    assert fields["GRAPHME_CONTEXT_MENU"]["value"] == "on"
+    assert env.read_text() == before
+    said = client.put("/v1/settings", json={"values": {"GRAPHME_CONTEXT_MENU": "off"}})
+    assert on == [] and {f["env"]: f for f in said.json()["fields"]}[
+        "GRAPHME_CONTEXT_MENU"]["value"] == "off"
+    assert client.put("/v1/settings", headers={"origin": "https://evil.example"},
+                      json={"values": {"GRAPHME_CONTEXT_MENU": "on"}}).status_code == 403
+    assert on == []
+    assert client.put("/v1/settings",
+                      json={"values": {"GRAPHME_CONTEXT_MENU": "maybe"}}).status_code == 400
+
+
+def test_where_there_is_no_right_click_menu_the_page_offers_none(
+    page: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from graphme import context_menu
+
+    client, _, _, _ = page
+    monkeypatch.setattr(context_menu, "supported", lambda: False)
+    fields = {f["env"] for f in client.get("/v1/settings").json()["fields"]}
+    assert "GRAPHME_CONTEXT_MENU" not in fields
+
+
+def test_the_right_click_menu_is_switched_only_once_the_rest_of_the_save_holds(
+    page: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from graphme import context_menu
+
+    client, _, _, _ = page
+    switched: list[str] = []
+    monkeypatch.setattr(context_menu, "supported", lambda: True)
+    monkeypatch.setattr(context_menu, "installed", lambda home: False)
+    monkeypatch.setattr(context_menu, "install", lambda command, home: switched.append("on"))
+    said = client.put("/v1/settings", json={"values": {
+        "GRAPHME_CONTEXT_MENU": "on", "GRAPHME_NEO4J_PASSWORD": "x"}})
+    assert said.status_code == 400 and switched == []
+
+    def refused(command: list[str], home: Path) -> None:
+        raise PermissionError("invented: the Services folder is locked")
+
+    monkeypatch.setattr(context_menu, "install", refused)
+    said = client.put("/v1/settings", json={"values": {"GRAPHME_CONTEXT_MENU": "on"}})
+    assert said.status_code == 400 and "right-click menu" in said.json()["detail"]

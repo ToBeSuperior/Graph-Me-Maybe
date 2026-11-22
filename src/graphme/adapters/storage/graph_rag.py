@@ -18,11 +18,14 @@ that, in one call; nothing here reasons from one hop to the next.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
+import re
 import threading
 import time
 import unicodedata
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
@@ -36,14 +39,22 @@ from graphme.adapters.chat import Endpoint, complete, image_part, is_transient
 from graphme.adapters.embedding import BatchEmbedder, Remembered
 from graphme.adapters.export.neo4j import CHUNK_LABEL, NODE_LABEL
 from graphme.adapters.storage.answer_prompt import (
+    CHECK_SYSTEM,
+    FOLLOW_UP_SYSTEM,
     MAX_QUERIES,
     SPLIT_SYSTEM,
     SYSTEM,
+    _Claims,
+    _FollowUp,
     _nothing_found,
     _prompt,
     _Split,
+    asked_after,
     asked_with_samples,
     language_samples,
+)
+from graphme.adapters.storage.answer_prompt import (
+    Turn as Turn,  # what `ask` takes a conversation's earlier turns as
 )
 from graphme.adapters.storage.hybrid_search import (
     _OnceRetriever,
@@ -60,6 +71,7 @@ from graphme.application.embedded_documents import shown_name
 from graphme.application.graph_chunks import CHUNK_RULE, chunks
 from graphme.application.passage_scores import IMPORTANCE_RULE, centroid, importance
 from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop
+from graphme.config import LINK_DISCOUNT
 from graphme.domain.text_match import estimated_tokens, folded
 from graphme.ports.storage import AssetStore
 
@@ -106,6 +118,25 @@ ANSWER_TOKENS = 12_000
 shows every document found, the model reads the best of them."""
 
 
+TURN_SEARCHES = 64
+"""The most searches a turn keeps: a question asks a few, one a query and workspace."""
+
+_TURN: ContextVar[Remembered[Any] | None] = ContextVar("graphme_turn", default=None)
+"""The searches made in the turn under way (`one_search`), by reader and key."""
+
+
+@contextlib.contextmanager
+def one_search() -> Iterator[None]:
+    """A turn whose stages each search: inside it, every search a reader makes is made once and
+    kept until it ends, so an answer started after its search finished still reads the passages
+    the search showed. A thread the turn starts takes it along with `contextvars.copy_context`."""
+    token = _TURN.set(Remembered(TURN_SEARCHES))
+    try:
+        yield
+    finally:
+        _TURN.reset(token)
+
+
 def collected(ranked: Sequence[Any], documents: int) -> list[Any]:
     """The passages a question finds, `ranked` best first: walked down until `documents`
     documents are reached, the passage reaching the last one included, each document giving
@@ -123,6 +154,28 @@ def collected(ranked: Sequence[Any], documents: int) -> list[Any]:
     return taken
 
 
+def within(ranked: Sequence[Any], only: frozenset[str] | None) -> list[Any]:
+    """The passages of `ranked` in the documents `only` names, in their order; every passage
+    when `only` is None. A scope naming nothing in the graph leaves none."""
+    return list(ranked) if only is None else [p for p in ranked if p["document_id"] in only]
+
+
+def linked_without(linked: Sequence[dict[str, Any]],
+                   exclude: frozenset[str]) -> list[dict[str, Any]]:
+    """The linked documents but those `exclude` names, and the hop-3 ones reached through
+    them."""
+    return [d for d in linked if d["document_id"] not in exclude and d.get("via") not in exclude]
+
+
+def linked_within(linked: Sequence[dict[str, Any]], only: frozenset[str] | None
+                  ) -> list[dict[str, Any]]:
+    """The linked documents inside the scope: a question about chosen documents brings none
+    from outside them, nor a hop-3 one reached through a document outside."""
+    return list(linked) if only is None else [
+        d for d in linked
+        if d["document_id"] in only and (d["hop"] < 3 or d["via"] in only)]
+
+
 def across(found: Sequence[tuple[str, Sequence[T]]], *, rrf_k: int) -> list[tuple[str, T]]:
     """Several workspaces' ranked lists as one, each named by its workspace: fused by
     reciprocal rank, each workspace weighted the same -- a score comes from its workspace's own
@@ -138,16 +191,30 @@ def find_across(found: Sequence[tuple[str, Sequence[GraphSource]]], documents: i
     """What each workspace's `find` found, fused (`across`) and walked to `documents`
     documents as one search is (`collected`). Ids come from a file's content, so a document is
     told apart by its workspace too."""
+    fused = across(found, rrf_k=rrf_k)
+    # The walk counts found documents alone; a linked one ranked among them (`promoted`) goes
+    # with the document it was reached from, so the walk shows what each workspace's did.
     ranked = [{"id": (ws, s.id), "document_id": (ws, s.document_id), "source": s}
-              for ws, s in across(found, rrf_k=rrf_k)]
-    return [replace(p["source"], workspace=p["id"][0]) for p in collected(ranked, documents)]
+              for ws, s in fused if s.promoted_from is None]
+    kept = {id(p["source"]) for p in collected(ranked, documents)}
+    while True:
+        shown = {(ws, doc) for ws, s in fused if id(s) in kept
+                 for doc in (s.document_id, *(d.document_id for d in s.linked))}
+        brought = {id(s) for ws, s in fused if id(s) not in kept and s.promoted_from
+                   and (ws, s.promoted_from.via) in shown}
+        if not brought:
+            break
+        kept |= brought
+    return [replace(s, workspace=ws) for ws, s in fused if id(s) in kept]
 
 
 def ask_across(read: Sequence[tuple[str, GraphRag, Sequence[RetrieverResultItem]]],
-               question: str, documents: int, *, rrf_k: int) -> GraphAnswer:
+               question: str, documents: int, *, rrf_k: int,
+               history: Sequence[Turn] = (),
+               shown: Callable[[GraphAnswer], None] | None = None) -> GraphAnswer:
     """An answer from what each workspace's `read` gave, fused (`across`) and walked as one
     question's passages are (`collected`, `filled`, `within_budget`): each workspace's pictures
-    read from its own scope, the answer written as one workspace's is (`answered`)."""
+    read from its own scope, the answer written as one workspace's is (`written`)."""
     ranked = [{"id": (ws, m["id"]), "document_id": (ws, m["document_id"]), "ws": ws,
                "item": RetrieverResultItem(content=item.content, metadata={**m, "workspace": ws})}
               for ws, item in across([(ws, items) for ws, _, items in read], rrf_k=rrf_k)
@@ -163,8 +230,7 @@ def ask_across(read: Sequence[tuple[str, GraphRag, Sequence[RetrieverResultItem]
                                   strict=True):
                 held[at] = theirs
     pictures = [picture for each in held for picture in each][:ANSWER_PICTURES]
-    return GraphAnswer(text=read[0][1].answered(question, items, pictures),
-                       sources=[_source(item) for item in items])
+    return read[0][1].written(question, items, pictures, history, shown=shown)
 
 
 def filled(ranked: Sequence[Any], taken: Sequence[Any]) -> list[Any]:
@@ -219,6 +285,46 @@ def relevant_links(linked: Sequence[dict[str, Any]], floor: float) -> list[dict[
     return kept
 
 
+def promoted(sources: Sequence[GraphSource], discount: float, named: set[str],
+             closeness: Mapping[str, float]) -> list[GraphSource]:
+    """`sources` with each linked document ranked by its own passages: its best passage's
+    closeness to the question, times `discount` for each hop past the first -- none when the
+    question names it -- set against each found passage's `closeness`, the same measure of
+    the same question vector (a found passage's fused score ranks it within its search and
+    says nothing of how near it is). One nearer than a found passage stands in its place as
+    that passage of its own, with the place's score, saying how it was reached
+    (`promoted_from`); it leaves the document it was reached from, taking along the hop-3
+    documents reached through it. A found document the question names keeps its place ahead
+    (`named_first`), and a passage with no closeness -- a search by words alone -- is passed
+    by none. Only the order changes: every document shown before is shown, and no other."""
+    near = dict(closeness)
+    rows = [(source, list(source.linked)) for source in sources]
+    reached = sorted(
+        ((best.score * (1.0 if doc.document_id in named else discount ** (doc.hop - 1)),
+          doc, best)
+         for _, linked in rows for doc in linked if doc.passages
+         for best in [max(doc.passages, key=lambda p: p.score)]),
+        key=lambda each: -each[0])
+    for score, doc, best in reached:
+        at = next((i for i, (found, _) in enumerate(rows)
+                   if found.document_id not in named and found.id in near
+                   and score > near[found.id]), None)
+        if at is None:
+            continue
+        parent, linked = next(row for row in rows if doc in row[1])
+        carried = [d for d in linked if d.hop == 3 and d.via == doc.document_id]
+        for each in [doc, *carried]:
+            linked.remove(each)
+        near[best.id] = score  # one ranked after it stays after it
+        rows.insert(at, (GraphSource(
+            id=best.id, score=rows[at][0].score, document_id=doc.document_id, file=doc.file,
+            members=best.members, context=best.text, linked=carried, modified=doc.modified,
+            workspace=parent.workspace,
+            promoted_from=LinkedFrom(via=doc.via, hop=doc.hop, direction=doc.direction)),
+            carried))
+    return [replace(source, linked=linked) for source, linked in rows]
+
+
 def within_budget(items: Sequence[RetrieverResultItem], budget: int = ANSWER_TOKENS
                   ) -> list[RetrieverResultItem]:
     """The front of `items` the answer reads: as many as fit in `budget` tokens, in order --
@@ -271,6 +377,15 @@ class LinkedDocument:
 
 
 @dataclass(frozen=True, slots=True)
+class LinkedFrom:
+    """Where a linked document ranked among the found ones (`promoted`) was reached from."""
+
+    via: str
+    hop: int
+    direction: str
+
+
+@dataclass(frozen=True, slots=True)
 class GraphSource:
     """A passage an answer was given, and the documents the graph reached from its own:
     the passage's document is hop 1, the documents linked to it hop 2, theirs hop 3."""
@@ -290,12 +405,30 @@ class GraphSource:
     """The mail it came from, or the mail that carried its document (`mail_origin`)."""
     workspace: str | None = None
     """The workspace it was found in, once said (`find_across`, `ask_across`, the server)."""
+    promoted_from: LinkedFrom | None = None
+    """Set when this is a linked document's passage ranked among the found ones (`promoted`)."""
+
+
+@dataclass(frozen=True, slots=True)
+class Claim:
+    """One thing an answer says, checked against the passages it cites."""
+    text: str
+    """As the answer writes it."""
+    supported: bool
+    correction: str | None
+    """When unsupported: the claim as the passages say it; None when they say nothing of it."""
+    files: list[str]
 
 
 @dataclass(frozen=True, slots=True)
 class GraphAnswer:
     text: str
     sources: list[GraphSource]
+    claims: list[Claim] = field(default_factory=list)
+    checked: bool = False
+    """Whether the claims were checked; false when the check was off or failed."""
+    queries: tuple[str, ...] = ()
+    """What was searched for it (`GraphRag.last_queries`)."""
 
 
 class GraphRag:
@@ -316,11 +449,14 @@ class GraphRag:
         relevance_floor: float,
         dense_weight: float,
         rrf_k: int,
+        link_discount: float = LINK_DISCOUNT,
         assets: AssetStore | None = None,
         wait: Callable[[float], None] = time.sleep,
         scope: WorkspaceScope = DEFAULT_SCOPE,
+        check_answers: bool = False,  # a check is a model call: only a caller that asks gets one
     ) -> None:
         self._space = space
+        self._check_answers = check_answers
         self._scope = scope
         self._wait = wait
         self._assets = assets
@@ -343,6 +479,7 @@ class GraphRag:
         self._floor = relevance_floor
         self._dense_weight = dense_weight
         self._rrf_k = rrf_k
+        self._link_discount = link_discount
         self._vector = checked_name(vector_property)
         self._model_property = checked_name(f"{vector_property}_model")
         self._centroid = checked_name(f"{vector_property}_centroid")
@@ -492,26 +629,72 @@ class GraphRag:
         with self._driver.session() as session:
             session.execute_write(write)
 
-    def ask(self, question: str, *, documents: int) -> GraphAnswer:
+    def ask(self, question: str, *, documents: int, history: Sequence[Turn] = (),
+            only: frozenset[str] | None = None, exclude: frozenset[str] = frozenset(),
+            shown: Callable[[GraphAnswer], None] | None = None) -> GraphAnswer:
+        """The question answered, from the documents `only` names when it is given;
+        after earlier `history` turns, searched as the question it stands for
+        (`_asked`) and answered with those turns above its passages. `shown` is handed the
+        answer before its claims are checked (`written`)."""
         _checked(documents)
-        items = within_budget(self.read(question, documents=documents))
+        items = within_budget(self.read(question, documents=documents, history=history,
+                                     only=only, exclude=exclude))
         # A graph_chunk holding a table, a picture or a chart says it in words a model wrote
         # once; the picture goes too, so the answer reads it, not the description.
         pictures = [picture for each in self.pictures(items) for picture in each]
-        return GraphAnswer(text=self.answered(question, items, pictures),
-                           sources=[_source(item) for item in items])
+        return replace(self.written(question, items, pictures, history, shown=shown),
+                       queries=self.last_queries(question, history))
 
-    def read(self, question: str, *, documents: int) -> list[RetrieverResultItem]:
+    def written(self, question: str, items: Sequence[RetrieverResultItem],
+                pictures: Sequence[tuple[str, bytes]],
+                history: Sequence[Turn] = (), *,
+                shown: Callable[[GraphAnswer], None] | None = None) -> GraphAnswer:
+        """The answer (`answered`) with its sources, and its claims checked when that is on
+        and there is a passage to check them against. `shown` is handed the answer before the
+        check, so a caller can say it while the check runs; what it raises stops the check."""
+        text = self.answered(question, items, pictures, history)
+        sources = promoted([_source(item) for item in items], self._link_discount,
+                           _named_in(items), _closeness_in(items))
+        answer = GraphAnswer(text=text, sources=sources)
+        if shown is not None:
+            shown(answer)
+        claims = self.checked(text, items) if self._check_answers and items else None
+        return replace(answer, claims=claims or [], checked=claims is not None)
+
+    def checked(self, answer: str, items: Sequence[RetrieverResultItem]) -> list[Claim] | None:
+        """What each claim of `answer` comes to against the passages it cites (all of them
+        when it cites none); None when the check could not be made -- the answer stands."""
+        cited = set(re.findall(r"\[([^\]]+)\]", answer))
+        read = [item for item in items
+                if shown_name(str((item.metadata or {}).get("file", ""))) in cited] or items
+        content = f"Answer:\n{answer}\n\nPassages:\n" + "\n\n".join(i.content for i in read)
+        try:
+            reply = self._complete(system=CHECK_SYSTEM, content=content,
+                                   schema=strict_response_schema(_Claims), name="answer_check")
+            written = _Claims.model_validate_json(reply)
+        except Exception as error:  # noqa: BLE001 -- an unchecked answer still goes out
+            _log.warning("answer not checked -- %s", str(error)[:200])
+            return None
+        # A claim the answer does not hold is the check's own writing: it proves nothing.
+        held = folded(answer)
+        return [Claim(c.text, c.supported, None if c.supported else c.correction, c.files)
+                for c in written.claims if folded(c.text) and folded(c.text) in held]
+
+    def read(self, question: str, *, documents: int, history: Sequence[Turn] = (),
+             only: frozenset[str] | None = None,
+             exclude: frozenset[str] = frozenset()) -> list[RetrieverResultItem]:
         """What an answer reads, best first, before `within_budget` cuts it."""
-        return [_item(record) for record in _once(self._found(question, documents, read_on=True))]
+        found = self._found(question, documents, read_on=True, history=history,
+                            only=only, exclude=exclude)
+        return [_item(record) for record in _once(found)]
 
     def answered(self, question: str, items: Sequence[RetrieverResultItem],
-                 pictures: Sequence[tuple[str, bytes]]) -> str:
+                 pictures: Sequence[tuple[str, bytes]], history: Sequence[Turn] = ()) -> str:
         """The answer written from `items` and the pictures they hold."""
         if not items:
             # Nothing near the question: no passage to answer from, and no model call for it.
             return _nothing_found(question)
-        prompt = _prompt(question, "\n".join(item.content for item in items))
+        prompt = _prompt(question, "\n".join(item.content for item in items), history)
         content: list[dict[str, Any]] = [
             {"type": "text", "text": prompt + (PICTURES_FOLLOW if pictures else "")}]
         for label, png in pictures:
@@ -552,27 +735,37 @@ class GraphRag:
                 break
         return pictures
 
-    def find(self, question: str, *, documents: int) -> list[GraphSource]:
+    def find(self, question: str, *, documents: int, history: Sequence[Turn] = (),
+             only: frozenset[str] | None = None,
+             exclude: frozenset[str] = frozenset()) -> list[GraphSource]:
         """The passages a question finds and the documents linked to theirs, with no answer
         written -- what the Q folder page shows: as `ask` reads them, but with
         LINKED_DOCUMENTS hop-3 documents under each hop-2 one rather than in all."""
         _checked(documents)
-        found = self._found(question, documents)
-        return [_source(_item(record)) for record in _once(found, each_folder=True)]
+        found = self._found(question, documents, history=history, only=only, exclude=exclude)
+        items = [_item(record) for record in _once(found, each_folder=True)]
+        return promoted([_source(item) for item in items], self._link_discount,
+                        _named_in(items), _closeness_in(items))
 
-    def _found(self, question: str, documents: int, *, read_on: bool = False
-               ) -> list[neo4j.Record]:
+    def _found(self, question: str, documents: int, *, read_on: bool = False,
+               history: Sequence[Turn] = (),
+               only: frozenset[str] | None = None,
+               exclude: frozenset[str] = frozenset()) -> list[neo4j.Record]:
         """The fused search for each thing the question asks (`_queries`), the passages taken
         from each search in turn, best first, each once -- walked until `documents` documents
         are reached (`collected`) -- then the documents linked to each one found, walked once
         a document. A document the question names, where the search found it, comes first
         (`named_first`). An answer and its folder page ask side by side: the search runs once
-        for both, and asking for fewer documents takes the front of the same passages."""
-        queries, said = self._asked(question)
+        for both, and asking for fewer documents takes the front of the same passages.
+        `only` searches the passages of the documents it names, and brings the linked
+        documents inside it alone; a scoped search is shared by its scope.
+        `only` empty finds nothing, None is every document. `exclude` leaves its documents out
+        of this question alone: their passages are not found nor are they brought as linked."""
+        queries, said, searched = self._asked(question, history)
 
         def search() -> list[neo4j.Record]:
             retriever = self._retriever()
-            searches = [retriever.fused(query) for query in queries]
+            searches = [retriever.fused(query, only) for query in queries]
             found: dict[str, neo4j.Record] = {}
             for rank in range(max(map(len, searches), default=0)):
                 for one in searches:
@@ -580,26 +773,33 @@ class GraphRag:
                         found.setdefault(one[rank]["id"], one[rank])
             return list(found.values())
 
-        ranked = cast(list[neo4j.Record], self._shared(("found", question), search))
-        named = self._named(named_phrases(question, said), ranked)
+        # kept by its queries: the same words after other turns are another search
+        key = ("found", queries) if only is None else ("found", queries, only)
+        ranked = [record for record in within(cast(list[neo4j.Record], self._shared(key, search)),
+                                              only)
+                  if record["document_id"] not in exclude]
+        every = self._named(named_phrases(searched, said))
+        named = every & {record["document_id"] for record in ranked}
         order = named_first(ranked, named)
         taken = collected(order, documents)
         if not read_on:  # the page shows the walk
-            return self._linked(taken, question)
+            return _marked(self._linked(taken, searched, only, exclude), every)
         # an answer reads only in the documents the question names (`named_only`), else on
         # into the documents found (`filled`)
-        return self._linked(named_only(ranked, named) if named else filled(order, taken), question)
+        return _marked(self._linked(named_only(ranked, named) if named else filled(order, taken),
+                                    searched, only, exclude), every)
 
-    def _named(self, phrases: Sequence[str], ranked: Sequence[neo4j.Record]) -> set[str]:
-        """The documents `phrases` name, of those the search found."""
+    def _named(self, phrases: Sequence[str]) -> set[str]:
+        """The documents `phrases` name, found or not."""
         if not phrases:
             return set()
-        found = {record["document_id"] for record in ranked}
         # ponytail: the space's identities read for each question naming something; keep
         # them with the graph's fingerprint if a space of thousands makes this slow.
-        return documents_named(phrases, self._space.identities()) & found
+        return documents_named(phrases, self._space.identities())
 
-    def _linked(self, found: list[neo4j.Record], question: str) -> list[neo4j.Record]:
+    def _linked(self, found: list[neo4j.Record], question: str,
+                only: frozenset[str] | None = None,
+                exclude: frozenset[str] = frozenset()) -> list[neo4j.Record]:
         """`found` with the documents linked to each document in it, hop by hop, given to the
         document's best passage: the walk is the document's, so it is made once a document,
         however many of its passages were found."""
@@ -615,6 +815,7 @@ class GraphRag:
         assert retriever.embedder is not None
         records, _, _ = self._query(
             self._links_query(), ids=list(first),
+            passages=[record["id"] for record in found],
             query_vector=retriever.embedder.embed_query(question),
             database_=retriever.neo4j_database,
             routing_=neo4j.RoutingControl.READ,
@@ -624,26 +825,44 @@ class GraphRag:
         held = documents_with_message_ids(self._driver, sorted(quoted),
                                           database=retriever.neo4j_database, scope=self._scope)
         links = {record["document_id"]: linked_without_answered_quotes(
-                     relevant_links(record["linked"], self._floor), in_space=held)
+                     linked_without(linked_within(
+                         relevant_links(record["linked"], self._floor), only), exclude),
+                     in_space=held)
                  for record in records}
+        near = {p["id"]: p["closeness"] for p in (records[0].get("near") or [] if records else [])}
         return [
             neo4j.Record({**dict(record),  # type: ignore[no-untyped-call]
+                          "closeness": near.get(record["id"]),
                           "linked": links.get(record["document_id"], [])
                           if first[record["document_id"]] == at else []})
             for at, record in enumerate(found)
         ]
 
-    def _asked(self, question: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        """What the question asks, one search query each, and the phrases in it naming a
-        document (`SPLIT_SYSTEM`) -- or the question itself and none, where the model asks it
-        as one thing or gives no usable answer. Made once for a question and the samples it is
-        asked beside, however many workspaces ask it, at once or after (`SPLITS`); a split that
+    def _asked(self, question: str, history: Sequence[Turn] = ()) -> _Asked:
+        """What the question asks, one search query each, the phrases in it naming a
+        document (`SPLIT_SYSTEM`), and the question searched for: after earlier turns, the
+        question as it reads on its own (`FOLLOW_UP_SYSTEM`) -- or the question itself, as
+        one query naming nothing, where the model asks it as one thing or gives no usable
+        answer. Made once for a question, the turns before it and the samples it is asked
+        beside, however many workspaces ask it, at once or after (`SPLITS`); a split that
         failed is not kept."""
-        asked = asked_with_samples(question, self._language_samples())
-        key = (self._endpoint.wire, self._endpoint.base_url, self._endpoint.model, asked)
-        split = SPLITS.get(key, lambda: self._split_question(question, asked),
+        key, asked = self._split_key(question, history)
+        split = SPLITS.get(key, lambda: self._split_question(question, asked, history),
                            keep=lambda split: split is not None)
-        return split or ((question,), ())
+        return split or ((question,), (), question)
+
+    def last_queries(self, question: str, history: Sequence[Turn] = ()) -> tuple[str, ...]:
+        """What the question was searched for, read from the split kept when it was asked
+        (`_asked`) -- no model is asked: the question itself when none is kept."""
+        key, _ = self._split_key(question, history)
+        split = SPLITS.get(key, lambda: None, keep=lambda split: split is not None)
+        return split[0] if split else (question,)
+
+    def _split_key(self, question: str, history: Sequence[Turn]) -> tuple[tuple[str, ...], str]:
+        """What a split is kept by -- the endpoint and model asked and what they are sent --
+        and what they are sent."""
+        asked = asked_after(history, asked_with_samples(question, self._language_samples()))
+        return (self._endpoint.wire, self._endpoint.base_url, self._endpoint.model, asked), asked
 
     def _complete(self, **ask: Any) -> str:
         """`complete`, asked again on ASK_RETRY_DELAYS while the endpoint says "not now"."""
@@ -656,23 +875,29 @@ class GraphRag:
             self._wait(delay)
         return complete(self._client, self._endpoint, **ask)
 
-    def _split_question(self, question: str, asked: str
-                        ) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    def _split_question(self, question: str, asked: str,
+                        history: Sequence[Turn] = ()) -> _Asked | None:
+        # A question asked with no turns before it is split as it always was.
+        system, shape = (FOLLOW_UP_SYSTEM, _FollowUp) if history else (SPLIT_SYSTEM, _Split)
         try:
             reply = self._complete(
-                system=SPLIT_SYSTEM, content=asked,
-                schema=strict_response_schema(_Split), name="question_split")
-            written = _Split.model_validate_json(reply)
+                system=system, content=asked,
+                schema=strict_response_schema(shape), name="question_split")
+            written = shape.model_validate_json(reply)
         except Exception as error:  # noqa: BLE001 -- unsplit is how every question was asked
             _log.warning("question not split -- %s", str(error)[:200])
             return None  # not kept: the next ask tries the model again
+        # The question as it reads on its own is what is searched for and what names a document.
+        standalone = written.standalone if isinstance(written, _FollowUp) else ""
+        searched = standalone.strip() or question
         parts = _kept(written.queries, MAX_QUERIES)
         # The same queries in the documents' other languages: what full-text search matches.
-        queries = tuple(dict.fromkeys((*(parts if len(parts) > 1 else (question,)),
+        queries = tuple(dict.fromkeys((*(parts if len(parts) > 1 else (searched,)),
                                        *_kept(written.translated, MAX_QUERIES * 2))))
         # A name is one the question writes: one copied off the samples names nothing asked.
-        named = [phrase for phrase in written.documents if folded(phrase) in folded(question)]
-        return queries, _kept(named, MAX_QUERIES)
+        held = folded(f"{question}\n{searched}")
+        named = [phrase for phrase in written.documents if folded(phrase) in held]
+        return queries, _kept(named, MAX_QUERIES), searched
 
     def _language_samples(self) -> list[str]:
         """A line of each language the space's documents are written in, from one passage of
@@ -704,9 +929,13 @@ class GraphRag:
 
     def _shared(self, key: object, work: Callable[[], Any]) -> Any:
         """`work()`, run by the first of those asking for `key` at once; the others wait for
-        it and are handed what it returned (or raised). Kept only while it runs: a result
-        shared longer would outlive the documents it was found in."""
-        return self._flights.get(key, work)
+        it and are handed what it returned (or raised). Kept only while it runs, or inside a
+        turn (`one_search`) until the turn ends: a result shared longer would outlive the
+        documents it was found in."""
+        turn = _TURN.get()
+        if turn is None:
+            return self._flights.get(key, work)
+        return turn.get((self, key), lambda: self._flights.get(key, work))
 
     def _ensure_index(self) -> None:
         """The vector index at this model's size: one at another size is dropped and made
@@ -782,7 +1011,8 @@ class GraphRag:
 
     def _links_query(self) -> str:
         """The documents linked to each of `$ids`, hop by hop, each with its passages nearest
-        the question (`$query_vector`)."""
+        the question (`$query_vector`), and how near the question each found passage of
+        `$passages` is, on the same measure (`promoted`)."""
         vector = f"c.`{self._vector}`"
         linked = _links_of(self._scope)
         # The linked documents nearest the question as a whole, before any passage is read.
@@ -791,6 +1021,12 @@ class GraphRag:
             linked.`{self._centroid}`, $query_vector), 0.0) AS whole
           ORDER BY whole DESC LIMIT {LINK_CANDIDATES}"""
         return f"""
+        CALL () {{
+          UNWIND $passages AS passage
+          MATCH (c:{CHUNK_LABEL} {{id: passage}}) WHERE {vector} IS NOT NULL
+          RETURN collect({{id: c.id, closeness: vector.similarity.cosine({vector}, $query_vector)}})
+            AS near
+        }}
         UNWIND $ids AS found
         MATCH (start:Document {{id: found}})
         CALL (start) {{
@@ -831,7 +1067,7 @@ class GraphRag:
                           modified: reached.modified_at}})
             AS linked
         }}
-        RETURN start.id AS document_id, linked
+        RETURN start.id AS document_id, linked, near
         """
 
 
@@ -852,10 +1088,14 @@ def _links_of(scope: WorkspaceScope) -> str:
             RETURN n.id AS other, 'similar' AS direction
           }}"""
 
-SPLITS: Remembered[tuple[tuple[str, ...], tuple[str, ...]] | None] = Remembered(256)
+_Asked = tuple[tuple[str, ...], tuple[str, ...], str]
+"""A question's split: its search queries, the phrases naming a document, and the question as
+it is searched for."""
+SPLITS: Remembered[_Asked | None] = Remembered(256)
 """Each question's split (`GraphRag._asked`), by the endpoint and model asked and what they
-were sent -- the question beside its workspace's language samples: workspaces written alike
-ask once, one written in another language asks for its own translations."""
+were sent -- the question beside its workspace's language samples, after the turns before
+it: workspaces written alike ask once, one written in another language asks for its own
+translations, and the same words after other turns are another question."""
 
 _WAY = ("CASE WHEN 'cites' IN ways THEN 'cites' WHEN 'cited_by' IN ways THEN 'cited_by' "
         "ELSE 'similar' END")
@@ -924,8 +1164,39 @@ def _item(record: neo4j.Record) -> RetrieverResultItem:
             "linked": linked,
             "modified": record["modified"],
             "origin": mail_origin(record),
+            "named": record.get("named", False),
+            "closeness": record.get("closeness"),
         },
     )
+
+
+def _marked(records: list[neo4j.Record], named: set[str]) -> list[neo4j.Record]:
+    """`records` with each found and linked document saying whether the question names it
+    (`named`), for `promoted` to read once the passages are items."""
+    if not named:
+        return records
+    return [neo4j.Record({**dict(record),  # type: ignore[no-untyped-call]
+                          "named": record["document_id"] in named,
+                          "linked": [{**doc, "named": doc["document_id"] in named}
+                                     for doc in record["linked"]]})
+            for record in records]
+
+
+def _closeness_in(items: Sequence[RetrieverResultItem]) -> dict[str, float]:
+    """Each found passage's closeness to the question (`_linked`), by its id; none when the
+    question was searched by its words alone."""
+    return {m["id"]: m["closeness"] for item in items for m in [item.metadata or {}]
+            if m.get("closeness") is not None}
+
+
+def _named_in(items: Sequence[RetrieverResultItem]) -> set[str]:
+    """The documents among `items`, found or linked, that the question names (`_marked`)."""
+    named: set[str] = set()
+    for item in items:
+        found = item.metadata or {}
+        named |= {found["document_id"]} if found.get("named") else set()
+        named |= {doc["document_id"] for doc in found.get("linked", []) if doc.get("named")}
+    return named
 
 
 MAIL_CARRIERS = 3
@@ -1019,6 +1290,8 @@ def _once(records: list[neo4j.Record], *, each_folder: bool = False) -> list[neo
 
 def _source(item: RetrieverResultItem) -> GraphSource:
     found = dict(item.metadata or {})
+    found.pop("named", None)  # read by `promoted` through `_named_in`
+    found.pop("closeness", None)  # and through `_closeness_in`
     linked = [
         LinkedDocument(
             document_id=doc["document_id"], file=doc["file"], hop=doc["hop"], via=doc["via"],

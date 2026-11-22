@@ -1,13 +1,15 @@
 // The answer written from what was found, above the folders it was written from. It opens short:
 // a generated answer is a lead to the documents, not a substitute for them, so each [file] it
-// cites is a link that shows that document in the folders and its page on the right.
+// cites is a link that shows that document in the folders and its page on the right. Once the
+// answer is checked, each statement it checked carries its mark (ClaimMarks).
 import { AlertTriangle, ChevronDown, RotateCw, Sparkles, Square } from 'lucide-react';
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button, Skeleton } from '../../components/ui';
 import { cn, shownName } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import type { TrailDoc } from '../../lib/hops';
 import { blocks, inlines } from '../../lib/markdown';
+import { ClaimDetails, ClaimMark, withClaims, type Claim } from '../chat/ClaimMarks';
 
 /** A line of the answer: bold, italics and code as they are written, and each [file] it cites a
  * button when that file was found. */
@@ -61,9 +63,13 @@ function drawn(text: string, inline: (part: string) => ReactNode[]): ReactNode[]
   });
 }
 
-export function AnswerCard({ state, answer, error, byLabel, onCite, onHover, onRetry, onCancel }: {
+export function AnswerCard({ state, answer, claims = [], checking = false, error, byLabel, onCite, onHover, onRetry, onCancel }: {
   state: 'off' | 'pending' | 'done' | 'error';
   answer?: string;
+  /** What the check said of the answer's statements. */
+  claims?: Claim[];
+  /** The answer is being checked. */
+  checking?: boolean;
   error?: string;
   byLabel: Map<string, TrailDoc>;
   onCite: (doc: TrailDoc) => void;
@@ -74,6 +80,8 @@ export function AnswerCard({ state, answer, error, byLabel, onCite, onHover, onR
   const t = useT();
   const [more, setMore] = useState(false);
   const [long, setLong] = useState(false);
+  const [open, setOpen] = useState<number | null>(null);
+  const toggle = (i: number) => { setOpen((o) => (o === i ? null : i)); setMore(true); };
   const body = useRef<HTMLDivElement>(null);
   // Taller than the folded height (max-h-28, 112px) is long, whether it is folded now or not.
   useLayoutEffect(() => {
@@ -81,7 +89,10 @@ export function AnswerCard({ state, answer, error, byLabel, onCite, onHover, onR
     if (body.current) setLong(body.current.scrollHeight > 116);
   }, [answer]);
   const shown = useMemo(() => (answer === undefined ? null
-    : drawn(answer.trim(), (part) => written(part, byLabel, onCite, onHover))), [answer, byLabel, onCite, onHover]);
+    : drawn(answer.trim(), (part) => withClaims(part, claims).map((piece, k) => (typeof piece === 'number'
+      ? <ClaimMark key={k} claim={claims[piece]} open={open === piece} onToggle={() => toggle(piece)} />
+      : <Fragment key={k}>{written(piece, byLabel, onCite, onHover)}</Fragment>)))),
+  [answer, claims, open, byLabel, onCite, onHover]);
 
   return (
     <section className="rounded-xl border border-line bg-panel" aria-live="polite">
@@ -116,6 +127,8 @@ export function AnswerCard({ state, answer, error, byLabel, onCite, onHover, onR
                 {t(more ? 'showLess' : 'showMore')}<ChevronDown className={cn('size-3 transition-transform', more && 'rotate-180')} />
               </button>
             )}
+            {checking && <p className="mt-1 text-xs text-muted">{t('checkingAnswer')}</p>}
+            <ClaimDetails claims={claims} open={open} onToggle={toggle} />
           </>
         )}
       </div>

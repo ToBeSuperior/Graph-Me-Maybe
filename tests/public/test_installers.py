@@ -297,8 +297,11 @@ def test_an_install_stops_while_the_app_runs(tmp_path: Path, home: str | None) -
             "GRAPHME_INSTALL_SOURCE": str(_assets(tmp_path / "assets")), "GRAPHME_HOME": str(data),
             "GRAPHME_NO_NEO4J": "1", "GRAPHME_NO_SHORTCUT": "1", "GRAPHME_NO_LAUNCH": "1",
             "GRAPHME_VERSION": "v0.0.0", "GRAPHME_PORT": str(server.server_address[1])}
+        # Another install's app is not in the way, so that install runs to its end -- slower than
+        # one stopped at the check, the more so beside a full test run.
         done = subprocess.run(["sh", str(ROOT / "install.sh")], env=env, capture_output=True,
-                              text=True, stdin=subprocess.DEVNULL, timeout=60)
+                              text=True, stdin=subprocess.DEVNULL,
+                              timeout=300 if home == "/elsewhere/graph-me-maybe" else 60)
         server.shutdown()
     if home == "/elsewhere/graph-me-maybe":
         assert "quit it first" not in done.stderr, done.stderr

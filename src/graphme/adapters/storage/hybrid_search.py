@@ -4,7 +4,7 @@ identifiers it names become as Lucene queries."""
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any
 
 import neo4j
@@ -95,7 +95,7 @@ class _OnceRetriever(HybridCypherRetriever):
         self.rrf_k = rrf_k
         """`Settings.rrf_k`."""
 
-    def fused(self, question: str) -> list[neo4j.Record]:
+    def fused(self, question: str, only: Collection[str] | None = None) -> list[neo4j.Record]:
         """The passages both searches rank, fused: a passage ranked r by a search counts that
         search's weight / (rrf_k + r), and its score is the sum, scaled so a passage first in
         both scores 1 -- the relative relevance the page shows. A passage is fused only with
@@ -103,7 +103,11 @@ class _OnceRetriever(HybridCypherRetriever):
         question naming a code leans on the words where some passage holds the code: an
         identifier is matched by its letters, and BM25 serves specific questions better than
         cosine (arXiv:2504.05324). A weight already leaning on the words stays as set.
-        Highest score first: the query's later steps keep no order."""
+        Highest score first: the query's later steps keep no order.
+
+        `only` searches the passages of those documents alone: the two searches read
+        SCOPED_REACH candidates and keep the chosen documents' within the query, so a chosen
+        document ranked below SEARCH_DEPTH among all is still found."""
         dense, text = round(self.dense_weight, 6), round(1.0 - self.dense_weight, 6)
         # A code no passage holds says nothing about where the answer is (a page number dropped
         # as furniture, a code inside a picture): the question is searched as one naming none.
@@ -121,9 +125,11 @@ class _OnceRetriever(HybridCypherRetriever):
         if not self.text_only:
             assert self.embedder is not None
             asked["query_vector"] = self.embedder.embed_query(question)
+        fused = _FUSED_WORDS if self.text_only else _FUSED
+        if only is not None:
+            fused, asked = _scoped(fused), {**asked, "only": list(only), "reach": SCOPED_REACH}
         records, _, _ = self.driver.execute_query(
-            self.scope.cypher((_FUSED_WORDS if self.text_only else _FUSED)
-                              + self.retrieval_query),
+            self.scope.cypher(fused + self.retrieval_query),
             asked,
             database_=self.neo4j_database,
             routing_=neo4j.RoutingControl.READ,
@@ -181,6 +187,25 @@ so a passage is kept only with evidence it is about the question: its cosine (Ne
 (1 + cos) / 2) reaches `relevance_floor`, or it holds the question's words (`every_word`). A
 fulltext match on some of them is not that: a nonsense question shares a common word with
 something. What follows is the retrieval query, which reads `node` and `score`."""
+
+
+SCOPED_REACH = 10_000
+"""How many passages each search of a scoped question reads before keeping the chosen
+documents'. ponytail: a flat reach; a corpus with far more passages needs the index to
+filter by document."""
+
+
+def _scoped(fused: str) -> str:
+    """`fused` reading SCOPED_REACH candidates from each search and keeping the passages of
+    the documents in `$only`."""
+    return (fused.replace("$candidates, $query_vector)\n    YIELD node, score",
+                          "$reach, $query_vector)\n    YIELD node, score\n"
+                          "    WHERE node.document_id IN $only")
+            .replace("{limit: $candidates})\n    YIELD node, score",
+                     "{limit: $reach})\n    YIELD node, score\n"
+                     "    WHERE node.document_id IN $only")
+            .replace("{limit: $candidates})\n    YIELD node\n",
+                     "{limit: $reach})\n    YIELD node\n    WHERE node.document_id IN $only\n"))
 
 
 def every_word(question: str) -> str:

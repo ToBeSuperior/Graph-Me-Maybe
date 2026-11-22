@@ -145,19 +145,34 @@ carried, which open as documents.
 
 ## Asking
 
-A question splits a wide window into three columns (a narrow one shows the middle column only).
+A question begins a conversation, which splits a wide window into three columns (a narrow one
+shows the middle column only, the conversations in a menu and the page in a sheet).
 
-**Left — recent questions.** The last ten asked in this tab; a question also lives in the address
-(`?q=…&k=…`), so it can be bookmarked or shared, and reopening it searches the graph as it is now.
+**Left — conversations.** Kept on this computer by the app, never in the browser, each under its
+first question at its own address (`/c/…`). A follow-up is asked after the turns before it, so
+"and its hold time?" is understood. An old link (`?q=…&k=…`) begins a conversation and asks it.
+A turn asked before the graph changed says so, with **Ask again**.
 
-**Middle, top — the answer.** Written from the documents found, in the question's language (English
+**Middle — the turns.** Each turn is the question, the documents found, then the answer, with its
+stage shown (finding → writing → checking) and a **Stop**.
+
+**The scope.** Above the box, chips say what the conversation asks about: all documents, or the
+documents chosen. Files dropped on the box become the scope; in the app's own window a file no graph
+holds is built into the workspace open first, and the question waits for it; one another workspace
+holds is offered to be asked there. A chip's × takes it off.
+
+**The answer.** Written from the documents found, in the question's language (English
 when the question has none — only numbers or codes). It starts collapsed to four lines. A `[file
-name]` in the answer selects that document below and opens its page on the right. The answer can be
-stopped or written again.
+name]` in the answer selects that document below and opens its page on the right. Once checked
+against the passages, a statement they bear out is marked ✓, and one they say otherwise or say
+nothing of ⚠ — click it to see the statement beside what the sources say and the files checked.
+The answer can be stopped or asked again.
 
-**Middle — the documents found, as folders.** The documents whose passages match the question are the
-top-level folders (hop 1, numbered by rank); inside each, the documents linked to it (hop 2); inside
-those, theirs (hop 3).
+**The documents found, as folders.** The first three found are shown, **Show all** opens the
+rest. The documents whose passages match the question are the top-level folders (hop 1, numbered by
+rank); inside each, the documents linked to it (hop 2); inside those, theirs (hop 3). Each row's ⋯
+opens its preview, asks only about it from then on, asks the question again without it, or opens
+its original.
 
 - Each row shows its hop, how it relates to the row above (← cited by · → cites · ≈ similar), the
   line that brought it in, and the file's modified date.
@@ -167,7 +182,7 @@ those, theirs (hop 3).
   (DOCX, PPTX…).
 - Keyboard: ↑↓ move, → open or go in, ← close or go up, Enter opens.
 - **Documents** is how many documents the search finds (hop 1), each with up to five of its
-  passages; changing it searches and answers again. The answer reads the best of what was found,
+  passages; the next question is asked with it. The answer reads the best of what was found,
   up to a fixed length, while the folders show all of it. With few documents and a large value,
   everything comes back as hop 1.
 - **Download** saves the documents found as one zip with a folder per hop. Pick files one by one, a
@@ -178,6 +193,22 @@ those, theirs (hop 3).
 **Right — the preview.** The path (question › document › linked document), the matching passages one
 at a time (‹ ›), and the page each is on; a page holding a match has a dot on its tab. On a narrow
 screen this slides in from the side.
+
+
+### Asking from Finder or Explorer
+
+Turn on **Right-click menu** in **Manage › Keys and model › Advanced settings**. Then right-click
+files or folders in Finder (macOS: under **Quick Actions** or **Services**) or Explorer (Windows)
+and choose **Ask Graph-Me-Maybe**. A small window opens above the others on a conversation about
+those files: a file no graph holds is read into the workspace open first (never into a mail
+workspace), and one another workspace holds is offered to be asked there.
+
+- The pin keeps the window above the others or lets it go behind.
+- The slider makes the whole window see-through, from 100% down to 40%; the next window opens the
+  same way, at the place the last one closed.
+- **Open in the main window** carries the conversation to the app's window.
+- On macOS, if the entry is missing from **Quick Actions**, choose **Quick Actions › Customize…**
+  and tick it. On Windows each file picked opens its own window.
 
 ## Manage
 

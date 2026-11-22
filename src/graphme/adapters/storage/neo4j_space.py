@@ -329,6 +329,14 @@ class Neo4jGraphSpace:
         )
         return {record["h"] for record in records}
 
+    def documents_of(self, hashes: Sequence[str]) -> dict[str, str]:
+        """The documents of these file contents (SHA-256), by content."""
+        records, _, _ = self._query(
+            "UNWIND $hashes AS h MATCH (d:Document {content_hash: h}) "
+            "RETURN h, d.id AS id", hashes=list(hashes),
+        )
+        return {record["h"]: record["id"] for record in records}
+
     def unlinked(self, rule: str) -> set[str]:
         """The documents whose mentions were not judged by `rule` -- put since, or never."""
         records, _, _ = self._query(

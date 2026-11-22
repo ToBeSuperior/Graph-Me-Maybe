@@ -272,8 +272,10 @@ def create_graph_rag(
         relevance_floor=settings.relevance_floor,
         dense_weight=settings.hybrid_dense_weight,
         rrf_k=settings.rrf_k,
+        link_discount=settings.link_discount,
         assets=LocalAssetStore(settings.asset_dir),
         scope=space.scope,
+        check_answers=settings.check_answers,
     )
 
 

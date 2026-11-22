@@ -26,6 +26,12 @@ RELEVANCE_FLOORS = {"text-embedding-3-large": 0.2, "harrier-oss-v1-0.6b": 0.39, 
 were set midway between the lowest on-topic and the highest off-topic question's nearest
 cosine, six of each in English and six in Korean: harrier 0.41 / 0.37, KURE 0.48 / 0.44."""
 
+LINK_DISCOUNT = 0.85
+"""What a linked document's passage score is multiplied by for each hop past the first, when
+it is ranked among the found documents (`graph_rag.promoted`): a document a found one cites is
+told apart from a found one at the same closeness. Chosen on the invented samples' questions
+(`tools/golden/compare_search.py`)."""
+
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 """This machine's names. `[::1]` is how a Host header writes the IPv6 one."""
 
@@ -47,10 +53,12 @@ ENV_FIELDS = {
     "GRAPHME_RELEVANCE_FLOOR": "relevance_floor",
     "GRAPHME_HYBRID_DENSE_WEIGHT": "hybrid_dense_weight",
     "GRAPHME_RRF_K": "rrf_k",
+    "GRAPHME_LINK_DISCOUNT": "link_discount",
     "GRAPHME_VIEWER_DIR": "viewer_directory",
     "GRAPHME_RENDER_TIMEOUT_SECONDS": "render_timeout_seconds",
     "GRAPHME_CHROME_EXECUTABLE": "chrome_executable",
     "GRAPHME_HIERARCHY_READINGS": "hierarchy_readings",
+    "GRAPHME_CHECK_ANSWERS": "check_answers",
     "GRAPHME_NEO4J_URI": "neo4j_uri",
     "GRAPHME_NEO4J_USER": "neo4j_user",
     "GRAPHME_NEO4J_PASSWORD": "neo4j_password",
@@ -64,7 +72,8 @@ ENV_FIELDS = {
     "GRAPHME_GOOGLE_CLIENT_SECRET": "google_client_secret",
     "GRAPHME_MICROSOFT_CLIENT_ID": "microsoft_client_id",
 }
-_FLOAT_FIELDS = {"render_timeout_seconds", "relevance_floor", "hybrid_dense_weight"}
+_FLOAT_FIELDS = {"render_timeout_seconds", "relevance_floor", "hybrid_dense_weight",
+                 "link_discount"}
 _INT_FIELDS = {
     "rrf_k",
     "hierarchy_readings",
@@ -172,6 +181,8 @@ class Settings(BaseModel):
     rrf_k: int = Field(default=60, gt=0)
     """Reciprocal rank fusion's constant: a passage ranked r counts weight / (rrf_k + r). 60 is
     the value Cormack et al. fixed and the common default since."""
+    link_discount: float = Field(default=LINK_DISCOUNT, gt=0, le=1)
+    """`LINK_DISCOUNT`; 1 ranks a linked document by its passages alone."""
     viewer_directory: Path = Field(default_factory=release_assets.default_viewer)
     """OOXML viewer bundle; build it with adapters/rendering/viewer/setup.sh. The default folder
     is filled from this version's release the first time a page is drawn."""
@@ -179,6 +190,9 @@ class Settings(BaseModel):
     chrome_executable: str | None = Field(default_factory=_installed_chrome)
     """The browser that draws OOXML pages: the Chrome installed on this machine, unless set.
     With none, Playwright's own browser (`playwright install chromium --only-shell`)."""
+    check_answers: bool = True
+    """Whether an answer's claims are checked against the passages it cites, one more model
+    call for each answer."""
     hierarchy_readings: int = Field(default=1, ge=1, le=4)
     """How many independent readings each page gets. Above one, they run together and
     where they disagree the model is shown both beside the page and picks one -- a page

@@ -96,6 +96,7 @@ const tab = ({ isActive }: { isActive: boolean }) =>
 export function AppShell() {
   const t = useT();
   const chrome = useWindowChrome();
+  const { pathname } = useLocation();
   // How a build ended is said once, wherever the reader is.
   useWorkspaceFollower();
   useBuildFollower((build) => {
@@ -119,7 +120,7 @@ export function AppShell() {
         </NavLink>
         <div className="app-no-drag"><WorkspaceMenu /></div>
         <nav className="app-no-drag flex items-center gap-1" aria-label={t('navigation')}>
-          <NavLink to="/" end className={tab}><FolderTree className="size-4" />{t('navAsk')}</NavLink>
+          <NavLink to="/" end className={({ isActive }) => tab({ isActive: isActive || pathname.startsWith('/c/') })}><FolderTree className="size-4" />{t('navAsk')}</NavLink>
           <NavLink to="/manage" className={tab}><Database className="size-4" />{t('navManage')}</NavLink>
         </nav>
         <div className="app-no-drag ml-auto flex items-center gap-1.5">

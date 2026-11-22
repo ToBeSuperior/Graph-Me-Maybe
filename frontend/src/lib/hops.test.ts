@@ -36,6 +36,23 @@ describe('hopTrail', () => {
   });
 });
 
+describe('a linked document ranked among the found ones', () => {
+  const moved = [
+    { id: 'm:0', file: 'memo.docx', score: 0.9, document_id: 'm', members: [], context: 'memo', linked: [] },
+    { id: 'q:0', file: 'spec.docx', score: 0.7, document_id: 'q', members: ['q1'], context: 'rule',
+      promoted_from: { via: 'm', hop: 2, direction: 'cites' }, linked: [
+        { document_id: 'k', file: 'ks.docx', hop: 3, via: 'q', direction: 'cites', passages: [] }] },
+  ] as Source[];
+  const trail = hopTrail(moved);
+  it('keeps its hop badge and the documents reached through it', () => {
+    expect(trail.rows.map((r) => [r.doc.id, r.doc.hop])).toEqual([['m', 1], ['q', 2]]);
+    expect([trail.rows[1].via, trail.rows[1].direction]).toEqual(['m', 'cites']);
+    expect(trail.edges.map((e) => `${e.from}>${e.to}:${e.direction}`).sort()).toEqual(['m>q:cites', 'q>k:cites']);
+    expect(Object.fromEntries(trail.nodes.map((n) => [n.id, n.hop]))).toEqual({ m: 1, q: 2, k: 3 });
+    expect(trail.rows[1].next.map((n) => [n.doc.id, n.doc.hop])).toEqual([['k', 3]]);
+  });
+});
+
 describe('answerPath', () => {
   const trail = hopTrail(sources);
   it('finds the walk to a cited document and its length', () => {

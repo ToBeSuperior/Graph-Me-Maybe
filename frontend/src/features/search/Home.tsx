@@ -1,14 +1,14 @@
 // The home page: before anything is in the graph, a place to drop a folder (or try the samples);
-// after, one question box with the questions asked before and, with the samples in, some to try.
-import { Database, History } from 'lucide-react';
+// after, one question box with the conversations kept and, with the samples in, some to try.
+import { Database, MessagesSquare } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { Button, Empty, Skeleton } from '../../components/ui';
 import { useT } from '../../lib/i18n';
-import { useCorpusMap } from '../../lib/queries';
+import { useCorpusMap, useThreads } from '../../lib/queries';
 import { BuildProgress, useIncoming } from '../upload/BuildProgress';
 import { FolderDrop } from '../upload/FolderDrop';
-import { RecentList, useHistory } from './RecentList';
+import { ThreadList } from '../chat/ThreadList';
 import { SearchBox, useAsk } from './SearchBox';
 
 /** A file the samples are written as (src/graphme/samples.py): with it in the graph, the
@@ -20,7 +20,7 @@ export function Home() {
   const ask = useAsk();
   const map = useCorpusMap();
   const incoming = useIncoming();
-  const { history, forget } = useHistory();
+  const threads = useThreads();
   const total = map.data?.total ?? 0;
   const hasSamples = !!map.data?.documents.some((d) => d.label === SAMPLE_FILE);
 
@@ -85,10 +85,10 @@ export function Home() {
           </div>
         </div>
       )}
-      {history.length > 0 && (
+      {!!threads.data?.length && (
         <div>
-          <h2 className="mb-1 flex items-center gap-1.5 text-xs font-medium text-faint"><History className="size-3.5" />{t('recent')}</h2>
-          <RecentList roomy history={history} onAsk={ask} onForget={forget} />
+          <h2 className="mb-1 flex items-center gap-1.5 text-xs font-medium text-faint"><MessagesSquare className="size-3.5" />{t('recent')}</h2>
+          <ThreadList roomy />
         </div>
       )}
       <p className="text-center text-xs text-faint">

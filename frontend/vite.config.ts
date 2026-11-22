@@ -12,5 +12,5 @@ export default defineConfig({
   // changeOrigin off: the Host stays this page's, so a dev server opened with --host is refused
   // by a keyless server instead of passing as 127.0.0.1.
   server: { port: 5173, proxy: { '/v1': { target: DEMO, changeOrigin: false } } },
-  test: { include: ['src/**/*.test.ts'] },
+  test: { include: ['src/**/*.test.{ts,tsx}'] },
 });

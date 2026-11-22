@@ -46,6 +46,8 @@ class FakeSpace:
         self.carriers: dict[str, set[str]] = {}
         """attachment document id -> ids of the mail messages that carry it"""
         self.hashes: set[str] = set()
+        self.by_hash: dict[str, str] = {}
+        """content hash -> document id"""
         self.deleted: list[list[str]] = []
         self.relocated: list[tuple[str, str]] = []
         self.asked: list[list[str] | None] = []
@@ -68,6 +70,7 @@ class FakeSpace:
         self.held[extracted.document.id] = extracted.document.file_name
         self.paths[extracted.document.id] = str(extracted.document.source_path)
         self.hashes.add(extracted.document.content_hash)
+        self.by_hash[extracted.document.content_hash] = extracted.document.id
 
     def relocate(self, content_hash: str, source_path: str) -> None:
         self.relocated.append((content_hash, source_path))
@@ -97,6 +100,9 @@ class FakeSpace:
 
     def contents(self, hashes: Any) -> set[str]:
         return {h for h in hashes if h in self.hashes}
+
+    def documents_of(self, hashes: Any) -> dict[str, str]:
+        return {h: self.by_hash[h] for h in hashes if h in self.by_hash}
 
     def source_path(self, document_id: str) -> str | None:
         return self.paths.get(document_id)

@@ -5,8 +5,17 @@ from __future__ import annotations
 
 import unicodedata
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
+
+
+@dataclass(frozen=True, slots=True)
+class Turn:
+    """One earlier question of the conversation and the answer it was given."""
+    question: str
+    answer: str
+
 
 SYSTEM = (
     "Answer the question using only the provided context. Answer in the language the "
@@ -44,6 +53,48 @@ SPLIT_SYSTEM = (
     "codes kept as written. Leave `translated` empty when every sample is in the question's "
     "language or no samples follow."
 )
+FOLLOW_UP_SYSTEM = SPLIT_SYSTEM + (
+    "\n\nEarlier turns of the conversation come before the question. The question may lean "
+    "on them -- \"it\", \"that procedure\", \"and for the other one?\". Write in "
+    "`standalone` the question as it reads on its own, in its language, every name, number "
+    "and document it refers to taken from the earlier turns, and split that rather than the "
+    "words as written. When the question already reads on its own, `standalone` is empty."
+)
+"""The split of a question asked after earlier turns: a question asked without them is split
+by SPLIT_SYSTEM alone, as it always was."""
+HISTORY_TURNS = 3
+"""How many of the latest turns a follow-up is read beside."""
+HISTORY_ANSWER_CHARS = 600
+"""How much of each earlier answer goes along: its opening names what it was about."""
+CHECK_SYSTEM = (
+    "You are given an answer and the passages it was written from, each passage opening with "
+    "the [file name] it comes from. Split the answer into the separate claims it makes, and "
+    "check each against the passages alone, not against what you know. In `text`, copy the "
+    "claim exactly as the answer writes it, in one piece, never reworded or joined with "
+    "another. `supported` is true when a passage says it; when none does, or a passage says "
+    "otherwise, it is false. When it is false, `correction` is the claim written as the "
+    "passages say it, in the answer's language, with the figure, name or condition they give; "
+    "when the passages say nothing about it, `correction` is null. `files` names each "
+    "passage's file you compared it with. A statement that the answer cannot be found in the "
+    "context is not a claim. Return only JSON matching the schema."
+)
+"""How an answer is checked once it is written: claim by claim, against its own passages."""
+
+
+class _Claim(BaseModel):
+    text: str
+    supported: bool
+    correction: str | None = None
+    files: list[str] = Field(default_factory=list)
+
+
+class _Claims(BaseModel):
+    """The check as the model wrote it. A claim whose `text` is not in the answer is dropped
+    where it is read (`GraphRag.checked`): a quote the answer does not hold proves nothing."""
+
+    claims: list[_Claim] = Field(default_factory=list)
+
+
 """How a question asking several things -- a problem and how competitors handled it -- is
 cut into one search each: one search for both finds what the nearer part is about."""
 MAX_QUERIES = 3
@@ -60,6 +111,13 @@ class _Split(BaseModel):
     """The queries again in the documents' languages the question is not in."""
 
 
+class _FollowUp(_Split):
+    """The split of a question asked after earlier turns (FOLLOW_UP_SYSTEM)."""
+
+    standalone: str = ""
+    """The question as it reads without the earlier turns; empty when it already does."""
+
+
 TEMPLATE = """Context:
 {context}
 
@@ -69,17 +127,41 @@ Question:
 Answer:"""
 
 
-def _prompt(question: str, context: str) -> str:
+def _prompt(question: str, context: str, history: Sequence[Turn] = ()) -> str:
     """The question under its context, and for a Korean or an English question -- or one with
     no language of its own, which is answered in English -- the language said again beside
     it: told only in the system prompt, ahead of a long context, a smaller model answered
-    Korean questions in English, and English questions in Korean."""
+    Korean questions in English, and English questions in Korean. Earlier turns of the
+    conversation go above the context: what a follow-up's "it" refers to."""
     prompt = TEMPLATE.format(query_text=question, context=context)
+    if history:
+        prompt = f"Earlier in this conversation:\n{_turns(history)}\n\n{prompt}"
     if _is_korean(question):
         return prompt.replace("\n\nAnswer:", "\n\nAnswer in Korean:")
     if _is_english(question):
         return prompt.replace("\n\nAnswer:", "\n\nAnswer in English:")
     return prompt
+
+
+def asked_after(history: Sequence[Turn], asked: str) -> str:
+    """What a split is sent: the latest earlier turns, then the question as it is asked."""
+    if not history:
+        return asked
+    return f"Earlier turns:\n{_turns(history)}\n\nQuestion:\n{asked}"
+
+
+def _turns(history: Sequence[Turn]) -> str:
+    """The latest HISTORY_TURNS turns, each answer cut to its opening."""
+    return "\n\n".join(
+        f"Question: {turn.question}\nAnswer: {_opening(turn.answer)}"
+        for turn in history[-HISTORY_TURNS:])
+
+
+def _opening(answer: str) -> str:
+    answer = answer.strip()
+    if len(answer) <= HISTORY_ANSWER_CHARS:
+        return answer
+    return answer[: HISTORY_ANSWER_CHARS - 1].rstrip() + "…"
 
 
 def _is_korean(text: str) -> bool:

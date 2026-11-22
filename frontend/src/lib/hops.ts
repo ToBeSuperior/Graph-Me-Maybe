@@ -39,13 +39,20 @@ export function hopTrail(sources: Source[]): Trail {
   };
   for (const hit of sources) {
     if (!rows.has(hit.document_id)) {
+      // A linked document ranked among the found ones by its own passages keeps its hop.
+      const hop = (hit.promoted_from?.hop ?? 1) as 1 | 2 | 3;
       rows.set(hit.document_id, {
-        doc: { id: hit.document_id, label: hit.file, hop: 1, rank: rows.size + 1, score: hit.score,
+        doc: { id: hit.document_id, label: hit.file, hop, rank: rows.size + 1, score: hit.score,
           modified: hit.modified, passages: [] },
+        via: hit.promoted_from?.via, direction: hit.promoted_from?.direction as Direction | undefined,
         next: [],
       });
     }
     const row = rows.get(hit.document_id)!;
+    const from = hit.promoted_from;
+    if (from && !edges.has(`${from.via}>${hit.document_id}`)) {
+      edges.set(`${from.via}>${hit.document_id}`, { from: from.via, to: hit.document_id, direction: from.direction as Direction });
+    }
     row.doc.passages.push({ id: hit.id, score: hit.score, members: hit.members, text: hit.context });
     reach({ ...row.doc });
     const second = new Map<string, TrailEntry>();
@@ -64,7 +71,8 @@ export function hopTrail(sources: Source[]): Trail {
       }
     }
     for (const doc of (hit.linked ?? []).filter((d) => d.hop === 3)) {
-      const entry = second.get(doc.via) ?? row.next.find((n) => n.doc.id === doc.via);
+      const entry = second.get(doc.via) ?? row.next.find((n) => n.doc.id === doc.via)
+        ?? (doc.via === row.doc.id ? row : undefined); // reached through a ranked hop-2 one
       if (entry && !entry.next.some((t) => t.doc.id === doc.document_id)) {
         entry.next.push({
           doc: { id: doc.document_id, label: doc.file, hop: 3, modified: doc.modified, passages: doc.passages },

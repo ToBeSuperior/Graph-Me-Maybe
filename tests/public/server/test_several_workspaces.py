@@ -3,6 +3,7 @@ ranked lists fused by reciprocal rank with each workspace weighted the same, and
 naming the workspace it came from. Invented workspaces and passages only."""
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,12 @@ from fastapi.testclient import TestClient
 from neo4j_graphrag.types import RetrieverResultItem
 
 from graphme.adapters.storage import local_neo4j
-from graphme.adapters.storage.graph_rag import GraphNotEmbedded, GraphSource
+from graphme.adapters.storage.graph_rag import (
+    GraphNotEmbedded,
+    GraphRag,
+    GraphSource,
+    Turn,
+)
 from graphme.server import create_app, state
 from graphme.server.state import Demo
 from graphme.server.workspaces import FIRST
@@ -29,30 +35,43 @@ class _Rag:
         self.workspace, self.embedded = workspace, embedded
         self.text_only = False
         self.answered_from: list[str] = []
+        self.history: list[Turn] = []
+        self.answered_after: list[Turn] = []
 
     def _check(self) -> None:
         if not self.embedded:
             raise GraphNotEmbedded("no vector index")
 
-    def find(self, question: str, *, documents: int) -> list[GraphSource]:
+    def find(self, question: str, *, documents: int,
+             history: Sequence[Turn] = (), only: Any = None) -> list[GraphSource]:
         self._check()
+        self.history = list(history)
         return [GraphSource(id=f"{doc}:{n}", score=0.5, document_id=doc, file=f"{doc}.docx",
                             members=[f"{doc}-u{n}"], context=f"{self.workspace} {doc} {n}")
                 for doc in ("memo", "spec") for n in (0, 1)][: 2 * documents]
 
-    def read(self, question: str, *, documents: int) -> list[RetrieverResultItem]:
+    def read(self, question: str, *, documents: int,
+             history: Sequence[Turn] = (), only: Any = None) -> list[RetrieverResultItem]:
         return [RetrieverResultItem(content=s.context, metadata={
                     "id": s.id, "score": s.score, "document_id": s.document_id, "file": s.file,
                     "members": s.members, "linked": [], "modified": None, "origin": None})
-                for s in self.find(question, documents=documents)]
+                for s in self.find(question, documents=documents, history=history)]
+
+    def last_queries(self, question: str, history: Sequence[Turn] = ()) -> tuple[str, ...]:
+        return (f"{question} as {self.workspace} searched it",)
 
     def pictures(self, items: list[RetrieverResultItem]) -> list[list[tuple[str, bytes]]]:
         assert all(str(i.content).startswith(self.workspace) for i in items)  # never crosses
         return [[] for _ in items]
 
+    _check_answers = False
+    written = GraphRag.written
+    _link_discount = 0.85  # what `written` ranks linked documents with (`promoted`)
+
     def answered(self, question: str, items: list[RetrieverResultItem],
-                 pictures: list[tuple[str, bytes]]) -> str:
+                 pictures: list[tuple[str, bytes]], history: Sequence[Turn] = ()) -> str:
         self.answered_from = [str(i.content) for i in items]
+        self.answered_after = list(history)
         return "invented answer"
 
 
@@ -152,3 +171,31 @@ def test_an_answer_reads_the_fused_passages_and_an_unknown_workspace_is_404(
     assert [(s["workspace"], s["id"]) for s in answered.json()["sources"]] == [
         (FIRST, "memo:0"), (other, "memo:0"), (FIRST, "memo:1"), (other, "memo:1")]
     assert nowhere.status_code == 404
+
+
+def test_a_follow_up_over_two_workspaces_takes_its_turns_to_each(demo_: Demo) -> None:
+    other = _made(demo_, "Invented project")
+    client = TestClient(create_app(demo_), base_url=BASE)
+    turns = [{"question": "What does the invented memo follow?", "answer": "The spec."}]
+
+    answered = client.post("/v1/ask", json={"question": "And its hold time?", "documents": 2,
+                                            "workspaces": [FIRST, other], "history": turns})
+
+    assert answered.status_code == 200, answered.text
+    said = [Turn("What does the invented memo follow?", "The spec.")]
+    assert demo_.rag().history == said and demo_.reader(other).rag().history == said  # type: ignore[attr-defined]
+    assert demo_.rag().answered_after == said  # type: ignore[attr-defined]
+    assert answered.json()["queries"] == [f"And its hold time? as {FIRST} searched it"]
+
+
+def test_an_answer_over_two_workspaces_streams_its_stages(demo_: Demo) -> None:
+    other = _made(demo_, "Invented project")
+    client = TestClient(create_app(demo_), base_url=BASE)
+
+    streamed = client.post("/v1/ask", json={"question": "invented", "documents": 1,
+                                            "workspaces": [FIRST, other]},
+                           headers={"Accept": "text/event-stream"})
+
+    names = [line.removeprefix("event: ") for line in streamed.text.splitlines()
+             if line.startswith("event: ")]
+    assert names == ["searched", "answered", "checked"], streamed.text

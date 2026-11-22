@@ -181,3 +181,63 @@ def test_quit_completely_takes_the_icon_away_before_the_process_ends(
     icon.act("quit")
 
     assert said[:2] == [("visible", False), "stop"] and said.index("ended") > 1
+
+
+def test_a_goto_left_long_ago_is_dropped_not_followed(tmp_path: Path) -> None:
+    agent.ask_goto(tmp_path, "/c/abc")
+    old = (tmp_path / agent.GOTO).stat().st_mtime - 60
+    os.utime(tmp_path / agent.GOTO, (old, old))
+
+    assert agent.take_goto(tmp_path) is None
+    assert not (tmp_path / agent.GOTO).exists()
+
+
+def test_a_goto_waits_until_the_window_is_there_to_take_it(tmp_path: Path) -> None:
+    loaded: list[str] = []
+
+    class Window:
+        def load_url(self, url: str) -> None:
+            loaded.append(url)
+
+    class Webview:
+        windows: list[Any] = []
+
+    agent.ask_goto(tmp_path, "/c/abc")
+    agent.follow_goto_once(tmp_path, "http://127.0.0.1:1", Webview)
+    assert loaded == [] and (tmp_path / agent.GOTO).exists()
+    Webview.windows = [Window()]
+    agent.follow_goto_once(tmp_path, "http://127.0.0.1:1", Webview)
+    assert loaded == ["http://127.0.0.1:1/c/abc"]
+
+
+def test_without_a_webview_the_browser_opens_at_the_page_asked_for(
+    tmp_path: Path, monkeypatch: Any,
+) -> None:
+    agent_file.write_server_file(tmp_path, port=8799, token="t")
+    agent.ask_goto(tmp_path, "/c/abc")
+    browsed: list[str] = []
+    monkeypatch.setattr(agent.processes, "open_in_browser", browsed.append)
+
+    agent.open_window(tmp_path, connect=lambda home: httpx.Client(), show=lambda url: False,
+                      front=lambda pid: False, tell=lambda text: None)
+
+    assert browsed == ["http://127.0.0.1:8799/c/abc"]
+
+
+def test_the_installed_app_opens_for_the_home_its_launcher_names(
+    tmp_path: Path, monkeypatch: Any,
+) -> None:
+    bundle = tmp_path / "Graph-Me-Maybe.app"
+    (bundle / "Contents" / "MacOS").mkdir(parents=True)
+    home = tmp_path / "My Data"
+    (bundle / "Contents" / "MacOS" / "Graph-Me-Maybe").write_text(
+        f'#!/bin/sh\nGRAPHME_HOME="{home}" exec "/invented/graphme-app"\n')
+    started: list[list[str]] = []
+    monkeypatch.setattr(agent.processes, "popen", lambda args, **_: started.append(args))
+    monkeypatch.setattr(agent.sys, "platform", "darwin")
+
+    agent._open_app(home, bundle=bundle)
+    agent._open_app(tmp_path / "other", bundle=bundle)
+
+    assert started[0] == ["open", str(bundle)]
+    assert started[1][-3:] == ["-m", "graphme.launcher", str(tmp_path / "other")]

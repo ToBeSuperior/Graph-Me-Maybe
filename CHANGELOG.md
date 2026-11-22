@@ -5,6 +5,30 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+
+### Added
+
+- Ask is a conversation. Each question begins one, kept on this computer and listed on the left
+  at its own address; a follow-up ("and its hold time?") is asked after the turns before it. The
+  documents found sit inside the conversation as folders you can open, narrow to (**Ask only
+  this**) or leave out once (**Ask again without this**), and the page stays on the right.
+- Each statement of an answer is checked against the passages found: ✓ when they bear it out, ⚠
+  when they say otherwise or nothing, with what they do say.
+- Files dropped on the question box become what the conversation asks about; a file no graph
+  holds is read first, and one another workspace holds is offered to be asked there.
+- Right-click files in Finder or Explorer and choose **Ask Graph-Me-Maybe**: a small window above
+  the others asks about them, with a pin and a see-through slider (40–100%). Turned on in
+  **Manage › Keys and model › Advanced settings**.
+- The HTTP API streams a turn as it goes (`searched`, `answered`, `checked`, `saved`) and keeps
+  conversations under `/v1/threads`; `/v1/ask` streams too when asked for `text/event-stream`.
+
+### Changed
+
+- A document linked to the ones found now competes on its own passage: when it matches the
+  question better than a document found directly (counted down by `GRAPHME_LINK_DISCOUNT`, 0.85
+  a hop), it is ranked among them.
+
 ## [0.1.77] - 2026-11-19
 
 ### Changed

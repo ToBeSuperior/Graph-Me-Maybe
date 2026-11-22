@@ -911,6 +911,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Scope
+         * @description Files and folders on this machine as documents of the graph, found by their
+         *     content. `workspace` is the one holding most of the files (the open one wins a tie),
+         *     `document_ids` those it holds; `missing` the files no workspace holds, `elsewhere`
+         *     those another workspace holds (never built), and `build_into` where a missing file
+         *     may be built: that workspace, else the open one, never a mail workspace.
+         */
+        post: operations["scope_v1_scope_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/search": {
         parameters: {
             query?: never;
@@ -944,8 +968,82 @@ export interface paths {
         /**
          * Ask
          * @description A question answered from the graph space, with the passages it was answered from.
+         *     With `Accept: text/event-stream`, its stages as they finish (`staged`): `searched`
+         *     (Found), `answered` (Answer, its claims not checked yet), `checked` (Checked), or
+         *     `error` (StreamError) once they began.
          */
         post: operations["ask_v1_ask_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/threads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Threads
+         * @description The conversations kept for `workspace` (the open one when not given), the latest
+         *     changed first; a file that cannot be read is left out.
+         */
+        get: operations["threads_v1_threads_get"];
+        put?: never;
+        /**
+         * Thread Create
+         * @description A conversation begun, with no turns: every turn asks `workspace` (the open one when
+         *     not given) about the documents `scope` names (every one when None).
+         */
+        post: operations["thread_create_v1_threads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/threads/{thread_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Thread */
+        get: operations["thread_v1_threads__thread_id__get"];
+        put?: never;
+        post?: never;
+        /** Thread Delete */
+        delete: operations["thread_delete_v1_threads__thread_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Thread Change
+         * @description A conversation renamed, or its scope replaced for the turns after.
+         */
+        patch: operations["thread_change_v1_threads__thread_id__patch"];
+        trace?: never;
+    };
+    "/v1/threads/{thread_id}/turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Thread Turn
+         * @description A question asked in a conversation: after its earlier turns, about its scope, in its
+         *     workspace. Its stages are streamed as `/ask`'s are, then `saved` (ThreadTurn) once the
+         *     turn is kept -- one that failed is kept too, saying why. With `Accept:
+         *     application/json`, the finished turn alone.
+         */
+        post: operations["thread_turn_v1_threads__thread_id__turns_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1142,11 +1240,20 @@ export interface components {
             answer: string;
             /** Sources */
             sources: components["schemas"]["Source"][];
+            /** Queries */
+            queries?: string[];
             /**
              * Text Only
              * @default false
              */
             text_only: boolean;
+            /** Claims */
+            claims?: components["schemas"]["Claim"][];
+            /**
+             * Checked
+             * @default false
+             */
+            checked: boolean;
         };
         /** AuraUpload */
         AuraUpload: {
@@ -1334,6 +1441,17 @@ export interface components {
             /** Importance */
             importance?: number | null;
         };
+        /** Claim */
+        Claim: {
+            /** Text */
+            text: string;
+            /** Supported */
+            supported: boolean;
+            /** Correction */
+            correction?: string | null;
+            /** Files */
+            files?: string[];
+        };
         /** Confirm */
         Confirm: {
             /**
@@ -1399,6 +1517,13 @@ export interface components {
             /** Files */
             files: number;
         };
+        /** Elsewhere */
+        Elsewhere: {
+            /** Path */
+            path: string;
+            /** Workspace */
+            workspace: string;
+        };
         /** ExportJob */
         ExportJob: {
             /** Id */
@@ -1438,6 +1563,8 @@ export interface components {
         Found: {
             /** Sources */
             sources: components["schemas"]["Source"][];
+            /** Queries */
+            queries?: string[];
             /**
              * Text Only
              * @default false
@@ -1526,6 +1653,15 @@ export interface components {
             passages: components["schemas"]["LinkedPassage"][];
             /** Modified */
             modified?: number | null;
+        };
+        /** LinkedFrom */
+        LinkedFrom: {
+            /** Via */
+            via: string;
+            /** Hop */
+            hop: number;
+            /** Direction */
+            direction: string;
         };
         /** LinkedPassage */
         LinkedPassage: {
@@ -1642,6 +1778,13 @@ export interface components {
             /** Changes */
             changes?: boolean | null;
         };
+        /** NewThread */
+        NewThread: {
+            /** Scope */
+            scope?: string[] | null;
+            /** Workspace */
+            workspace?: string | null;
+        };
         /** Opened */
         Opened: {
             /** Opened */
@@ -1719,6 +1862,12 @@ export interface components {
             workspace?: string | null;
             /** Workspaces */
             workspaces?: string[] | null;
+            /** History */
+            history?: components["schemas"]["Turn"][];
+            /** Only */
+            only?: string[] | null;
+            /** Exclude */
+            exclude?: string[] | null;
         };
         /** ReadRequest */
         ReadRequest: {
@@ -1743,6 +1892,27 @@ export interface components {
         Reset: {
             /** Deleted */
             deleted: number;
+        };
+        /** Scope */
+        Scope: {
+            /** Document Ids */
+            document_ids: string[];
+            /** Missing */
+            missing: string[];
+            /**
+             * Elsewhere
+             * @default []
+             */
+            elsewhere: components["schemas"]["Elsewhere"][];
+            /** Workspace */
+            workspace?: string | null;
+            /** Build Into */
+            build_into?: string | null;
+        };
+        /** ScopeRequest */
+        ScopeRequest: {
+            /** Paths */
+            paths: string[];
         };
         /** SearchModel */
         SearchModel: {
@@ -1826,6 +1996,81 @@ export interface components {
             origin?: string | null;
             /** Workspace */
             workspace?: string | null;
+            promoted_from?: components["schemas"]["LinkedFrom"] | null;
+        };
+        /** Thread */
+        Thread: {
+            /** Id */
+            id: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /** Scope */
+            scope?: string[] | null;
+            /** Workspace */
+            workspace: string;
+            /** Turns */
+            turns?: components["schemas"]["ThreadTurn"][];
+            /** Created At */
+            created_at: number;
+            /** Updated At */
+            updated_at: number;
+        };
+        /** ThreadPatch */
+        ThreadPatch: {
+            /** Title */
+            title?: string | null;
+            /** Scope */
+            scope?: string[] | null;
+        };
+        /** ThreadSummary */
+        ThreadSummary: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Updated At */
+            updated_at: number;
+            /** Turns */
+            turns: number;
+        };
+        /** ThreadTurn */
+        ThreadTurn: {
+            /** Question */
+            question: string;
+            /** Scope */
+            scope?: string[] | null;
+            found?: components["schemas"]["Found"] | null;
+            answer?: components["schemas"]["Answer"] | null;
+            /** Stamp */
+            stamp?: string | null;
+            /** Asked At */
+            asked_at: number;
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * Turn
+         * @description An earlier question of the conversation and the answer it was given.
+         */
+        Turn: {
+            /** Question */
+            question: string;
+            /** Answer */
+            answer: string;
+        };
+        /** TurnRequest */
+        TurnRequest: {
+            /** Question */
+            question: string;
+            /** Documents */
+            documents?: number | null;
+            /** Stamp */
+            stamp?: string | null;
+            /** Exclude */
+            exclude?: string[] | null;
         };
         /** Uploaded */
         Uploaded: {
@@ -3347,6 +3592,39 @@ export interface operations {
             };
         };
     };
+    scope_v1_scope_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScopeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Scope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     search_v1_search_post: {
         parameters: {
             query?: never;
@@ -3400,6 +3678,202 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Answer"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    threads_v1_threads_get: {
+        parameters: {
+            query?: {
+                workspace?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    thread_create_v1_threads_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewThread"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Thread"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    thread_v1_threads__thread_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Thread"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    thread_delete_v1_threads__thread_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Deleted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    thread_change_v1_threads__thread_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ThreadPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Thread"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    thread_turn_v1_threads__thread_id__turns_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TurnRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadTurn"];
                 };
             };
             /** @description Validation Error */

@@ -236,10 +236,12 @@ def build_server(client: httpx.Client) -> FastMCP:
     def ask(question: str, top_k: int = 5, workspace: str | None = None,
             workspaces: list[str] | None = None) -> dict[str, Any]:
         """An answer written by the model set in Graph-Me-Maybe (it costs that model's calls),
-        with the passages it was written from; `workspaces` asks several at once."""
+        with the passages it was written from and `claims`, each statement of it checked against
+        them (`supported`, else a `correction`); `workspaces` asks several at once."""
         answer = post("/v1/ask", {"question": question, "documents": top_k,
                                   **asked_of(workspace, workspaces)})
         return {"answer": answer["answer"], "text_only": answer.get("text_only", False),
+                "claims": answer.get("claims", []),
                 "sources": [{"document_id": s["document_id"], "file": shown_name(s["file"]),
                              "passage_id": s["id"],
                              **({"workspace": s.get("workspace")} if workspaces else {})}

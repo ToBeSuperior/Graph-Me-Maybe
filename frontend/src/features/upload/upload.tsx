@@ -4,7 +4,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
-import { api, call, sent, type Samples } from '../../api/client';
+import { api, call, sent, type BuildState, type Samples } from '../../api/client';
 import { useT } from '../../lib/i18n';
 import { keys } from '../../lib/queries';
 
@@ -47,8 +47,9 @@ interface Uploading { done: number; total: number; current: string }
 
 interface UploadApi {
   uploading: Uploading | null;
-  /** Upload the readable files among `files` and build them into the graph. */
-  add: (files: { file: File; path: string }[]) => Promise<void>;
+  /** Upload the readable files among `files` and build them into the graph: the files uploaded
+   * and the build started, null when none was. */
+  add: (files: { file: File; path: string }[]) => Promise<{ files: string[]; build: BuildState } | null>;
   samples: () => Promise<void>;
   loadingSamples: boolean;
 }
@@ -70,7 +71,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const add: UploadApi['add'] = async (files) => {
     const picked = files.filter(({ file, path }) => readable(file, path));
     const skipped = files.length - picked.length;
-    if (!picked.length) { toast.error(t('nothingReadable')); return; }
+    if (!picked.length) { toast.error(t('nothingReadable')); return null; }
     const ids: string[] = [];
     const failed: string[] = [];
     const why = new Set<string>();
@@ -90,11 +91,14 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     setUploading(null);
     if (failed.length) toast.error(t('notUploaded', failed.length), { description: `${failed.join(', ')} — ${[...why].join(' · ')}` });
     toast(t('uploaded', ids.length, skipped), { description: skipped ? t('skippedWhy') : undefined });
-    if (!ids.length) return;
+    if (!ids.length) return null;
     try {
-      started(await startBuild(ids));
+      const build = await startBuild(ids);
+      started(build);
+      return { files: ids, build };
     } catch (error) {
       toast.error(t('cannotBuild'), { description: String((error as Error).message) });
+      return null;
     }
   };
 

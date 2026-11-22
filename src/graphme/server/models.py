@@ -229,6 +229,12 @@ class Opened(_Model):
 # Questions ----------------------------------------------------------------------------------
 
 
+class Turn(_Model):
+    """An earlier question of the conversation and the answer it was given."""
+    question: str
+    answer: str
+
+
 class Question(_Model):
     question: str = ""
     documents: int | None = None
@@ -240,6 +246,16 @@ class Question(_Model):
     workspaces: list[str] | None = None
     """Several workspaces asked at once, by id: each searched in its own graph, the results
     fused by rank. None or empty: `workspace` alone."""
+    history: list[Turn] = Field(default_factory=list)
+    """The conversation's earlier turns, oldest first: a follow-up is searched as the question
+    it stands for. Only the latest few are read, each answer's opening."""
+    only: list[str] | None = None
+    """Document ids the question is about: only their passages, and the documents linked to
+    them inside the list, are searched. None: every document. Ids a workspace does not hold
+    find nothing there."""
+    exclude: list[str] | None = None
+    """Document ids left out of this question: none of their passages is found and none is
+    brought as a linked document."""
 
     @model_validator(mode="before")
     @classmethod
@@ -248,6 +264,31 @@ class Question(_Model):
         if isinstance(data, dict) and data.get("documents") is None and "top_k" in data:
             return {**data, "documents": data["top_k"]}
         return data
+
+
+class ScopeRequest(_Model):
+    paths: list[str]
+    """Files and folders on this computer; a folder stands for the supported files under it."""
+
+
+class Elsewhere(_Model):
+    path: str
+    workspace: str
+
+
+class Scope(_Model):
+    document_ids: list[str]
+    """The documents of the files `workspace` holds, by content."""
+    missing: list[str]
+    """The files no workspace holds."""
+    elsewhere: list[Elsewhere] = []
+    """The files another workspace than `workspace` holds; they are never built."""
+    workspace: str | None = None
+    """The workspace holding most of the files (the open one wins a tie); None when none holds
+    any. Without a workspace registry, the one open graph is named by the settings' id."""
+    build_into: str | None = None
+    """Where a missing file may be built: `workspace`, else the open one; never a mail
+    workspace -- then the open one if it is not mail, else None (nothing is buildable)."""
 
 
 class LinkedPassage(_Model):
@@ -268,6 +309,13 @@ class LinkedDocument(_Model):
     modified: float | None = None
 
 
+class LinkedFrom(_Model):
+    via: str
+    hop: int
+    direction: str
+    """How `via` is linked to it: cites | cited_by | similar."""
+
+
 class Source(_Model):
     id: str
     score: float
@@ -281,19 +329,106 @@ class Source(_Model):
     """The mail it came from, or the mail that carried its document."""
     workspace: str | None = None
     """The workspace it was found in."""
+    promoted_from: LinkedFrom | None = None
+    """Set when this is a linked document ranked among the found ones by its own passages:
+    where it was reached from, and its hop."""
 
 
 class Found(_Model):
     sources: list[Source]
+    queries: list[str] = Field(default_factory=list)
+    """What was searched: the question, or each thing it asks as a query of its own."""
     text_only: bool = False
     """Searched by words alone: the workspace's passages were embedded with another search
     model, and it is not the one open."""
 
 
+class Claim(_Model):
+    text: str
+    """As the answer writes it."""
+    supported: bool
+    correction: str | None = None
+    """When unsupported: the claim as the passages say it; none when they say nothing of it."""
+    files: list[str] = Field(default_factory=list)
+
+
 class Answer(_Model):
     answer: str
     sources: list[Source]
+    queries: list[str] = Field(default_factory=list)
+    """What was searched: the question, or each thing it asks as a query of its own."""
     text_only: bool = False
+    claims: list[Claim] = Field(default_factory=list)
+    checked: bool = False
+    """Whether the claims were checked against the passages; false when off or failed."""
+
+
+class Checked(_Model):
+    """An answer's claims once checked: the `checked` event of a streamed question."""
+    claims: list[Claim] = Field(default_factory=list)
+    checked: bool = False
+
+
+class StreamError(_Model):
+    """What a streamed question says when it fails after its stages began."""
+    message: str
+
+
+# Threads: conversations kept on this computer -------------------------------------------------
+
+
+class ThreadTurn(_Model):
+    question: str
+    scope: list[str] | None = None
+    """The documents the turn was asked about; None for every document."""
+    found: Found | None = None
+    answer: Answer | None = None
+    stamp: str | None = None
+    """The fingerprint of the graph the turn was asked of, as the client gave it."""
+    asked_at: float
+    error: str | None = None
+    """Why the turn has no answer, when it failed."""
+
+
+class Thread(_Model):
+    id: str
+    title: str = ""
+    """The first question, unless renamed."""
+    scope: list[str] | None = None
+    """The documents every turn is asked about; None for every document."""
+    workspace: str
+    turns: list[ThreadTurn] = Field(default_factory=list)
+    created_at: float
+    updated_at: float
+
+
+class ThreadSummary(_Model):
+    id: str
+    title: str
+    updated_at: float
+    turns: int
+
+
+class NewThread(_Model):
+    scope: list[str] | None = None
+    workspace: str | None = None
+    """The workspace the thread asks, by id; the open one when not given."""
+
+
+class ThreadPatch(_Model):
+    title: str | None = None
+    scope: list[str] | None = None
+    """Given, even as null, it replaces the scope; left out, the scope stays."""
+
+
+class TurnRequest(_Model):
+    question: str
+    documents: int | None = None
+    """How many documents to find; the server's setting when not given."""
+    stamp: str | None = None
+    """The fingerprint of the graph the client sees, kept with the turn."""
+    exclude: list[str] | None = None
+    """Document ids left out of this turn alone; the thread's scope is not changed."""
 
 
 # Export -------------------------------------------------------------------------------------

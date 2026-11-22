@@ -282,6 +282,24 @@ def create_app(
 
         launch(port=port, browser=not no_browser)
 
+    @app.command("ask-window",
+                 short_help="Ask about files in a small window, as the right-click menu does.")
+    def ask_window_command(
+        paths: Annotated[list[Path], typer.Argument(help="files and folders to ask about")],
+        home: Annotated[Path | None, typer.Option(help="the app's home folder")] = None,
+    ) -> None:
+        """What the right-click "Ask Graph-Me-Maybe" runs: the app started when it is not
+        running, then a small window, above the others, on a conversation about `paths`."""
+        from graphme import agent, ask_window
+
+        try:
+            # The home the settings name (a checkout's `.env` too), as the server's own.
+            where = home or load_settings().local_models or app_home()
+            ask_window.main([str(p) for p in paths], where)
+        except Exception as error:  # started from a menu: no console says it
+            agent._tell(f"Graph-Me-Maybe could not open the window: {error}")
+            raise
+
     @app.command("xlsx-bundle",
                  short_help="Render an XLSX workbook into a page and mapping bundle.")
     def xlsx_bundle(
@@ -371,3 +389,7 @@ def main() -> None:
     except (ValueError, RuntimeError, OSError) as error:
         typer.echo(f"error: {error}", err=True)
         raise SystemExit(1) from None
+
+
+if __name__ == "__main__":  # the right-click menu: `python -m graphme.cli ask-window ...`
+    main()

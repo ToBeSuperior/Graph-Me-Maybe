@@ -246,3 +246,11 @@ def test_a_home_named_in_the_settings_file_is_where_its_neo4j_lives(
     monkeypatch.delenv("GRAPHME_HOME", raising=False)
     monkeypatch.delenv("GRAPHME_NEO4J_URI", raising=False)
     assert load_settings().local_neo4j == tmp_path / "dev-home"
+
+
+def test_the_link_discount_is_read_and_kept_between_0_and_1() -> None:
+    assert load_settings(environ={"GRAPHME_LINK_DISCOUNT": "0.7"}).link_discount == 0.7
+    assert load_settings(environ={}).link_discount == 0.85
+    for wrong in ("0", "1.5"):
+        with pytest.raises(ValueError):
+            load_settings(environ={"GRAPHME_LINK_DISCOUNT": wrong})

@@ -43,6 +43,7 @@ from graphme.server.jobs import (
 from graphme.server.mail_accounts import MailAccounts
 from graphme.server.mail_sync import MailSync
 from graphme.server.search_models import SearchModels
+from graphme.server.threads import ThreadStore
 from graphme.server.workspaces import Workspaces
 
 if TYPE_CHECKING:
@@ -154,6 +155,27 @@ class DemoBase:
         if self.workspaces is None:
             raise Busy("workspaces are the app's own graph DB's -- this server uses another")
         return self.workspaces
+
+    def threads(self, workspace: str | None = None) -> ThreadStore:
+        """The conversations kept for `workspace` (the open one when None): beside its crops,
+        in its folder in the home, the home's own graph's in `<home>/.graphme/threads`.
+        LookupError for a workspace there is none of."""
+        settings = self.settings
+        if workspace is not None and self.workspaces is not None:
+            self.workspaces.item(workspace)
+            settings = state._in_workspace(settings, self.workspaces, workspace)
+        return ThreadStore(settings.asset_dir.parent / "threads")
+
+    def thread_store(self, thread_id: str) -> ThreadStore:
+        """The store holding `thread_id`, whichever workspace it asks; KeyError for none."""
+        names = [self.settings.workspace]
+        if self.workspaces is not None:
+            names += [item["id"] for item in self.workspaces.listed()["items"]]
+        for name in dict.fromkeys(names):
+            store = self.threads(name)
+            if store.has(thread_id):
+                return store
+        raise KeyError(thread_id)
 
     def mail_accounts(self) -> MailAccounts:
         spaces = self.workspace_registry()
