@@ -5,6 +5,11 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Fixed
+
+- On Windows, two writes of one settings file at the same moment no longer fail: the second
+  waits for the first.
+
 ## [0.2.3] - 2026-11-23
 
 ### Fixed

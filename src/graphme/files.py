@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -22,7 +23,20 @@ def write_atomic(path: Path, data: str | bytes, *, suffix: str = ".tmp",
                 os.fsync(out.fileno())
         if path.exists():
             shutil.copymode(path, temporary)
-        os.replace(temporary, path)
+        _replace(temporary, path)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise
+
+
+def _replace(source: str, target: Path, tries: int = 20) -> None:
+    """`os.replace`, tried again while Windows refuses it because another writer is putting its
+    own file in place at the same moment (WinError 5); elsewhere it never is."""
+    for attempt in range(tries):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == tries - 1:
+                raise
+            time.sleep(0.01 * (attempt + 1))

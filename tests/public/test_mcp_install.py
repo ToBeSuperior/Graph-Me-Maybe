@@ -91,7 +91,8 @@ def test_without_a_stable_script_the_entry_runs_this_python(tmp_path: Path) -> N
     temporary = tmp_path / "uv" / "archive-v0" / "abc" / "bin" / "graphme"
     temporary.parent.mkdir(parents=True)
     temporary.write_text("", encoding="utf-8")
-    want = {"command": "/py/bin/python", "args": ["-m", "graphme.cli", "mcp"]}
+    want = {"command": str(Path("/py/bin/python").absolute()),  # C:\py\... on Windows
+            "args": ["-m", "graphme.cli", "mcp"]}
 
     assert mcp_install.current_entry(argv0="-c", which=lambda n: str(temporary),
                                      executable="/py/bin/python") == want
