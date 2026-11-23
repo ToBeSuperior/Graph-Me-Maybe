@@ -7,12 +7,16 @@ import sys
 import threading
 import time
 import traceback
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 from graphme.adapters.embedding import sweep_vectors
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.adapters.storage.graph_rag import PASSAGE_CHARS, GraphRag
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
 from graphme.adapters.storage.workspace_scope import WorkspaceScope
+from graphme.application.ingest import documents_at
 from graphme.application.page_readings import PageReadings
 from graphme.application.visual_crops import CROP_ASSET_KEY
 from graphme.server import state
@@ -26,6 +30,18 @@ from graphme.server.jobs import (
     ExportJob,
     GraphStarting,
 )
+
+MAX_SCOPE_FILES = 500
+"""The most files a scope is found for: each is read whole to know its content, and a file kept
+online only is downloaded for that."""
+
+
+class TooManyFiles(Exception):
+    """A scope's paths hold more than `MAX_SCOPE_FILES` files: turned away before any is read."""
+
+    def __init__(self) -> None:
+        super().__init__(f"these paths hold more than {MAX_SCOPE_FILES} files -- choose fewer "
+                         "files, or ask in the workspace a folder already built is in")
 
 
 class SpaceJobs(DemoBase):
@@ -275,3 +291,68 @@ class SpaceJobs(DemoBase):
         with self.opening_space:
             self.graph.graph_space()
             return self.graph.rag()
+
+    def scope_of(self, paths: list[str], *,
+                 space_of: Callable[[str | None], Any]) -> dict[str, Any]:
+        """Files and folders on this machine as documents of the graph, found by their
+        content. `workspace` is the one holding most of the files (the open one wins a tie),
+        `document_ids` those it holds; `missing` the files no workspace holds, `elsewhere`
+        those another workspace holds (never built), and `build_into` where a missing file
+        may be built: that workspace, else the open one, never a mail workspace. `space_of`
+        opens a workspace's graph (None: the only one). TooManyFiles past MAX_SCOPE_FILES,
+        said as soon as the walk finds one more."""
+        files: list[Path] = []
+        missing: list[str] = []
+
+        def counted(found: int) -> None:
+            if len(files) + found > MAX_SCOPE_FILES:  # the rest of the walk is not waited for
+                raise TooManyFiles
+
+        for each in paths:
+            try:
+                files += documents_at(Path(each).expanduser().resolve(), on_found=counted)
+            except (OSError, ValueError):  # not there, not a format read here
+                missing.append(each)
+            files = list(dict.fromkeys(files))  # a file and its folder both given
+            if len(files) > MAX_SCOPE_FILES:
+                raise TooManyFiles
+        # Reading a file kept online only downloads it: given back once its content is known.
+        clouded = [f for f in files if state.online_only(f)]
+        try:
+            hashes = {str(f): h for f in files if (h := state.content_hash(f))}
+        finally:
+            state._give_back_for_good(clouded)
+        spaces = self.workspaces
+        # no registry: the one open graph, under the id the settings give it
+        kinds: dict[str, str] = {self.settings.workspace: "documents"}
+        names: list[str] = [self.settings.workspace]
+        if spaces is not None:
+            active = spaces.active
+            items = spaces.listed()["items"]
+            kinds = {i["id"]: i.get("kind", "documents") for i in items}
+            names = [active, *(i["id"] for i in items if i["id"] != active)]
+        held: dict[str, dict[str, str]] = {}
+        for name in names:
+            try:
+                held[name] = space_of(name if spaces else None).documents_of(
+                    sorted(set(hashes.values())))
+            except Exception:  # noqa: BLE001 -- a workspace beside that will not open
+                if name == names[0]:
+                    raise
+                continue  # holds nothing here
+        counts = {n: sum(h in held[n] for h in hashes.values()) for n in held}
+        best = max(counts, key=lambda n: counts[n])  # the first of equals: the open one
+        has = counts[best] > 0
+        here = held[best] if has else {}
+        elsewhere = [{"path": p, "workspace": next(n for n in held if n != best and h in held[n])}
+                     for p, h in hashes.items()
+                     if h not in here and any(h in held[n] for n in held if n != best)]
+        gone = [p for p, h in hashes.items() if not any(h in x for x in held.values())]
+        base: str | None = best if has else names[0]
+        if kinds.get(base or "") == "mail":  # read from its mailbox, never built
+            base = names[0] if kinds.get(names[0]) != "mail" else None
+        return {"document_ids": list(dict.fromkeys(here[h] for h in hashes.values() if h in here)),
+                "missing": list(dict.fromkeys(
+                    [*missing, *(str(f) for f in files if str(f) not in hashes), *gone])),
+                "elsewhere": elsewhere,
+                "workspace": best if has else None, "build_into": base}

@@ -10,10 +10,11 @@ import json
 import os
 import shutil
 import sys
-import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
+
+from graphme.files import write_atomic
 
 CLIENTS = ("claude-code", "claude-desktop", "cursor")
 NAME = "graph-me-maybe"
@@ -92,6 +93,29 @@ def registered_entry(path: Path) -> dict[str, Any] | None:
     return entry if isinstance(entry, dict) else None
 
 
+def registered_scopes(path: Path) -> list[tuple[str, dict[str, Any]]]:
+    """Claude Code's per-project (local scope) entries, `claude mcp add` writes there: each as
+    ("project <path>", entry)."""
+    projects = _read(path).get("projects")
+    found: list[tuple[str, dict[str, Any]]] = []
+    for where, project in (projects.items() if isinstance(projects, dict) else ()):
+        servers = project.get("mcpServers") if isinstance(project, dict) else None
+        entry = servers.get(NAME) if isinstance(servers, dict) else None
+        if isinstance(entry, dict):
+            found.append((f"project {where}", entry))
+    return found
+
+
+def installed(entry: Mapping[str, Any], wanted: Mapping[str, Any]) -> bool:
+    """Whether `entry` is already `wanted`: the same command and arguments, no URL-style key
+    left beside them, and that program still on disk."""
+    command = entry.get("command")
+    return (all(entry.get(k) == v for k, v in wanted.items())
+            and not any(k in entry for k in ("type", "url", "headers"))
+            and isinstance(command, str) and Path(command).is_file()
+            and os.access(command, os.X_OK))
+
+
 def registered(path: Path) -> bool:
     return registered_entry(path) is not None
 
@@ -101,30 +125,21 @@ def install(client: str, *, user_home: Path | None = None, platform: str = sys.p
             entry: dict[str, Any] | None = None) -> Path:
     """The entry written into `client`'s config -- once, however often this runs -- after the
     file is copied to `.bak` (the first copy is kept); the file's path. An entry already there
-    keeps its other fields, such as `env`; only `command` and `args` are set."""
+    is replaced by exactly the wanted shape (a stale URL-style entry's `type`/`url`/`headers`
+    must not survive beside `command`); only its `env`, the user's own, is kept."""
     wanted = entry or current_entry()
     shown = config_path(client, user_home=user_home, platform=platform, environ=environ)
     path = shown.resolve()  # a symlinked file stays a link; its target is updated
     said = _read(path)
     servers = said.setdefault("mcpServers", {})
     old = servers.get(NAME)
-    if isinstance(old, dict) and all(old.get(k) == v for k, v in wanted.items()):
+    if isinstance(old, dict) and installed(old, wanted):
         return shown
-    servers[NAME] = {**(old if isinstance(old, dict) else {}), **wanted}
+    env = old.get("env") if isinstance(old, dict) else None
+    servers[NAME] = {**wanted, **({"env": env} if isinstance(env, dict) else {})}
     path.parent.mkdir(parents=True, exist_ok=True)
     backup = path.with_name(path.name + ".bak")
     if path.exists() and not backup.exists():
         shutil.copy2(path, backup)
-    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as out:
-            json.dump(said, out, ensure_ascii=False, indent=2)
-            out.flush()
-            os.fsync(out.fileno())
-        if path.exists():
-            shutil.copymode(path, temporary)
-        os.replace(temporary, path)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
+    write_atomic(path, json.dumps(said, ensure_ascii=False, indent=2))
     return shown

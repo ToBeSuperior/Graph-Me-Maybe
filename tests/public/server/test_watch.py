@@ -546,7 +546,7 @@ def test_a_daily_time_missed_while_closed_builds_at_the_next_start(
     before = workspace_demo.build.id
     clock.after(days=1, hours=8)  # the app was closed through the night
 
-    Watcher(workspace_demo, now=clock).tick()
+    _settled(Watcher(workspace_demo, now=clock), clock)  # once quiet: a copy may be under way
 
     assert until(lambda: _built(workspace_demo, before)), workspace_demo.build
 
@@ -640,3 +640,92 @@ def test_another_sites_page_cannot_start_a_watched_build(
                                "Authorization": "Bearer invented-server-key"})
 
     assert told.status_code == 403 and workspace_demo.build.id == before
+
+
+def test_a_daily_build_waits_for_a_file_still_being_written(
+    watched: tuple[TestClient, Watcher], workspace_demo: Demo, clock: Clock, tmp_path: Path
+) -> None:
+    client, watcher = watched
+    folder = _folder(workspace_demo, tmp_path)
+    _choose(client, folder, "daily", at="02:00")
+    before = workspace_demo.build.id
+    clock.after(minutes=58)  # 01:58: a copy begins
+    (folder / "price.xlsx").write_bytes(b"an invented price list, half")
+    watcher.tick()
+    clock.after(minutes=2)  # 02:00: still growing
+    (folder / "price.xlsx").write_bytes(b"an invented price list, half and more")
+    watcher.tick()
+    assert workspace_demo.build.id == before
+
+    clock.after(minutes=SETTLE_MINUTES)
+    watcher.tick()
+    assert until(lambda: _built(workspace_demo, before)), workspace_demo.build
+
+
+def test_a_daily_build_that_failed_runs_again_once_the_files_change(
+    watched: tuple[TestClient, Watcher], workspace_demo: Demo, clock: Clock, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, watcher = watched
+    folder = _folder(workspace_demo, tmp_path)
+    _choose(client, folder, "daily", at="02:00")
+    real = workspace_demo._build_corpus
+
+    def cancelled(docs: list[str], put: bool, embed: bool) -> None:
+        workspace_demo.build.state = "cancelled"
+
+    monkeypatch.setattr(workspace_demo, "_build_corpus", cancelled)
+    (folder / "memo.docx").write_bytes(b"an invented memo, saving")
+    clock.after(hours=1)
+    _settled(watcher, clock)
+    assert until(lambda: workspace_demo.build.state == "cancelled")
+    first = workspace_demo.build.id
+    _settled(watcher, clock)  # the same files: not tried again
+    assert workspace_demo.build.id == first
+
+    monkeypatch.setattr(workspace_demo, "_build_corpus", real)
+    (folder / "memo.docx").write_bytes(b"an invented memo, saved")
+    clock.after(minutes=1)
+    _settled(watcher, clock)  # the same day
+    assert until(lambda: _built(workspace_demo, first)), workspace_demo.build
+
+
+def test_an_unreadable_watch_file_is_set_aside_not_written_over(
+    watched: tuple[TestClient, Watcher], workspace_demo: Demo, tmp_path: Path
+) -> None:
+    client, watcher = watched
+    said = workspace_demo.workspace_registry().home / "watch.json"
+    said.write_text('{"targets": [{"kind": "folder", "id": "t9"', encoding="utf-8")
+
+    _choose(client, _folder(workspace_demo, tmp_path), "manual")
+
+    assert said.with_suffix(".json.bad").read_text(encoding="utf-8").startswith('{"targets"')
+
+
+def test_a_file_that_failed_in_a_finished_build_is_tried_again(
+    watched: tuple[TestClient, Watcher], workspace_demo: Demo, clock: Clock, tmp_path: Path,
+) -> None:
+    client, watcher = watched
+    folder = _folder(workspace_demo, tmp_path)
+    _choose(client, folder, "on_change")
+
+    def broken_memo(session: Any) -> None:
+        if session.source.name == "memo.docx":
+            session.state, session.error = "error", "invented failure"
+        else:
+            _read_as_their_files(session)
+
+    workspace_demo._run = broken_memo  # type: ignore[method-assign]
+    (folder / "price.xlsx").write_bytes(b"an invented price list")
+    (folder / "memo.docx").write_bytes(b"an invented memo")
+    before = workspace_demo.build.id
+    _settled(watcher, clock)
+    assert until(lambda: _built(workspace_demo, before)), workspace_demo.build
+    first = workspace_demo.build.id
+    assert len(workspace_demo.build.failed) == 1  # done, with the memo failed in it
+
+    workspace_demo._run = _read_as_their_files  # type: ignore[method-assign]
+    _settled(watcher, clock)
+
+    assert until(lambda: _built(workspace_demo, first)), workspace_demo.build
+    assert workspace_demo.build.total == 1  # the memo alone, tried again

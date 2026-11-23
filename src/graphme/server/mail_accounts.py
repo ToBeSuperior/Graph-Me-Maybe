@@ -27,6 +27,7 @@ from graphme.adapters.sources.mail_store import MailStore
 from graphme.adapters.sources.microsoft_sign_in import MicrosoftSignIn
 from graphme.adapters.sources.outlook_mail import OutlookMailbox
 from graphme.adapters.sources.sign_in import Vault, vault
+from graphme.files import write_atomic
 from graphme.server.workspaces import Workspaces
 
 ASK_ABOVE_MESSAGES = 1_000
@@ -244,11 +245,7 @@ class MailAccounts:
             return []
 
     def _write(self, items: list[dict[str, Any]]) -> None:
-        self._home.mkdir(parents=True, exist_ok=True)
-        kept = self._file.with_suffix(".tmp")
-        kept.write_text(json.dumps({"accounts": items}, ensure_ascii=False, indent=1),
-                        encoding="utf-8")
-        kept.replace(self._file)
+        write_atomic(self._file, json.dumps({"accounts": items}, ensure_ascii=False, indent=1))
 
 
 def _counted(count: MailCount) -> dict[str, Any]:

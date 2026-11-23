@@ -5,10 +5,7 @@ from __future__ import annotations
 
 import neo4j
 
-from graphme.adapters.storage.graph_rag import (
-    _once,
-    fold_versions,
-)
+from graphme.adapters.storage.graph_rag import _once
 from graphme.application.versions import (
     VERSION_OVERLAP,
     Measured,
@@ -16,6 +13,7 @@ from graphme.application.versions import (
     VersionOf,
     by_document,
     families,
+    fold_versions,
     minhash,
     overlap,
     passage_hashes,
@@ -61,6 +59,27 @@ def test_two_documents_sharing_a_boilerplate_paragraph_stay_apart() -> None:
     assert overlap(memo, order) < VERSION_OVERLAP
     assert families([Measured("memo", HASH_A, frozenset(passage_hashes(memo))),
                      Measured("order", HASH_B, frozenset(passage_hashes(order)))]) == []
+
+
+def test_a_document_with_an_annex_appended_is_one_family_with_the_original() -> None:
+    annex = [f"Gate rules final.docx > Annex\nAnnex row {n}: invented tariff {n} for gate {n}."
+             for n in range(15)]
+    annexed = [t.replace("Gate rules.docx", "Gate rules final.docx") for t in _POLICY] + annex
+    docs = [Measured("v1", HASH_A, frozenset(passage_hashes(_POLICY))),
+            Measured("annexed", HASH_B, frozenset(passage_hashes(annexed)))]
+
+    assert overlap(passage_hashes(_POLICY), passage_hashes(annexed)) < 0.5  # not by Jaccard alone
+    assert families(docs) == [{"v1", "annexed"}]
+
+
+def test_a_short_document_quoted_inside_a_long_one_stays_apart() -> None:
+    clause = [f"Clause.docx > Terms\nTerm {n}: the invented harbour office keeps the key."
+              for n in range(3)]
+    report = [t.replace("Clause.docx", "Report.docx") for t in clause] + [
+        f"Report.docx > Findings\nFinding {n}: invented crane {n} was late." for n in range(20)]
+
+    assert families([Measured("clause", HASH_A, frozenset(passage_hashes(clause))),
+                     Measured("report", HASH_B, frozenset(passage_hashes(report)))]) == []
 
 
 def test_minhash_is_the_same_for_the_same_passages_and_nothing_overlaps_with_nothing() -> None:
@@ -152,3 +171,40 @@ def test_an_ungrouped_pair_stays_apart_after_one_side_is_rebuilt() -> None:
     assert kept and kept[0]["others"] == ["c0"], "and written for the new one"
     lineage = [p for q, p in driver.sent if "d.replaces = $replaces" in q]
     assert lineage and lineage[0]["replaces"] == ["c-older", "c1"]
+
+
+def test_copies_changed_at_the_same_time_keep_one_latest_whatever_their_ids() -> None:
+    from graphme.application.versions import Member, latest
+
+    one, two = Member("x1", "Offer.pdf", 5.0), Member("x2", "Offer (1).pdf", 5.0)
+    assert latest([one, two]).file == latest([Member("y9", "Offer.pdf", 5.0),
+                                              Member("y1", "Offer (1).pdf", 5.0)]).file
+    assert latest([one, two]) == latest([two, one])
+
+
+def test_one_turn_reads_the_families_and_identities_once() -> None:
+    from types import SimpleNamespace
+
+    import httpx
+
+    from graphme.adapters.storage.graph_rag import GraphRag, one_search
+
+    calls = {"pairs": 0, "identities": 0}
+
+    def pairs() -> list[object]:
+        calls["pairs"] += 1
+        return []
+
+    def identities() -> list[object]:
+        calls["identities"] += 1
+        return []
+
+    rag = GraphRag(SimpleNamespace(driver=None, version_pairs=pairs, identities=identities),  # type: ignore[arg-type]
+                   embedder=None, endpoint=None, client=httpx.Client(), model="m",  # type: ignore[arg-type]
+                   dimensions=3, relevance_floor=0.0, dense_weight=0.6, rrf_k=60)
+    with one_search():  # what find and read, side by side, each ask for
+        for _ in range(2):
+            rag._families()
+            rag._named(("Invented memo",))
+
+    assert calls == {"pairs": 1, "identities": 1}

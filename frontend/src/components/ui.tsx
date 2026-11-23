@@ -173,10 +173,10 @@ export function MenuContent({ children, align = 'end' }: { children: ReactNode; 
   );
 }
 
-export function MenuItem({ onSelect, children }: { onSelect: () => void; children: ReactNode }) {
+export function MenuItem({ onSelect, children, disabled, title }: { onSelect: () => void; children: ReactNode; disabled?: boolean; title?: string }) {
   return (
-    <MenuPrimitive.Item onSelect={onSelect}
-      className="flex h-8 max-w-80 cursor-pointer items-center truncate rounded-md px-2 text-sm outline-none select-none data-[highlighted]:bg-hover">
+    <MenuPrimitive.Item onSelect={onSelect} disabled={disabled} title={title}
+      className="flex h-8 max-w-80 cursor-pointer items-center truncate rounded-md px-2 text-sm outline-none select-none data-[highlighted]:bg-hover data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50">
       {children}
     </MenuPrimitive.Item>
   );

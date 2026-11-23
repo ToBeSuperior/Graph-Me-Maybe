@@ -641,3 +641,27 @@ def test_a_build_lets_go_of_a_cloud_copy_only_where_it_knows_the_copy_is(
     demo._build_then_let_go(["gone"], put=False, embed=False)
 
     assert (here / "inside" / ".env").is_file()
+
+
+def test_copies_in_one_build_are_read_one_after_the_other(demo: Demo, tmp_path: Path) -> None:
+    """Read side by side, two copies of one file both missed the page readings the first
+    keeps; read in turn, the second reuses them (`page_readings`)."""
+    said: list[tuple[str, str]] = []
+
+    def run(session: Any) -> None:
+        said.append(("start", session.source.name))
+        time.sleep(0.3)
+        said.append(("end", session.source.name))
+        read_as("a", session.source.name)(session)
+
+    demo._run = run  # type: ignore[method-assign]
+    for name in ("offer.pdf", "offer (1).pdf"):
+        (tmp_path / name).write_bytes(b"%PDF-1.4 an invented offer")
+    (tmp_path / "terms.pdf").write_bytes(b"%PDF-1.4 invented terms")
+    build = demo.build_corpus([demo.open_path(str(tmp_path / name))
+                               for name in ("offer.pdf", "offer (1).pdf", "terms.pdf")], "test")
+    assert until(lambda: build.state == "done"), build
+
+    offers = [step for step, name in said if name.startswith("offer")]
+    assert offers in (["start", "end", "start", "end"], ["start", "end"]), said
+    assert said.index(("start", "terms.pdf")) < said.index(("end", "offer.pdf"))  # others go on

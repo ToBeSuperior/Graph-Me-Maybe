@@ -59,3 +59,11 @@ describe('the workspaces, changed outside the page', () => {
     expect(client.getQueryData(keys.workspaces)).toBe('kept');
   });
 });
+
+describe('the conversations', () => {
+  it('are asked again when the page comes back, like every other list', async () => {
+    const { threadsOptions, threadOptions } = await import('./queries');
+    expect(threadsOptions.refetchOnWindowFocus).toBe('always');
+    expect(threadOptions('t1').refetchOnWindowFocus).toBe('always');
+  });
+});

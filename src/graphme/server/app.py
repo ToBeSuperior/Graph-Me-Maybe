@@ -71,7 +71,6 @@ from graphme.adapters.storage.graph_rag import (
 )
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, modified_at
 from graphme.api import GraphMe
-from graphme.application.corpus_build import content_hash
 from graphme.application.embedded_documents import name_part
 from graphme.application.ingest import documents_at
 from graphme.application.versions import Member, by_document, latest, versions_of
@@ -98,7 +97,7 @@ from graphme.server.jobs import (
 )
 from graphme.server.settings import changed, described, from_here, home_of, preflight_behind
 from graphme.server.state import SPACE_WAIT, Demo
-from graphme.server.threads import ThreadStore
+from graphme.server.threads import ThreadStore, question_of
 
 WEB = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 """The web app as a checkout builds it (`npm run build` in `frontend/`); an installed package
@@ -124,10 +123,6 @@ def default_web() -> Path | None:
 
 MAX_QUESTION_CHARS = 1000
 """The longest question asked: a page of text is not a question, and it is what is embedded."""
-
-MAX_SCOPE_FILES = 500
-"""The most files a scope is found for: each is read whole to know its content, and a file kept
-online only is downloaded for that."""
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -1212,61 +1207,17 @@ def create_app(
         none is, so a question without them is asked with no exclusion at all."""
         return {"exclude": frozenset(request.exclude)} if request.exclude else {}
 
-    @v1.post("/scope", response_model=api.Scope)
+    @v1.post("/scope", response_model=api.Scope, dependencies=[HERE])
     def scope(request: api.ScopeRequest) -> dict[str, Any]:
-        """Files and folders on this machine as documents of the graph, found by their
-        content. `workspace` is the one holding most of the files (the open one wins a tie),
-        `document_ids` those it holds; `missing` the files no workspace holds, `elsewhere`
-        those another workspace holds (never built), and `build_into` where a missing file
-        may be built: that workspace, else the open one, never a mail workspace. More than
-        MAX_SCOPE_FILES files is a 400."""
-        files: list[Path] = []
-        missing: list[str] = []
-        for each in request.paths:
-            try:
-                files += documents_at(Path(each).expanduser().resolve())
-            except (OSError, ValueError):  # not there, not a format read here
-                missing.append(each)
-        files = list(dict.fromkeys(files))  # a file and its folder both given
-        if len(files) > MAX_SCOPE_FILES:  # turned away before any is read
-            raise HTTPException(
-                400, f"these paths hold {len(files):,} files, more than {MAX_SCOPE_FILES} -- "
-                     "choose fewer files, or ask in the workspace a folder already built is in")
-        hashes = {str(f): h for f in files if (h := content_hash(f))}
-        spaces = demo.workspaces
-        # no registry: the one open graph, under the id the settings give it
-        kinds: dict[str, str] = {demo.settings.workspace: "documents"}
-        names: list[str] = [demo.settings.workspace]
-        if spaces is not None:
-            active = spaces.active
-            items = spaces.listed()["items"]
-            kinds = {i["id"]: i.get("kind", "documents") for i in items}
-            names = [active, *(i["id"] for i in items if i["id"] != active)]
-        held: dict[str, dict[str, str]] = {}
-        for name in names:
-            try:
-                held[name] = space_of(name if spaces else None).documents_of(
-                    sorted(set(hashes.values())))
-            except (HTTPException, Neo4jError, ServiceUnavailable, SessionExpired):
-                if name == names[0]:
-                    raise
-                continue  # a workspace beside that will not open holds nothing here
-        counts = {n: sum(h in held[n] for h in hashes.values()) for n in held}
-        best = max(counts, key=lambda n: counts[n])  # the first of equals: the open one
-        has = counts[best] > 0
-        here = held[best] if has else {}
-        elsewhere = [{"path": p, "workspace": next(n for n in held if n != best and h in held[n])}
-                     for p, h in hashes.items()
-                     if h not in here and any(h in held[n] for n in held if n != best)]
-        gone = [p for p, h in hashes.items() if not any(h in x for x in held.values())]
-        base: str | None = best if has else names[0]
-        if kinds.get(base or "") == "mail":  # read from its mailbox, never built
-            base = names[0] if kinds.get(names[0]) != "mail" else None
-        return {"document_ids": list(dict.fromkeys(here[h] for h in hashes.values() if h in here)),
-                "missing": list(dict.fromkeys(
-                    [*missing, *(str(f) for f in files if str(f) not in hashes), *gone])),
-                "elsewhere": elsewhere,
-                "workspace": best if has else None, "build_into": base}
+        """Files and folders on this machine as documents of the graph (`Demo.scope_of`).
+        More than MAX_SCOPE_FILES files is a 400."""
+        # Here, not at the top: space_jobs loads through state, never before it.
+        from graphme.server.space_jobs import TooManyFiles
+
+        try:
+            return demo.scope_of(request.paths, space_of=space_of)
+        except TooManyFiles as error:
+            raise HTTPException(400, str(error)) from error
 
     def rag_of(workspace: str | None) -> tuple[GraphRag, bool]:
         """The GraphRAG a workspace is asked through, and whether it is one beside the open."""
@@ -1414,7 +1365,7 @@ def create_app(
         changed first; a file that cannot be read is left out."""
         return threads_of(workspace).list()
 
-    @v1.post("/threads", response_model=api.Thread)
+    @v1.post("/threads", response_model=api.Thread, dependencies=[HERE])
     def thread_create(body: api.NewThread) -> api.Thread:
         """A conversation begun, with no turns: every turn asks `workspace` (the open one when
         not given) about the documents `scope` names (every one when None)."""
@@ -1425,20 +1376,21 @@ def create_app(
     def thread(thread_id: str) -> api.Thread:
         return thread_of(thread_id)[1]
 
-    @v1.patch("/threads/{thread_id}", response_model=api.Thread)
+    @v1.patch("/threads/{thread_id}", response_model=api.Thread, dependencies=[HERE])
     def thread_change(thread_id: str, body: api.ThreadPatch) -> api.Thread:
         """A conversation renamed, or its scope replaced for the turns after."""
         store, _ = thread_of(thread_id)
         return store.patch(thread_id, title=body.title, scope=body.scope,
                            scope_given="scope" in body.model_fields_set)
 
-    @v1.delete("/threads/{thread_id}", response_model=api.Deleted)
+    @v1.delete("/threads/{thread_id}", response_model=api.Deleted, dependencies=[HERE])
     def thread_delete(thread_id: str) -> dict[str, str]:
         store, _ = thread_of(thread_id)
         store.delete(thread_id)
         return {"deleted": thread_id}
 
-    @v1.post("/threads/{thread_id}/turns", response_model=api.ThreadTurn)
+    @v1.post("/threads/{thread_id}/turns", response_model=api.ThreadTurn,
+             dependencies=[HERE])
     def thread_turn(thread_id: str, body: api.TurnRequest,
                     http: Request) -> api.ThreadTurn | Response:
         """A question asked in a conversation: after its earlier turns, about its scope, in its
@@ -1446,41 +1398,8 @@ def create_app(
         turn is kept -- one that failed is kept too, saying why. With `Accept:
         application/json`, the finished turn alone."""
         store, kept = thread_of(thread_id)
-        request = api.Question(
-            question=body.question, documents=body.documents, workspace=kept.workspace,
-            only=kept.scope, exclude=body.exclude,
-            history=[api.Turn(question=t.question, answer=t.answer.answer)
-                     for t in kept.turns if t.answer is not None])
+        request = question_of(kept, body)
         validated(request)  # turned away as a plain 400 before anything is streamed
-
-        def kept_with(made: api.ThreadTurn, got: dict[str, Any]) -> bool:
-            """`made` with what the turn got, added to the thread; False when the thread was
-            deleted meanwhile."""
-            if "found" in got:
-                made.found = api.Found.model_validate(got["found"])
-            if "answer" in got:  # an answer cut off before its check is kept unchecked
-                made.answer = api.Answer.model_validate({
-                    **(made.found.model_dump(include={"queries", "text_only"})
-                       if made.found else {}), **got["answer"]})
-            try:
-                store.append(thread_id, made)
-            except KeyError:
-                return False
-            return True
-
-        def rescoped() -> list[str] | None:
-            """The thread's scope as the graph holds it now: a document edited and built again
-            since it was chosen is named by its new reading, and the thread keeps that. Looked
-            up as the turn's search looks it up (`GraphRag._found`), so once a turn."""
-            if not kept.scope:
-                return kept.scope
-            now = rag_of(kept.workspace)[0].current(
-                frozenset(kept.scope) | frozenset(body.exclude or ()))
-            scope = list(dict.fromkeys(now.get(i, i) for i in kept.scope))
-            if scope != kept.scope:
-                with contextlib.suppress(KeyError):  # deleted meanwhile: the turn says so
-                    store.patch(thread_id, scope=scope, scope_given=True)
-            return scope
 
         def turn(said: Said) -> api.ThreadTurn:
             made = api.ThreadTurn(question=request.question.strip(), scope=kept.scope,
@@ -1489,17 +1408,19 @@ def create_app(
             got: dict[str, Any] = {}
             try:
                 with one_search():  # the scope's lookup and the turn's search are one turn's
-                    made.scope = rescoped()
+                    # Looked up as the turn's search looks it up (`GraphRag._found`): once.
+                    made.scope = store.rescoped(
+                        kept, body.exclude, lambda ids: rag_of(kept.workspace)[0].current(ids))
                     staged(request, said, got)
             except Stopped:
-                kept_with(made, got)  # the client left: what was paid for is kept, not said
+                store.keep_turn(thread_id, made, got)  # the client left: kept, not said
                 raise
             except Exception as error:
                 made.error = told(error)
-                if kept_with(made, got):
+                if store.keep_turn(thread_id, made, got):
                     said("saved", made)
                 raise  # the failure said, never the deletion in its place
-            if not kept_with(made, got):
+            if not store.keep_turn(thread_id, made, got):
                 raise HTTPException(404, THREAD_DELETED)
             said("saved", made)
             return made

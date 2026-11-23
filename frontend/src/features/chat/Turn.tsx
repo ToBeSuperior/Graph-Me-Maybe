@@ -2,7 +2,7 @@
 // being asked shows its stage (finding, writing, checking) and can be stopped; a turn asked of
 // another graph than the one there is now says so and can be asked again.
 import { AlertTriangle, FolderSearch, RefreshCw, Square } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import type { Answer } from '../../api/client';
 import { Button, Empty, Skeleton, Spinner } from '../../components/ui';
 import { cn } from '../../lib/format';
@@ -25,8 +25,11 @@ export interface TurnShape {
 
 const STAGES = ['searching', 'answering', 'checking'] as const;
 
-export function Turn({ turn, stage, now, compact = false, selected = null, onOpenDocument, onStop, onAskAgain, onOnly, onWithout }: {
+/** Drawn again only when its own props change: kept turns stay put while the page polls. */
+export const Turn = memo(function Turn({ turn, index = 0, stage, now, compact = false, selected = null, busy = false, onOpenDocument, onStop, onAskAgain, onOnly, onWithout }: {
   turn: TurnShape;
+  /** Where this turn is in the conversation: handed back with a document picked. */
+  index?: number;
   /** Where a turn being asked is; none for one kept. */
   stage?: Stage;
   /** The graph's fingerprint now; a kept turn asked of another says so. */
@@ -34,12 +37,14 @@ export function Turn({ turn, stage, now, compact = false, selected = null, onOpe
   compact?: boolean;
   /** The row of this turn shown in the preview. */
   selected?: string | null;
+  /** A turn is being asked: asking from this one would stop it, so it waits. */
+  busy?: boolean;
   /** A document picked -- `cited` when picked from the answer. */
-  onOpenDocument: (row: Row, cited: boolean) => void;
+  onOpenDocument: (row: Row, cited: boolean, index: number) => void;
   onStop?: () => void;
   onAskAgain: (question: string, documents?: number, exclude?: string[]) => void;
   onOnly?: (doc: TrailDoc) => void;
-  onWithout?: (doc: TrailDoc) => void;
+  onWithout?: (doc: TrailDoc, question: string) => void;
 }) {
   const t = useT();
   const { question, found, answer } = turn;
@@ -48,8 +53,10 @@ export function Turn({ turn, stage, now, compact = false, selected = null, onOpe
   const trail = useMemo(() => hopTrail(found?.sources ?? []), [found]);
   const byLabel = useMemo(() => new Map(trail.nodes.map((n) => [n.label, n])), [trail]);
   const cited = useMemo(() => (answer ? answerPath(trail, answer.answer).used : new Set<string>()), [trail, answer]);
-  const pick = useCallback((row: Row) => onOpenDocument(row, false), [onOpenDocument]);
-  const cite = useCallback((doc: TrailDoc) => { const row = firstRow(trail, doc.id); if (row) onOpenDocument(row, true); }, [trail, onOpenDocument]);
+  const pick = useCallback((row: Row) => onOpenDocument(row, false, index), [onOpenDocument, index]);
+  const cite = useCallback((doc: TrailDoc) => { const row = firstRow(trail, doc.id); if (row) onOpenDocument(row, true, index); }, [trail, onOpenDocument, index]);
+  const without = useMemo(() => onWithout && ((doc: TrailDoc) => onWithout(doc, question)), [onWithout, question]);
+  const waiting = busy ? t('turnRunning') : undefined;
   const hover = useCallback((doc: TrailDoc | null) => setLit(doc?.id ?? null), []);
   const exclude = turn.exclude ?? undefined;
   const again = () => onAskAgain(question, undefined, exclude);
@@ -64,7 +71,7 @@ export function Turn({ turn, stage, now, compact = false, selected = null, onOpe
       {stale && (
         <p role="status" className="flex items-center gap-2 rounded-lg border border-warn/30 bg-warn/5 px-3 py-1.5 text-xs">
           <AlertTriangle className="size-3.5 shrink-0 text-warn" />{t('graphChanged')}
-          <button onClick={again} className="ml-auto font-medium text-accent-fg hover:underline">{t('askAgain')}</button>
+          <button onClick={again} disabled={busy} title={waiting} className="ml-auto font-medium text-accent-fg hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline">{t('askAgain')}</button>
         </p>
       )}
       {live && (
@@ -86,11 +93,11 @@ export function Turn({ turn, stage, now, compact = false, selected = null, onOpe
         ) : error || stage === 'failed' ? (
           <Empty icon={<AlertTriangle className="size-5" />} title={t('searchFailed')}>
             <p>{error}</p>
-            <Button className="mt-3" onClick={again}>{t('retry')}</Button>
+            <Button className="mt-3" disabled={busy} title={waiting} onClick={again}>{t('retry')}</Button>
           </Empty>
         ) : (
           <Empty icon={<FolderSearch className="size-5" />} title={t('searchStopped')}>
-            <Button className="mt-3" onClick={again}><RefreshCw className="size-3.5" />{t('searchAgain')}</Button>
+            <Button className="mt-3" disabled={busy} title={waiting} onClick={again}><RefreshCw className="size-3.5" />{t('searchAgain')}</Button>
           </Empty>
         )
       ) : !trail.rows.length ? (
@@ -100,16 +107,18 @@ export function Turn({ turn, stage, now, compact = false, selected = null, onOpe
             <li>{t('tipFewerWords')}</li>
             <li>{t('tipNumbers')}</li>
           </ul>
-          <Button className="mt-3" onClick={() => onAskAgain(question, 20, exclude)}>{t('searchWider')}</Button>
+          <Button className="mt-3" disabled={busy} title={waiting} onClick={() => onAskAgain(question, 20, exclude)}>{t('searchWider')}</Button>
         </Empty>
       ) : (
         <>
           <FoundCard trail={trail} question={question} queries={found.queries} compact={compact} selected={selected}
-            onSelect={pick} cited={cited} lit={lit} onOnly={onOnly} onWithout={onWithout} />
+            onSelect={pick} cited={cited} lit={lit} onOnly={onOnly} onWithout={without} busy={waiting} />
           <AnswerCard state={answerState} answer={answer?.answer} claims={answer?.claims} checking={stage === 'checking'}
-            error={error} byLabel={byLabel} onCite={cite} onHover={hover} onRetry={again} onCancel={onStop ?? (() => {})} />
+            error={error} byLabel={byLabel} onCite={cite} onHover={hover} onRetry={again} onCancel={onStop ?? noop} busy={waiting} />
         </>
       )}
     </article>
   );
-}
+});
+
+const noop = () => {};

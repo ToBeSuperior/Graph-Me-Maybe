@@ -191,3 +191,44 @@ def test_a_file_with_a_byte_order_mark_is_read(tmp_path: Path) -> None:
     mcp_install.install("claude-desktop", user_home=tmp_path, platform="darwin", entry=ENTRY)
 
     assert json.loads(path.read_text(encoding="utf-8"))["keep"] is True
+
+
+def test_an_old_url_entry_is_replaced_by_the_stdio_shape_keeping_only_env(tmp_path: Path) -> None:
+    path = _where(tmp_path, "cursor")
+    path.parent.mkdir(parents=True)
+    old = {"type": "http", "url": "http://127.0.0.1:1/mcp", "headers": {"A": "b"},
+           "env": {"K": "v"}, "command": ENTRY["command"], "args": ["mcp"]}
+    path.write_text(json.dumps({"mcpServers": {"graph-me-maybe": old}}), encoding="utf-8")
+
+    mcp_install.install("cursor", user_home=tmp_path, platform="darwin", entry=ENTRY)
+
+    assert json.loads(path.read_text(encoding="utf-8"))["mcpServers"]["graph-me-maybe"] == {
+        **ENTRY, "env": {"K": "v"}}
+
+
+def test_a_matching_entry_whose_program_is_gone_is_written_again(tmp_path: Path) -> None:
+    gone = {"command": str(tmp_path / "gone" / "graphme"), "args": ["mcp"]}
+    here = tmp_path / "graphme"
+    here.write_text("#!/bin/sh\n", encoding="utf-8")
+    here.chmod(0o755)
+    path = _where(tmp_path, "cursor")
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"mcpServers": {"graph-me-maybe": gone}}), encoding="utf-8")
+
+    assert not mcp_install.installed(gone, gone)
+    mcp_install.install("cursor", user_home=tmp_path, platform="darwin",
+                        entry={"command": str(here), "args": ["mcp"]})
+
+    assert json.loads(path.read_text(encoding="utf-8"))["mcpServers"]["graph-me-maybe"] == {
+        "command": str(here), "args": ["mcp"]}
+    assert mcp_install.installed({"command": str(here), "args": ["mcp"]},
+                                 {"command": str(here), "args": ["mcp"]})
+    assert not mcp_install.installed({**ENTRY, "url": "http://x"}, ENTRY)
+
+
+def test_the_project_scopes_of_claude_code_are_listed(tmp_path: Path) -> None:
+    path = tmp_path / ".claude.json"
+    path.write_text(json.dumps({"projects": {"/p/one": {"mcpServers": {
+        "graph-me-maybe": ENTRY, "x": {}}}, "/p/two": {}, "/p/odd": 3}}), encoding="utf-8")
+
+    assert mcp_install.registered_scopes(path) == [("project /p/one", ENTRY)]

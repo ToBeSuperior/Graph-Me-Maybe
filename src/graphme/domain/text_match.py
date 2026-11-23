@@ -46,9 +46,11 @@ def without(text: str, name: str) -> str:
 def estimated_tokens(text: str) -> int:
     """About how many tokens a text costs.
 
-    Korean is three bytes a character in UTF-8 and about a token a character, so counting
-    bytes over four -- which is close enough for English -- puts Korean text at a third of
-    its real size and any budget would be spent long before it is reached.
+    Korean, Chinese and Japanese are three bytes a character in UTF-8 and about a token a
+    character, so counting bytes over four -- which is close enough for English -- puts such
+    text at a third of its real size and any budget would be spent long before it is reached.
     """
-    hangul = sum(1 for character in text if "가" <= character <= "힣")
-    return hangul + max(0, len(text.encode("utf-8")) - hangul * 3) // 4
+    wide = sum(1 for character in text
+               if "\u2e80" <= character <= "\u9fff" or "가" <= character <= "힣"
+               or "\uf900" <= character <= "\ufaff")
+    return wide + max(0, len(text.encode("utf-8")) - wide * 3) // 4

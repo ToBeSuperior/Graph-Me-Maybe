@@ -13,8 +13,6 @@ Every write goes to a temp file beside its target and replaces it: a crash leave
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from dataclasses import dataclass, field
 from email.header import Header
 from email.parser import BytesHeaderParser
@@ -24,6 +22,7 @@ from pathlib import Path
 from graphme.adapters.extractors.mail import FOLDER_HEADER, message_key, without_folder_stamp
 from graphme.application.embedded_documents import name_part, safe_name
 from graphme.domain.ids import sha256_bytes
+from graphme.files import write_atomic
 
 _RESERVED = frozenset({"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)),
                        *(f"LPT{n}" for n in range(1, 10))})
@@ -36,16 +35,7 @@ class FolderState:
 
 
 def _write(path: Path, data: bytes) -> None:
-    with tempfile.NamedTemporaryFile(
-            dir=path.parent, prefix=".", suffix=".tmp", delete=False) as temp:
-        try:
-            temp.write(data)
-            temp.flush()
-            os.fsync(temp.fileno())
-        except BaseException:
-            Path(temp.name).unlink(missing_ok=True)
-            raise
-    os.replace(temp.name, path)
+    write_atomic(path, data)
 
 
 def _named(raw: bytes, key: str) -> str:

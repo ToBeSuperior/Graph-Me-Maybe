@@ -225,6 +225,16 @@ def any_named(named: Sequence[str]) -> str:
     return " OR ".join(_held(word) for word in named)
 
 
+_PARTICLE = re.compile(
+    r"(.*?[가-힣]{2})(?:에서|으로|까지|부터|에게|한테|보다|처럼|만큼|은|는|이|가|을|를|의|에|도|로|와|과|만)+")
+"""A Korean word and the particle written on it -- the closed set the grammar has, not one
+read off documents. The `cjk` analyzer keeps the particle in the word's last pair, so
+"보증금은" asked as a phrase never matched "보증금을"; the word is asked for without it too,
+when two syllables or more are left. The word is the shortest that leaves particles alone
+after it, so the longest particle ("으로", not "로") and several written together ("에서는")
+come off whole."""
+
+
 def _held(word: str) -> str:
     """A word as the index holds it: the phrase -- or, for one ending in Latin letters or
     digits, the same pieces with Hangul run on after the last. The `cjk` analyzer keeps a
@@ -232,7 +242,8 @@ def _held(word: str) -> str:
     every Korean sentence naming the number; only Hangul may run on, so 210 is not 2100."""
     pieces = re.findall(r"[^\W_]+", word)
     if not pieces or not re.fullmatch(r"[a-z0-9]+", pieces[-1]):
-        return f'"{word}"'
+        stem = re.fullmatch(_PARTICLE, word)
+        return f'("{word}" OR "{stem[1]}")' if stem else f'"{word}"'
     run_on = " AND ".join([*pieces[:-1], f"/{pieces[-1]}[가-힣]+/"])
     return f'("{word}" OR ({run_on}))'
 

@@ -152,14 +152,17 @@ export function useMailWorkspace() {
 }
 
 /** The conversations kept for the workspace open, the latest changed first. */
-export const useThreads = () => useQuery({ queryKey: keys.threads, queryFn: () => call(api.GET('/v1/threads')) });
+export const threadsOptions = { queryKey: keys.threads, queryFn: () => call(api.GET('/v1/threads')), ...fresh };
+export const useThreads = () => useQuery(threadsOptions);
 
 /** One conversation and its turns. */
-export const useThread = (id: string) => useQuery({
+export const threadOptions = (id: string) => ({
   queryKey: keys.thread(id),
   queryFn: () => call(api.GET('/v1/threads/{thread_id}', { params: { path: { thread_id: id } } })),
   retry: false,
+  ...fresh,
 });
+export const useThread = (id: string) => useQuery(threadOptions(id));
 
 /** The targets chosen to build by themselves and every mail account, asked again each minute:
  * what changed is counted by the server as it looks. */

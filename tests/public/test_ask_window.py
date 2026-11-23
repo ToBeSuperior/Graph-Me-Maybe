@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -266,12 +267,42 @@ def test_a_write_cut_short_leaves_the_kept_place_whole(tmp_path: Path,
 
     ask_window._keep(tmp_path, opacity=0.8)
 
-    def cut_short(self: Path, *_: Any, **__: Any) -> int:
-        self.open("w").close()  # emptied, then the disk filled
-        raise OSError("no space left")
-    monkeypatch.setattr(Path, "write_text", cut_short)
+    import os
+
+    def cut_short(*_: Any, **__: Any) -> None:
+        raise OSError("no space left")  # the disk filled before the new place was put in
+    monkeypatch.setattr(os, "replace", cut_short)
     with pytest.raises(OSError):
         ask_window._keep(tmp_path, opacity=0.5)
     monkeypatch.undo()
 
     assert ask_window.kept_opacity(tmp_path) == 0.8
+
+
+def test_files_picked_at_once_by_separate_processes_open_one_window(tmp_path: Path) -> None:
+    import threading
+
+    results: dict[str, list[str] | None] = {}
+
+    def one(name: str) -> None:
+        results[name] = ask_window.collect(tmp_path, name, window=0.4)
+
+    threads = [threading.Thread(target=one, args=(f"/files/{n}.pdf",)) for n in "abcd"]
+    for t in threads:
+        t.start()
+        time.sleep(0.02)
+    for t in threads:
+        t.join()
+
+    leaders = [v for v in results.values() if v is not None]
+    assert len(leaders) == 1 and sorted(leaders[0]) == [f"/files/{n}.pdf" for n in "abcd"]
+    assert list((tmp_path / ask_window.PENDING).iterdir()) == []
+    assert not (tmp_path / ask_window.LOCK).exists()
+
+
+def test_a_stale_collector_lock_does_not_swallow_the_next_pick(tmp_path: Path) -> None:
+    lock = tmp_path / ask_window.LOCK
+    lock.write_text("", encoding="utf-8")
+    os.utime(lock, (1, 1))
+
+    assert ask_window.collect(tmp_path, "/f/a.pdf", window=0) == ["/f/a.pdf"]

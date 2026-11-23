@@ -469,3 +469,26 @@ def test_readings_are_kept_before_a_model_key_is_given(tmp_path: Path,
     other = runtime.page_readings(Settings(profile="test", data_dir=tmp_path, api_key=None,
                                            model="model-b"))
     assert other.get("k") is None
+
+
+def test_readings_of_a_build_that_never_finished_are_kept_for_its_retry(
+        tmp_path: Path) -> None:
+    import os
+    import time
+
+    readings = PageReadings(tmp_path)
+    readings.put("k-cut", PageReading(names=("a",), answer={"said": "a"}))
+    readings.put("k-long-ago", PageReading(names=("b",), answer={"said": "b"}))
+    readings.name("3" * 64, "k-cut")  # a cancelled build: never settled into the graph
+    readings.name("4" * 64, "k-long-ago")
+    now = time.time()
+    long_ago = now - 365 * 24 * 3600
+    os.utime(tmp_path / f"{'4' * 64}.building", (long_ago, long_ago))
+    for path in tmp_path.glob("*.json"):
+        os.utime(path, (now - 3600, now - 3600))
+
+    readings.sweep(set(), before=now - 600)
+
+    assert readings.get("k-cut") is not None  # a retry pays nothing again
+    assert readings.get("k-long-ago") is None
+    assert not (tmp_path / f"{'4' * 64}.building").exists()

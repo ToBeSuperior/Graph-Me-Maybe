@@ -165,3 +165,13 @@ def test_on_windows_a_home_of_its_own_has_a_verb_of_its_own() -> None:
                         environ={"LOCALAPPDATA": r"C:\Inv"})
     assert r"Software\Classes\*\shell\GraphMeMaybe" in registry.keys
     assert mine not in registry.keys
+
+
+def test_on_windows_a_path_with_spaces_stays_one_argument() -> None:
+    registry = FakeWinreg()
+    context_menu.install([r"C:\Program Files\Py\pythonw.exe", "-m", "graphme.cli", "ask-window",
+                          "--home", r"C:\My Home"], platform="win32", registry=registry)
+
+    line = registry.keys[r"Software\Classes\*\shell\GraphMeMaybe\command"][""]
+    assert line == ('"C:\\Program Files\\Py\\pythonw.exe" -m graphme.cli ask-window '
+                    '--home "C:\\My Home" "%1"')

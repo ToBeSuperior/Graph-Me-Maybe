@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any, Protocol
 
 import typer
+from pydantic import ValidationError
 
 from graphme.adapters.export.neo4j import records_cypher
 from graphme.adapters.storage.graph_rag import GraphAnswer
@@ -136,8 +138,17 @@ def create_app(
         from graphme.doctor import checks
 
         # The home the settings name -- a checkout's `.env` may set GRAPHME_HOME -- as they read it.
-        env = {**read_dotenv(settings_folder() / ".env"), **os.environ}
-        found = checks(app_home(env), load_settings())
+        try:
+            env = {**read_dotenv(settings_folder() / ".env"), **os.environ}
+            found = checks(app_home(env), load_settings())
+        except ValueError as error:  # a bad .env or setting: one row, not a traceback
+            from graphme.doctor import Check
+
+            what = ("a setting is invalid: " + ", ".join(
+                ".".join(map(str, e["loc"])) for e in error.errors())
+                    if isinstance(error, ValidationError) else str(error))
+            found = [Check("settings", False, what, f"fix or remove it in "
+                           f"{settings_folder() / '.env'} (or `graphme setup`)")]
         if json_output:
             typer.echo(json.dumps([asdict(c) for c in found], ensure_ascii=False, indent=2))
         else:
@@ -345,7 +356,11 @@ def create_app(
         try:
             # The home the settings name (a checkout's `.env` too), as the server's own.
             where = home or load_settings().local_models or app_home()
-            ask_window.main([str(p) for p in paths], where)
+            picked = [str(p) for p in paths]
+            if sys.platform == "win32":  # one process per picked file: the first gathers them
+                picked = ask_window.collect(where, picked[0]) or []
+            if picked:
+                ask_window.main(picked, where)
         except Exception as error:  # started from a menu: no console says it
             agent._tell(f"Graph-Me-Maybe could not open the window: {error}")
             raise

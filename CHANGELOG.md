@@ -5,6 +5,56 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-23
+
+### Fixed
+
+- A daily build of a watched folder waits until its files have stopped changing for five
+  minutes, as a build on change does, so a file still being copied is not read half written. A
+  daily build that failed is tried again once the files change, not only the next day.
+- An unreadable `watch.json` is kept aside as `watch.json.bad` instead of being written over,
+  so the watched folders it listed are not lost.
+- A sentence of an answer citing a file the answer was not given is no longer marked as
+  supported.
+- A Korean word asked with a particle (`보증금은`) also finds the word with another particle or
+  none.
+- Identical copies in one build are read once: the second waits for the first and takes its
+  reading.
+- Which of several copies changed at the same moment is the latest no longer changes from one
+  build to the next.
+- Chinese and Japanese text is counted closer to its real size when an answer's passages are
+  fitted to its budget.
+- A sentence citing a linked document read with a passage is marked as supported, and a
+  citation written after the full stop counts for the sentence before it.
+- A Korean word with a longer particle (`보증금으로`, `회의에서는`) is also asked without it.
+- A file that failed inside a finished build of a watched folder is tried again, not taken as
+  built.
+- Pages read for a build that was cancelled or failed are kept for a week, so trying it again
+  does not pay for them again.
+- Choosing documents to ask stops looking once more than 500 files are found, and an
+  online-only file read to know its content is given back to the cloud.
+- A turn stopped part way keeps its place in the conversation, leaving the page while an answer
+  is written no longer stops it, and another turn's buttons wait until it is done.
+- `graphme mcp install` replaces an older URL-style entry instead of mixing the two, and counts
+  an entry as installed only while its program is still there. `graphme doctor` finds an entry
+  `claude mcp add` wrote for one project, and reports an unreadable `.env` instead of stopping.
+- On Windows, **Ask Graph-Me-Maybe** on several selected files opens one window with all of
+  them, as on macOS.
+
+### Security
+
+- Choosing documents to ask and changing a conversation take requests from this machine's own
+  pages only, as the watch and settings routes do.
+
+### Changed
+
+- An answer citing no file is not checked, which saves a model call.
+- A question reads the version groups and the documents it names once, not once for finding and
+  again for writing.
+- A document and the same text with an annex appended are now one group of versions, as an
+  edited copy is; a page quoted inside a longer report still stands apart. Every space is
+  grouped again on its next build.
+
 ## [0.2.2] - 2026-11-22
 
 ### Added

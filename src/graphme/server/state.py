@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import sys
-import tempfile
 import threading
 import time
 import traceback
@@ -35,6 +34,7 @@ from graphme.application.visual_crops import CROP_ASSET_KEY
 from graphme.config import Settings
 from graphme.domain.enums import DocumentFormat
 from graphme.domain.models import ExtractedDocument, HierarchyDecision
+from graphme.files import write_atomic
 from graphme.ports.sources import SourceStore
 from graphme.runtime import (
     create_graph_builder,
@@ -111,11 +111,7 @@ def _keep_page(folder: Path, name: str, png: bytes, limit: int) -> None:
     """`png` kept as `name`, then the oldest pages let go until what is kept fits `limit`."""
     if limit <= 0:
         return
-    folder.mkdir(parents=True, exist_ok=True)
-    handle, temporary = tempfile.mkstemp(dir=folder, suffix=".tmp")
-    with os.fdopen(handle, "wb") as out:
-        out.write(png)
-    os.replace(temporary, folder / name)
+    write_atomic(folder / name, png, sync=False)
     kept = []
     for path in folder.glob("*.png"):
         with contextlib.suppress(OSError):

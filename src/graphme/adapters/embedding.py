@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import contextlib
-import os
-import tempfile
 import threading
 from abc import abstractmethod
 from array import array
@@ -17,6 +15,7 @@ from neo4j_graphrag.embeddings import OpenAIEmbeddings
 from neo4j_graphrag.embeddings.base import Embedder
 
 from graphme.domain.ids import sha256_bytes
+from graphme.files import write_atomic
 
 V = TypeVar("V")
 
@@ -136,14 +135,8 @@ class KeptVectors(BatchEmbedder):
 
     def _write(self, key: str, vector: list[float]) -> None:
         with contextlib.suppress(OSError):
-            self._folder.mkdir(parents=True, exist_ok=True)
-            handle, temporary = tempfile.mkstemp(dir=self._folder, suffix=".part")
-            try:
-                with os.fdopen(handle, "wb") as stream:
-                    stream.write(array("d", vector).tobytes())
-                os.replace(temporary, self._folder / f"{key}.vec")
-            finally:
-                Path(temporary).unlink(missing_ok=True)
+            write_atomic(self._folder / f"{key}.vec", array("d", vector).tobytes(),
+                         suffix=".part", sync=False)
 
 
 def vector_key(model: str, text: str) -> str:

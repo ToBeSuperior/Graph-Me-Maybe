@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
-import tempfile
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,9 +22,14 @@ from typing import Any, TypeVar
 from graphme.application.reading_order import stated_box
 from graphme.domain.ids import canonical_json, sha256_bytes
 from graphme.domain.models import GraphNode
+from graphme.files import write_atomic
 
 READING_RULE = 1
 """The version of how a page is asked. Part of every key: changing it asks every page again."""
+
+BUILDING_KEPT_SECONDS = 7 * 24 * 3600
+"""How long the readings a build used are kept when it never put its document in the graph
+(cancelled, failed, the app quit): a retry within it is not paid for again."""
 
 T = TypeVar("T")
 
@@ -104,17 +107,9 @@ class PageReadings:
             return None  # none kept, or one that cannot be read: the page is asked
 
     def put(self, key: str, reading: PageReading) -> None:
-        self._folder.mkdir(parents=True, exist_ok=True)
         text = json.dumps({"names": list(reading.names), "answer": reading.answer},
                           ensure_ascii=False)
-        handle, temporary = tempfile.mkstemp(dir=self._folder, suffix=".part")
-        try:
-            with os.fdopen(handle, "w", encoding="utf-8") as stream:
-                stream.write(text)
-            os.replace(temporary, self._folder / f"{self._file(key)}.json")
-        except BaseException:
-            Path(temporary).unlink(missing_ok=True)
-            raise
+        write_atomic(self._folder / f"{self._file(key)}.json", text, suffix=".part", sync=False)
 
     def name(self, document: str, key: str) -> None:
         """The document of this content hash, being read, used the reading under `key`."""
@@ -131,10 +126,8 @@ class PageReadings:
             used = dict.fromkeys(building.read_text(encoding="utf-8").split())
         except OSError:
             return  # nothing was read through the readings
-        handle, temporary = tempfile.mkstemp(dir=self._folder, suffix=".part")
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            stream.write("".join(f"{key}\n" for key in used))
-        os.replace(temporary, self._folder / f"{held_as}.keys")
+        write_atomic(self._folder / f"{held_as}.keys", "".join(f"{key}\n" for key in used),
+                     suffix=".part", sync=False)
         building.unlink(missing_ok=True)
 
     def documents(self) -> set[str]:
@@ -145,7 +138,8 @@ class PageReadings:
 
     def sweep(self, documents: set[str], *, before: float) -> int:
         """Every reading no document in `documents` (content hashes the graph holds) names
-        deleted, unless written since `before` -- a build under way: how many."""
+        deleted, unless written since `before` -- a build under way -- or used by a build that
+        never settled, within `BUILDING_KEPT_SECONDS`: how many."""
         if not self._folder.is_dir():
             return 0
         keep: set[str] = set()
@@ -155,13 +149,19 @@ class PageReadings:
                     keep.update(index.read_text(encoding="utf-8").split())
             elif _older(index, before):
                 index.unlink(missing_ok=True)
+        for building in self._folder.glob("*.building"):
+            if _older(building, before - BUILDING_KEPT_SECONDS):
+                building.unlink(missing_ok=True)
+            else:
+                with contextlib.suppress(OSError):
+                    keep.update(building.read_text(encoding="utf-8").split())
         removed = 0
         for path in self._folder.glob("*.json"):
             if path.stem not in keep and _older(path, before):
                 path.unlink(missing_ok=True)
                 removed += 1
-        # A reading never put in the graph, and a write cut short.
-        for path in [*self._folder.glob("*.building"), *self._folder.glob("*.part")]:
+        # A write cut short.
+        for path in self._folder.glob("*.part"):
             if _older(path, before):
                 path.unlink(missing_ok=True)
         return removed

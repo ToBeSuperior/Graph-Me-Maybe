@@ -10,7 +10,7 @@ import os
 import shutil
 import sys
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from graphme import agent_file, mcp_install, model_endpoint
@@ -84,13 +84,22 @@ def _client(client: str, user_home: Path, platform: str, environ: Mapping[str, s
         entry = mcp_install.registered_entry(path)
     except mcp_install.ConfigError:
         return _check(name, f"{path} is not valid JSON; fix or remove it, then install", fix)
-    if entry is None:
+    scopes = [("", entry)] if entry is not None else []
+    if client == "claude-code":  # `claude mcp add` writes the local scope under `projects`
+        scopes += mcp_install.registered_scopes(path)
+    if not scopes:
         return _check(name, f"graph-me-maybe is not in {path}", fix)
+    # A scope whose program exists wins; else the first one is what is reported.
+    scope, entry = next(((s, e) for s, e in scopes if e.get("command")
+                         and _command_exists(str(e["command"]))), scopes[0])
+    where = f"in {scope}" if scope else ""
     if not entry.get("command"):
-        return Check(name, True, "", "", "registered (not a command entry)")
+        return Check(name, True, "", "", f"registered {where} (not a command entry)".replace(
+            "registered  ", "registered "))
     command = str(entry["command"])
-    return _check(name, "" if _command_exists(command)
-                  else f"registered command {command} does not exist", fix)
+    found = _check(name, "" if _command_exists(command)
+                   else f"registered command {command} does not exist", fix)
+    return replace(found, note=f"registered {where}") if scope and found.ok else found
 
 
 def checks(

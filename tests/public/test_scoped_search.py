@@ -162,3 +162,13 @@ def test_a_scope_naming_a_rebuilt_document_finds_the_one_built_in_its_place() ->
                        exclude=frozenset({"a"}))
     assert {p["document_id"] for p in found} == {"b"}
     assert len(asked) == 1 and sorted(asked[0]) == ["a", "gone", "old-b"], "one lookup"
+
+
+def test_a_korean_particle_is_asked_with_and_without() -> None:
+    from graphme.adapters.storage.hybrid_search import every_word
+
+    assert every_word("보증금은 반환") == '(("보증금은" OR "보증금") AND "반환")'
+    assert every_word("가스켓 시험에서") == '("가스켓" AND ("시험에서" OR "시험"))'
+    assert every_word("나이 평가") == '("나이" AND "평가")'  # one syllable is no word to keep
+    assert every_word("보증금으로") == '(("보증금으로" OR "보증금"))'  # the longest particle
+    assert every_word("회의에서는") == '(("회의에서는" OR "회의"))'  # particles written together

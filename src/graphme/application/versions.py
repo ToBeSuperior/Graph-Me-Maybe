@@ -3,7 +3,9 @@
 A name's `final`, `v3` or `(1)` differs from one collection to the next; content does not. Two
 documents are one family when their files are the same bytes (the content hash), or when the
 sets of what their passages say -- each heading and each line once -- overlap by VERSION_OVERLAP
-or more (Jaccard). Lines, not whole passages: passages are packed to a size, so one paragraph
+or more (Jaccard), or when the smaller one's lines are nearly all in the larger (CONTAINED) and
+they still overlap by CONTAINED_OVERLAP -- an original and the same text with an annex appended.
+Lines, not whole passages: passages are packed to a size, so one paragraph
 rewritten moves where every later passage starts, and two readings of an outline can put a heading
 in a passage's path or in its words. MinHash picks the pairs worth measuring -- signatures cut
 into bands, two documents sharing a band are measured -- so a space is not measured pair by pair;
@@ -15,21 +17,26 @@ import hashlib
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import combinations
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import numpy as np
 
 VERSION_OVERLAP = 0.8
 """How much of two documents' passages must be the same (Jaccard) for them to be versions."""
+CONTAINED = 0.96
+"""How much of the smaller document's lines the larger must hold to be the same text grown."""
+CONTAINED_OVERLAP = 0.4
+"""The Jaccard a contained pair still needs: a page quoted inside a long report is not a version."""
 PERMUTATIONS = 128
 """How many hashes a document's signature holds."""
-BANDS = 32
-"""The signature cut into this many bands: two documents sharing one are measured. Four hashes a
-band finds nearly every pair at VERSION_OVERLAP and measures few that are far below it."""
+BANDS = 64
+"""The signature cut into this many bands: two documents sharing one are measured. Two hashes a
+band finds nearly every pair at CONTAINED_OVERLAP; four missed nearly half of them."""
 KEYS_RULE = "lines"
 """Names what a document's `version_keys` hash (`passage_keys`): stored with them, so keys
 hashed another way are hashed again from the passages."""
-VERSIONS_RULE = f"{KEYS_RULE}/minhash{PERMUTATIONS}x{BANDS}/at{VERSION_OVERLAP}"
+VERSIONS_RULE = (f"{KEYS_RULE}/minhash{PERMUTATIONS}x{BANDS}/at{VERSION_OVERLAP}"
+                 f"/in{CONTAINED}at{CONTAINED_OVERLAP}")
 """Names how families are found: stored on each document grouped, so a change regroups all."""
 
 _PRIME = (1 << 31) - 1
@@ -113,6 +120,18 @@ def overlap(a: Collection[object], b: Collection[object]) -> float:
     return len(one & two) / union if union else 0.0
 
 
+def related(a: Collection[object], b: Collection[object]) -> bool:
+    """Whether two documents' passages make them versions: overlapping by VERSION_OVERLAP, or
+    the smaller held CONTAINED by the larger while overlapping by CONTAINED_OVERLAP."""
+    one, two = set(a), set(b)
+    shared, union, smaller = len(one & two), len(one | two), min(len(one), len(two))
+    if not union:
+        return False
+    jaccard = shared / union
+    return jaccard >= VERSION_OVERLAP or (
+        jaccard >= CONTAINED_OVERLAP and shared / smaller >= CONTAINED)
+
+
 Pair = tuple[str, str]
 
 
@@ -148,10 +167,9 @@ def candidates(docs: Sequence[Signed], fresh: Collection[str]) -> tuple[set[Pair
 
 def confirmed(copies: set[Pair], measure: set[Pair],
               hashes: Mapping[str, Collection[int]]) -> list[Pair]:
-    """The copies, and the pairs measured whose passages overlap by VERSION_OVERLAP."""
+    """The copies, and the pairs measured whose passages are `related`."""
     return sorted(copies | {(one, two) for one, two in measure
-                            if overlap(hashes.get(one, ()), hashes.get(two, ()))
-                            >= VERSION_OVERLAP})
+                            if related(hashes.get(one, ()), hashes.get(two, ()))})
 
 
 def version_pairs(docs: Sequence[Measured]) -> list[Pair]:
@@ -197,15 +215,17 @@ def by_document(pairs: Iterable[tuple[Member, Member]]) -> dict[str, tuple[Membe
 
 
 def latest(family: Sequence[Member]) -> Member:
-    """The family's last changed file; one with no time is older than any with one."""
-    return max(family, key=lambda m: (m.modified is not None, m.modified or 0.0))
+    """The family's last changed file; one with no time is older than any with one. Copies
+    changed at once are told apart by their names, never by ids a rebuild gives anew."""
+    return max(family, key=lambda m: (m.modified is not None, m.modified or 0.0, m.file,
+                                      m.document_id))
 
 
 def versions_of(family: Sequence[Member], shown: Collection[str]) -> list[VersionOf]:
     """The members of `family` not `shown`, last changed first, the family's latest marked."""
     newest = latest(family).document_id
     return [VersionOf(m.document_id, m.file, m.modified, m.document_id == newest)
-            for m in sorted(family, key=lambda m: -(m.modified or 0.0))
+            for m in sorted(family, key=lambda m: (-(m.modified or 0.0), m.file))
             if m.document_id not in shown]
 
 
@@ -213,3 +233,17 @@ def family_key(family: Mapping[str, Sequence[Member]], document: str) -> str:
     """What a document is told apart by once families fold: its family's first id, else its own."""
     members = family.get(document)
     return members[0].document_id if members else document
+
+
+def fold_versions(ranked: Sequence[Any], family: Mapping[str, Sequence[Member]],
+                  only: frozenset[str] | None = None) -> list[Any]:
+    """`ranked` with each family (`versions.by_document`) shown by its best-ranked member: the
+    passages of its other members are left out, so a document's copies take no place of the
+    documents asked for and the answer reads its words once. A question scoped to documents
+    (`only`) folds nothing: every document in it was named."""
+    if only is not None:
+        return list(ranked)
+    standing: dict[str, str] = {}
+    return [passage for passage in ranked
+            if standing.setdefault(family_key(family, passage["document_id"]),
+                                   passage["document_id"]) == passage["document_id"]]

@@ -62,3 +62,16 @@ describe('a statement the sources do not bear out, opened', () => {
   it('is struck through beside what the sources say instead', () => expect(struck('It is held for 4 minutes.')).toBe(true));
   it('is not struck through when the sources say nothing of it', () => expect(struck(null)).toBe(false));
 });
+
+describe('an earlier turn while another is being asked', () => {
+  const none = { question: 'Where is the invented valve?', found: { sources: [], queries: [], text_only: false } } satisfies TurnShape;
+
+  it('cannot ask again, so the turn running is not stopped by it', () => {
+    const html = (busy: boolean) => renderToStaticMarkup(
+      <Turn turn={none} busy={busy} onOpenDocument={() => {}} onAskAgain={() => {}} />);
+    expect(html(true)).toMatch(/<button[^>]*disabled[^>]*title="Wait for the answer being written, or stop it"[^>]*>.*Search wider/);
+    expect(html(false)).not.toContain('disabled=""');
+    const stale = renderToStaticMarkup(<Turn turn={{ ...turn, stamp: 's1' }} now="s2" busy onOpenDocument={() => {}} onAskAgain={() => {}} />);
+    expect(stale).toMatch(/<button[^>]*disabled[^>]*>Ask again/);
+  });
+});

@@ -120,3 +120,75 @@ def test_a_blank_claim_is_dropped_and_the_valid_one_kept(monkeypatch: pytest.Mon
     answer = rag.ask("What is the pressure drop limit?", documents=3)
 
     assert [c.text for c in answer.claims] == ["The pressure drop limit is 0.05 MPa"]
+
+
+def test_a_claim_citing_a_file_never_read_is_not_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tests.public.test_answer_check as here
+
+    monkeypatch.setattr(here, "ANSWER", "The pressure drop limit is 0.01 MPa [Spec.docx]. "
+                                        "The warranty is 24 months [Terms.pdf].")
+    rag, _ = _rag(monkeypatch, _claims(
+        {"text": "The pressure drop limit is 0.01 MPa", "supported": True, "files": ["Spec.docx"]},
+        {"text": "The warranty is 24 months", "supported": True, "files": ["Spec.docx"]}))
+
+    answer = rag.ask("What are the limit and the warranty?", documents=3)
+
+    assert [(c.supported, c.correction) for c in answer.claims] == [(True, None), (False, None)]
+
+
+LINKED_RECORD = neo4j.Record({
+    "id": "c", "score": 1.0, "document_id": "a", "file": "Spec.docx",
+    "text": "[Spec.docx] The pressure drop limit is 0.01 MPa.",
+    "members": [], "modified": None,
+    "linked": [{"document_id": "t", "file": "Terms.pdf", "hop": 2, "via": "a",
+                "direction": "cites", "modified": None,
+                "passages": [{"id": "t:0", "score": 0.9, "members": [],
+                              "text": "The warranty is 24 months."}]}]})
+OTHER_RECORD = neo4j.Record({
+    "id": "o", "score": 0.5, "document_id": "o", "file": "Other.docx",
+    "text": "[Other.docx] The invented canteen opens at noon.",
+    "members": [], "linked": [], "modified": None})
+
+
+def test_a_claim_citing_a_linked_document_is_supported_and_its_carrier_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tests.public.test_answer_check as here
+
+    monkeypatch.setattr(here, "ANSWER", "The warranty is 24 months [Terms.pdf].")
+    rag, seen = _rag(monkeypatch, _claims(
+        {"text": "The warranty is 24 months", "supported": True, "files": ["Terms.pdf"]}),
+        records=[LINKED_RECORD, OTHER_RECORD])
+
+    answer = rag.ask("How long is the warranty?", documents=3)
+
+    assert [(c.supported, c.correction) for c in answer.claims] == [(True, None)]
+    sent = json.dumps(seen[-1])
+    assert "24 months" in sent and "canteen" not in sent  # only the item carrying Terms.pdf
+
+
+def test_a_citation_after_the_period_belongs_to_its_sentence() -> None:
+    from graphme.adapters.storage.answer_check import _cites_unread
+
+    answer = "A is 1. [a.pdf] B is 2. [b.pdf]"
+
+    assert _cites_unread(answer, "B is 2", {"a.pdf"}) is True
+    assert _cites_unread(answer, "A is 1", {"b.pdf"}) is True
+    assert _cites_unread(answer, "A is 1", {"a.pdf"}) is False
+
+
+def test_an_answer_citing_no_file_is_not_sent_to_the_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tests.public.test_answer_check as here
+
+    monkeypatch.setattr(here, "ANSWER", "The context does not say.")
+    rag, seen = _rag(monkeypatch, _claims())
+
+    answer = rag.ask("What is the pressure drop limit?", documents=3)
+
+    assert answer.text == "The context does not say."
+    assert len(seen) == 1  # the answer alone
+    assert answer.checked is False and answer.claims == []

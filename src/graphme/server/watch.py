@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from graphme.adapters.sources.desktop_drives import DESKTOP_DRIVES
 from graphme.application.ingest import documents_at
+from graphme.files import write_atomic
 from graphme.server.jobs import BUILDING, Busy, CorpusBuild
 
 if TYPE_CHECKING:
@@ -130,6 +131,17 @@ class _Walk:
     in_graph: dict[str, str] | None = None
 
 
+@dataclass
+class _Started:
+    """A build started for a target: what its folder held then, what had changed, and the
+    document each changed file was given as, with the build's stop its readings carry."""
+    build: CorpusBuild
+    seen: Seen
+    key: frozenset[str]
+    docs: dict[str, str]
+    stop: threading.Event
+
+
 def _resolved(path: Path) -> Path:
     try:
         return path.resolve()
@@ -163,7 +175,7 @@ class Watcher:
         """target -> what its folder held at the last look."""
         self._quiet_since: dict[str, tuple[frozenset[str], datetime]] = {}
         """target -> what was changed at the last look, and since when it has stayed so."""
-        self._started: dict[str, tuple[CorpusBuild, Seen, frozenset[str]]] = {}
+        self._started: dict[str, _Started] = {}
         """target -> the build started for it, what the folder held then and what changed."""
         self._failed: dict[str, frozenset[str]] = {}
         """target -> what had changed when its last build did not finish: not built again
@@ -194,7 +206,7 @@ class Watcher:
             in_graph = graphs[target.workspace]
             started = self._started.get(target.id)
             # a finished build of the changes built them: none is left, before the next look
-            done = started is not None and started[0].state == "done"
+            done = started is not None and started.build.state == "done"
             changed = [] if done else self._changed.get(target.id, [])
             missing = [{"path": p, "document_id": in_graph.get(p) if in_graph else None}
                        for p in self._missing.get(target.id, [])
@@ -205,7 +217,7 @@ class Watcher:
                 "name": Path(target.path or "").name or target.path or target.id,
                 "changed": len(changed), "missing": missing,
                 "next_build": self._next(target, changed, now),
-                "building": started is not None and started[0].state in BUILDING,
+                "building": started is not None and started.build.state in BUILDING,
                 "error": self._errors.get(target.id)})
         if self._demo.workspaces is not None:
             build = self._demo.build
@@ -432,17 +444,22 @@ class Watcher:
         if self._errors.pop(target.id, None) is not None:
             self._quiet_since.pop(target.id, None)  # back: it settles again before building
         if started := self._started.get(target.id):
-            build, seen, key = started
+            build, seen, key = started.build, started.seen, started.key
             if build.state in BUILDING:
                 return  # what changes meanwhile is the next look's
             del self._started[target.id]
             if build.state == "done":  # taken: what the folder held then is the new start
+                # ...but for a file that failed in it: left as it was, so it is tried again.
+                seen = {p: v for p, v in seen.items() if p not in self._unbuilt(started)}
                 gone = {p: v for p, v in target.seen.items() if p not in seen}
                 target.seen = {**gone, **{p: [s, m] for p, (s, m) in seen.items()}}
                 self._failed.pop(target.id, None)
                 self._save(target)
             else:
                 self._failed[target.id] = key
+                if target.mode == "daily":  # due again once the files change, not tomorrow
+                    target.ran = None
+                    self._save(target)
         found = walk.found
 
         def unknown(path: str) -> bool:
@@ -465,6 +482,14 @@ class Watcher:
         if self._quiet_since.get(target.id, (None,))[0] != key:
             self._quiet_since[target.id] = (key, self._now())
 
+    def _unbuilt(self, started: _Started) -> set[str]:
+        """The files a finished build was given and did not read: each one's reading was this
+        build's (`stop`) and did not end done. One passed over as known was never read by it."""
+        sessions = self._demo.sessions
+        return {p for p, doc in started.docs.items()
+                if (s := sessions.get(doc)) is not None and s.stop is started.stop
+                and s.state != "done"}
+
     def _key(self, id: str) -> frozenset[str]:
         found = self._scanned.get(id, {})
         return frozenset(f"{p}:{found[p]}" for p in self._changed.get(id, []))
@@ -473,16 +498,18 @@ class Watcher:
         if target.id in self._started or target.id in self._errors:
             return False
         now = self._now()
+        key, since = self._quiet_since[target.id]
+        # A file still being written is not read, whatever started the build.
+        settled = key != self._failed.get(target.id) \
+            and now - since >= timedelta(minutes=SETTLE_MINUTES)
         if target.mode == "on_change":
-            key, since = self._quiet_since[target.id]
-            return bool(self._changed.get(target.id)) and key != self._failed.get(target.id) \
-                and now - since >= timedelta(minutes=SETTLE_MINUTES)
+            return bool(self._changed.get(target.id)) and settled
         if target.mode == "daily" and daily_due(target.at, target.ran, now):
             if not self._changed.get(target.id):
                 target.ran = now.isoformat()  # nothing to build: the next day's time
                 self._save(target)
                 return False
-            return True
+            return settled
         return False
 
     def _why_not(self, target: WatchTarget) -> str | None:
@@ -500,9 +527,10 @@ class Watcher:
         takes its slot, so a switch in between builds nothing (Busy)."""
         demo = self._demo
         changed = self._changed[target.id]
-        build = demo.build_corpus([demo.open_path(p) for p in changed], target.path or "",
-                                  into=target.workspace)
-        self._started[target.id] = (build, dict(self._scanned[target.id]), self._key(target.id))
+        docs = {p: demo.open_path(p) for p in changed}
+        build = demo.build_corpus(list(docs.values()), target.path or "", into=target.workspace)
+        self._started[target.id] = _Started(build, dict(self._scanned[target.id]),
+                                            self._key(target.id), docs, demo.build_stop)
         if target.mode == "daily":
             target.ran = self._now().isoformat()
             self._save(target)
@@ -528,12 +556,13 @@ class Watcher:
         try:
             said = json.loads(self._file.read_text(encoding="utf-8"))
             return [WatchTarget(**t) for t in said["targets"]]
-        except (OSError, ValueError, KeyError, TypeError):
+        except OSError:
+            return []
+        except (ValueError, KeyError, TypeError):
+            # Kept aside, not written over by the next choice: the targets can be read back.
+            self._file.replace(self._file.with_suffix(".json.bad"))
             return []
 
     def _write(self, targets: list[WatchTarget]) -> None:
-        self._file.parent.mkdir(parents=True, exist_ok=True)
-        kept = self._file.with_suffix(".tmp")
-        kept.write_text(json.dumps({"targets": [asdict(t) for t in targets]},
-                                   ensure_ascii=False, indent=1), encoding="utf-8")
-        kept.replace(self._file)
+        write_atomic(self._file, json.dumps({"targets": [asdict(t) for t in targets]},
+                                            ensure_ascii=False, indent=1))

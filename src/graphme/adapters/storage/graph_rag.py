@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import re
 import threading
 import time
 import unicodedata
@@ -38,13 +37,13 @@ from neo4j_graphrag.types import RetrieverResultItem
 from graphme.adapters.chat import Endpoint, complete, image_part, is_transient
 from graphme.adapters.embedding import BatchEmbedder, Remembered
 from graphme.adapters.export.neo4j import CHUNK_LABEL, NODE_LABEL
+from graphme.adapters.storage.answer_check import Claim as Claim
+from graphme.adapters.storage.answer_check import checked as _claims_checked
 from graphme.adapters.storage.answer_prompt import (
-    CHECK_SYSTEM,
     FOLLOW_UP_SYSTEM,
     MAX_QUERIES,
     SPLIT_SYSTEM,
     SYSTEM,
-    _Claims,
     _FollowUp,
     _nothing_found,
     _prompt,
@@ -62,6 +61,27 @@ from graphme.adapters.storage.hybrid_search import (
     linked_without_answered_quotes,
     numbers_named,
 )
+from graphme.adapters.storage.link_ranking import (
+    LINKED_DOCUMENTS as LINKED_DOCUMENTS,
+)
+from graphme.adapters.storage.link_ranking import (
+    GraphSource as GraphSource,
+)
+from graphme.adapters.storage.link_ranking import (
+    LinkedDocument as LinkedDocument,
+)
+from graphme.adapters.storage.link_ranking import LinkedFrom as LinkedFrom
+from graphme.adapters.storage.link_ranking import (
+    LinkedPassage as LinkedPassage,
+)
+from graphme.adapters.storage.link_ranking import (
+    _closeness_in,
+    _marked,
+    _named_in,
+)
+from graphme.adapters.storage.link_ranking import _once as _once
+from graphme.adapters.storage.link_ranking import promoted as promoted
+from graphme.adapters.storage.link_ranking import relevant_links as relevant_links
 from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace, checked_name
 from graphme.adapters.storage.similar_documents import SimilarDocuments
 from graphme.adapters.storage.workspace_scope import DEFAULT_SCOPE, WorkspaceScope
@@ -70,7 +90,7 @@ from graphme.application.corpus_links import documents_named
 from graphme.application.embedded_documents import shown_name
 from graphme.application.graph_chunks import CHUNK_RULE, chunks
 from graphme.application.passage_scores import IMPORTANCE_RULE, centroid, importance
-from graphme.application.versions import Member, VersionOf, by_document, family_key, versions_of
+from graphme.application.versions import Member, by_document, fold_versions
 from graphme.application.visual_crops import CROP_ASSET_KEY, read_crop
 from graphme.config import LINK_DISCOUNT
 from graphme.domain.text_match import estimated_tokens, folded
@@ -97,9 +117,6 @@ LINK_CANDIDATES = 6
 question as a whole (their centroids): a document linked to dozens is not read through all
 of them, and a few more than LINKED_DOCUMENTS leave room for one whose best passage is
 nearer than its whole."""
-LINKED_DOCUMENTS = 4
-"""Linked documents a found passage brings along at each hop, the ones nearest the question:
-a much-cited paper is linked to dozens, and all of them is a context nobody answers from."""
 SAMPLED_DOCUMENTS = 200
 """Documents a passage each is taken from to see which languages the space is written in."""
 ANSWER_PICTURES = 16
@@ -277,59 +294,6 @@ def named_phrases(question: str, said: Sequence[str]) -> tuple[str, ...]:
         phrase for phrase in (*said, *numbers_named(question)) if phrase.strip()))
 
 
-def relevant_links(linked: Sequence[dict[str, Any]], floor: float) -> list[dict[str, Any]]:
-    """The linked documents something says are about the question: each keeps only its
-    passages whose cosine reaches `floor` (`vector.similarity.cosine` gives (1 + cos) / 2, as
-    the index does), and one with none left is not brought along -- a link says two documents
-    belong together, not that the other one answers this question."""
-    kept = []
-    for doc in linked:
-        near = [p for p in doc["passages"] if 2 * p["score"] - 1 >= floor]
-        if near:
-            kept.append({**doc, "passages": near})
-    return kept
-
-
-def promoted(sources: Sequence[GraphSource], discount: float, named: set[str],
-             closeness: Mapping[str, float]) -> list[GraphSource]:
-    """`sources` with each linked document ranked by its own passages: its best passage's
-    closeness to the question, times `discount` for each hop past the first -- none when the
-    question names it -- set against each found passage's `closeness`, the same measure of
-    the same question vector (a found passage's fused score ranks it within its search and
-    says nothing of how near it is). One nearer than a found passage stands in its place as
-    that passage of its own, with the place's score, saying how it was reached
-    (`promoted_from`); it leaves the document it was reached from, taking along the hop-3
-    documents reached through it. A found document the question names keeps its place ahead
-    (`named_first`), and a passage with no closeness -- a search by words alone -- is passed
-    by none. Only the order changes: every document shown before is shown, and no other."""
-    near = dict(closeness)
-    rows = [(source, list(source.linked)) for source in sources]
-    reached = sorted(
-        ((best.score * (1.0 if doc.document_id in named else discount ** (doc.hop - 1)),
-          doc, best)
-         for _, linked in rows for doc in linked if doc.passages
-         for best in [max(doc.passages, key=lambda p: p.score)]),
-        key=lambda each: -each[0])
-    for score, doc, best in reached:
-        at = next((i for i, (found, _) in enumerate(rows)
-                   if found.document_id not in named and found.id in near
-                   and score > near[found.id]), None)
-        if at is None:
-            continue
-        parent, linked = next(row for row in rows if doc in row[1])
-        carried = [d for d in linked if d.hop == 3 and d.via == doc.document_id]
-        for each in [doc, *carried]:
-            linked.remove(each)
-        near[best.id] = score  # one ranked after it stays after it
-        rows.insert(at, (GraphSource(
-            id=best.id, score=rows[at][0].score, document_id=doc.document_id, file=doc.file,
-            members=best.members, context=best.text, linked=carried, modified=doc.modified,
-            workspace=parent.workspace,
-            promoted_from=LinkedFrom(via=doc.via, hop=doc.hop, direction=doc.direction)),
-            carried))
-    return [replace(source, linked=linked) for source, linked in rows]
-
-
 def within_budget(items: Sequence[RetrieverResultItem], budget: int = ANSWER_TOKENS
                   ) -> list[RetrieverResultItem]:
     """The front of `items` the answer reads: as many as fit in `budget` tokens, in order --
@@ -351,80 +315,6 @@ this is short, unlike a page reading's schedule."""
 
 class GraphNotEmbedded(RuntimeError):
     """A question was asked of a space nothing was embedded in yet."""
-
-
-@dataclass(frozen=True, slots=True)
-class LinkedPassage:
-    """A passage of a linked document, brought along because it is near the question."""
-
-    id: str
-    score: float
-    """Its similarity to the question."""
-    members: list[str]
-    text: str
-
-
-@dataclass(frozen=True, slots=True)
-class LinkedDocument:
-    """A document reached from a found passage's document by following the links between
-    documents: hop 2 is linked to that document, hop 3 to a hop-2 document."""
-
-    document_id: str
-    file: str
-    hop: int
-    via: str
-    """The document it was reached from."""
-    direction: str
-    """How `via` is linked to it: "cites" it, is "cited_by" it, or is "similar" to it."""
-    passages: list[LinkedPassage]
-    modified: float | None = None
-    """When its file was last changed (`Document.modified_at`)."""
-
-
-@dataclass(frozen=True, slots=True)
-class LinkedFrom:
-    """Where a linked document ranked among the found ones (`promoted`) was reached from."""
-
-    via: str
-    hop: int
-    direction: str
-
-
-@dataclass(frozen=True, slots=True)
-class GraphSource:
-    """A passage an answer was given, and the documents the graph reached from its own:
-    the passage's document is hop 1, the documents linked to it hop 2, theirs hop 3."""
-
-    id: str
-    score: float
-    document_id: str
-    file: str
-    members: list[str]
-    """The units it covers, in reading order."""
-    context: str
-    """The passage exactly as the model saw it, with what the graph brought along."""
-    linked: list[LinkedDocument] = field(default_factory=list)
-    modified: float | None = None
-    """When its document's file was last changed (`Document.modified_at`)."""
-    origin: str | None = None
-    """The mail it came from, or the mail that carried its document (`mail_origin`)."""
-    workspace: str | None = None
-    """The workspace it was found in, once said (`find_across`, `ask_across`, the server)."""
-    promoted_from: LinkedFrom | None = None
-    """Set when this is a linked document's passage ranked among the found ones (`promoted`)."""
-    versions: list[VersionOf] = field(default_factory=list)
-    """The other documents of its family, folded under it (`_once`)."""
-
-
-@dataclass(frozen=True, slots=True)
-class Claim:
-    """One thing an answer says, checked against the passages it cites."""
-    text: str
-    """As the answer writes it."""
-    supported: bool
-    correction: str | None
-    """When unsupported: the claim as the passages say it; None when they say nothing of it."""
-    files: list[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -667,23 +557,10 @@ class GraphRag:
         return replace(answer, claims=claims or [], checked=claims is not None)
 
     def checked(self, answer: str, items: Sequence[RetrieverResultItem]) -> list[Claim] | None:
-        """What each claim of `answer` comes to against the passages it cites (all of them
-        when it cites none); None when the check could not be made -- the answer stands."""
-        cited = set(re.findall(r"\[([^\]]+)\]", answer))
-        read = [item for item in items
-                if shown_name(str((item.metadata or {}).get("file", ""))) in cited] or items
-        content = f"Answer:\n{answer}\n\nPassages:\n" + "\n\n".join(i.content for i in read)
-        try:
-            reply = self._complete(system=CHECK_SYSTEM, content=content,
-                                   schema=strict_response_schema(_Claims), name="answer_check")
-            written = _Claims.model_validate_json(reply)
-        except Exception as error:  # noqa: BLE001 -- an unchecked answer still goes out
-            _log.warning("answer not checked -- %s", str(error)[:200])
-            return None
-        # A claim the answer does not hold is the check's own writing: it proves nothing.
-        held = folded(answer)
-        return [Claim(c.text, c.supported, None if c.supported else c.correction, c.files)
-                for c in written.claims if folded(c.text) and folded(c.text) in held]
+        """What each claim of `answer` comes to against the passages carrying the files it
+        cites (`answer_check.checked`); None when it cites none or the check could not be
+        made -- the answer stands."""
+        return _claims_checked(answer, items, self._complete)
 
     def read(self, question: str, *, documents: int, history: Sequence[Turn] = (),
              only: frozenset[str] | None = None,
@@ -776,13 +653,7 @@ class GraphRag:
         Copies and versions of one document (`family`, `_families`) fold to the best-ranked of
         them (`fold_versions`) once `only` and `exclude` are applied."""
         queries, said, searched = self._asked(question, history)
-        if asked := (only or frozenset()) | exclude:  # each as the graph holds it now
-            now = self.current(asked)
-            only = None if only is None else frozenset(now[i] for i in only if i in now)
-            exclude = frozenset(now[i] for i in exclude if i in now)
-        # a document left out takes its copies and versions with it, save one the scope names
-        exclude = exclude | {m.document_id for d in exclude for m in (family or {}).get(d, ())
-                             if only is None or m.document_id not in only}
+        only, exclude = self._resolved_scope(only, exclude, family or {})
 
         def search() -> list[neo4j.Record]:
             retriever = self._retriever()
@@ -812,6 +683,18 @@ class GraphRag:
         return _marked(self._linked(named_only(ranked, named) if named else filled(order, taken),
                                     searched, only, exclude), every)
 
+    def _resolved_scope(self, only: frozenset[str] | None, exclude: frozenset[str],
+                        family: Mapping[str, Sequence[Member]]
+                        ) -> tuple[frozenset[str] | None, frozenset[str]]:
+        """`only` and `exclude` as the graph holds each document now (`current`), and
+        `exclude` with the copies and versions of what it leaves out -- save one `only` names."""
+        if asked := (only or frozenset()) | exclude:
+            now = self.current(asked)
+            only = None if only is None else frozenset(now[i] for i in only if i in now)
+            exclude = frozenset(now[i] for i in exclude if i in now)
+        return only, exclude | {m.document_id for d in exclude for m in family.get(d, ())
+                                if only is None or m.document_id not in only}
+
     def current(self, ids: frozenset[str]) -> dict[str, str]:
         """Each of `ids` to the document the graph holds for it now: itself, or the one read
         from its file since it was edited; one deleted since is left out
@@ -821,16 +704,17 @@ class GraphRag:
 
     def _families(self) -> dict[str, tuple[Member, ...]]:
         """Each document of a family of copies and versions, by id, to its whole family -- read
-        for each question, so an ungrouped document stands alone at once."""
-        return by_document(self._space.version_pairs())
+        once a turn (`_shared`), so an ungrouped document stands alone from the next."""
+        return cast(dict[str, tuple[Member, ...]], self._shared(
+            ("families",), lambda: by_document(self._space.version_pairs())))
 
     def _named(self, phrases: Sequence[str]) -> set[str]:
         """The documents `phrases` name, found or not."""
         if not phrases:
             return set()
-        # ponytail: the space's identities read for each question naming something; keep
-        # them with the graph's fingerprint if a space of thousands makes this slow.
-        return documents_named(phrases, self._space.identities())
+        # ponytail: the space's identities read once a turn naming something; keep them with
+        # the graph's fingerprint if a space of thousands makes this slow.
+        return documents_named(phrases, self._shared(("identities",), self._space.identities))
 
     def _linked(self, found: list[neo4j.Record], question: str,
                 only: frozenset[str] | None = None,
@@ -1206,35 +1090,6 @@ def _item(record: neo4j.Record) -> RetrieverResultItem:
     )
 
 
-def _marked(records: list[neo4j.Record], named: set[str]) -> list[neo4j.Record]:
-    """`records` with each found and linked document saying whether the question names it
-    (`named`), for `promoted` to read once the passages are items."""
-    if not named:
-        return records
-    return [neo4j.Record({**dict(record),  # type: ignore[no-untyped-call]
-                          "named": record["document_id"] in named,
-                          "linked": [{**doc, "named": doc["document_id"] in named}
-                                     for doc in record["linked"]]})
-            for record in records]
-
-
-def _closeness_in(items: Sequence[RetrieverResultItem]) -> dict[str, float]:
-    """Each found passage's closeness to the question (`_linked`), by its id; none when the
-    question was searched by its words alone."""
-    return {m["id"]: m["closeness"] for item in items for m in [item.metadata or {}]
-            if m.get("closeness") is not None}
-
-
-def _named_in(items: Sequence[RetrieverResultItem]) -> set[str]:
-    """The documents among `items`, found or linked, that the question names (`_marked`)."""
-    named: set[str] = set()
-    for item in items:
-        found = item.metadata or {}
-        named |= {found["document_id"]} if found.get("named") else set()
-        named |= {doc["document_id"] for doc in found.get("linked", []) if doc.get("named")}
-    return named
-
-
 MAIL_CARRIERS = 3
 """How many of the messages that carried a document are named beside its passages."""
 
@@ -1289,70 +1144,6 @@ def _composed(text: str) -> str:
 
 _HOW = {"cites": "cites", "cited_by": "is cited by", "similar": "is similar to"}
 """How the document a link starts from stands to the one it reaches, as the model reads it."""
-
-
-def fold_versions(ranked: Sequence[Any], family: Mapping[str, Sequence[Member]],
-                  only: frozenset[str] | None = None) -> list[Any]:
-    """`ranked` with each family (`versions.by_document`) shown by its best-ranked member: the
-    passages of its other members are left out, so a document's copies take no place of the
-    documents asked for and the answer reads its words once. A question scoped to documents
-    (`only`) folds nothing: every document in it was named."""
-    if only is not None:
-        return list(ranked)
-    standing: dict[str, str] = {}
-    return [passage for passage in ranked
-            if standing.setdefault(family_key(family, passage["document_id"]),
-                                   passage["document_id"]) == passage["document_id"]]
-
-
-def _once(records: list[neo4j.Record], *, each_folder: bool = False,
-          family: Mapping[str, Sequence[Member]] | None = None) -> list[neo4j.Record]:
-    """Each found passage with the documents linked to its own that it brings along: at each
-    hop the LINKED_DOCUMENTS whose passages come nearest the question, hop 2 before hop 3, a
-    hop-3 document only from a hop-2 one it kept. A document is shown once, at the first hop
-    that reaches it -- one a question found (hop 1) is never brought along again, and a linked
-    one goes with the best-ranked passage that reaches it.
-
-    An answer takes LINKED_DOCUMENTS at hop 3 in all, so what the model reads stays short;
-    `each_folder` -- the Q folder page, where every hop-2 document is a folder -- takes that
-    many under each hop-2 document instead.
-
-    A document stands for its `family` (`versions.by_document`): a version of one shown is not
-    brought along, and each found document carries its family's others not shown (`versions`)."""
-    family = family or {}
-
-    def best(doc: dict[str, Any]) -> float:
-        return max((p["score"] for p in doc["passages"]), default=-1.0)
-
-    def key(doc: str) -> str:
-        return family_key(family, doc)
-
-    shown = {key(record["document_id"]) for record in records}
-    kept: list[list[dict[str, Any]]] = [[] for _ in records]
-    for hop in (2, 3):
-        for record, mine in zip(records, kept, strict=True):
-            reachable = {doc["document_id"] for doc in mine}
-            candidates = sorted(
-                (doc for doc in record["linked"]
-                 if doc["hop"] == hop and (hop == 2 or doc["via"] in reachable)),
-                key=best, reverse=True)
-            taken: dict[str | None, int] = {}
-            for doc in candidates:
-                under = doc["via"] if each_folder and hop == 3 else None
-                if taken.get(under, 0) < LINKED_DOCUMENTS and key(doc["document_id"]) not in shown:
-                    shown.add(key(doc["document_id"]))
-                    mine.append(doc)
-                    taken[under] = taken.get(under, 0) + 1
-    seen = {record["document_id"] for record in records} | {
-        doc["document_id"] for mine in kept for doc in mine}
-
-    def versions(doc: str) -> list[VersionOf]:
-        return versions_of(family[doc], seen) if doc in family else []
-
-    return [neo4j.Record({**dict(record),  # type: ignore[no-untyped-call]
-                          "versions": versions(record["document_id"]),
-                          "linked": mine})
-            for record, mine in zip(records, kept, strict=True)]
 
 
 def _source(item: RetrieverResultItem) -> GraphSource:

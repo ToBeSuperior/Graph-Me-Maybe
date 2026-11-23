@@ -15,7 +15,7 @@ import { ResultTree, type Row } from '../search/ResultTree';
 export const TOP_FOUND = 3;
 const EVERY_FORMAT = new Set<string>();
 
-export function FoundCard({ trail, question, queries = [], compact = false, selected, onSelect, cited, lit, onOnly, onWithout }: {
+export function FoundCard({ trail, question, queries = [], compact = false, selected, onSelect, cited, lit, onOnly, onWithout, busy }: {
   trail: Trail;
   question: string;
   /** What was searched, when the question was asked as several searches. */
@@ -28,6 +28,8 @@ export function FoundCard({ trail, question, queries = [], compact = false, sele
   lit: string | null;
   onOnly?: (doc: TrailDoc) => void;
   onWithout?: (doc: TrailDoc) => void;
+  /** A turn is being asked: asking about one document now would stop it. */
+  busy?: string;
 }) {
   const t = useT();
   const [all, setAll] = useState(false);
@@ -47,13 +49,13 @@ export function FoundCard({ trail, question, queries = [], compact = false, sele
         </MenuTrigger>
         <MenuContent>
           <MenuItem onSelect={() => onSelect(row)}><Eye className="mr-2 size-3.5" />{t('openPreview')}</MenuItem>
-          {onOnly && <MenuItem onSelect={() => onOnly(doc)}><Filter className="mr-2 size-3.5" />{t('askOnlyThis')}</MenuItem>}
-          {onWithout && <MenuItem onSelect={() => onWithout(doc)}><FilterX className="mr-2 size-3.5" />{t('askWithout')}</MenuItem>}
+          {onOnly && <MenuItem disabled={!!busy} title={busy} onSelect={() => onOnly(doc)}><Filter className="mr-2 size-3.5" />{t('askOnlyThis')}</MenuItem>}
+          {onWithout && <MenuItem disabled={!!busy} title={busy} onSelect={() => onWithout(doc)}><FilterX className="mr-2 size-3.5" />{t('askWithout')}</MenuItem>}
           <MenuItem onSelect={() => void openOriginal(doc.id, t)}><ExternalLink className="mr-2 size-3.5" />{t('openOriginal')}</MenuItem>
         </MenuContent>
       </Menu>
     );
-  }, [t, onSelect, onOnly, onWithout]);
+  }, [t, onSelect, onOnly, onWithout, busy]);
 
   return (
     <section className="rounded-xl border border-line bg-panel px-2 py-2" aria-label={t('foundTitle')}>

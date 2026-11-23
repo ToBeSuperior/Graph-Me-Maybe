@@ -191,16 +191,91 @@ def test_a_file_held_in_two_other_workspaces_names_the_first_listed(
 def test_a_scope_of_too_many_files_is_turned_away_before_any_is_read(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from graphme.server import app as server_app
-
     for n in range(3):
         _file(tmp_path, f"invented-{n}.docx", b"invented %d" % n)
-    monkeypatch.setattr(server_app, "MAX_SCOPE_FILES", 2, raising=False)
+    _cap(monkeypatch, 2)
     read: list[Path] = []
-    monkeypatch.setattr(server_app, "content_hash", lambda path: read.append(path))
+    monkeypatch.setattr(state, "content_hash", lambda path: read.append(path))
 
     said = client.post("/v1/scope", json={"paths": [str(tmp_path)]})
 
     assert said.status_code == 400
-    assert "3 files" in said.json()["detail"] and "fewer" in said.json()["detail"]
+    assert "more than 2 files" in said.json()["detail"] and "fewer" in said.json()["detail"]
     assert read == []
+
+
+def _cap(monkeypatch: pytest.MonkeyPatch, most: int) -> None:
+    from graphme.server import space_jobs
+
+    monkeypatch.setattr(space_jobs, "MAX_SCOPE_FILES", most)
+
+
+def test_a_scope_stops_walking_once_it_holds_too_many_files(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from graphme.application import ingest
+
+    for name in ("a", "b", "c", "d", "e", "f"):
+        (tmp_path / name).mkdir()
+        _file(tmp_path / name, "invented.docx", name.encode())
+    _cap(monkeypatch, 1)
+    listed: list[Path] = []
+    real = ingest._listed
+
+    def counted(here: Path, *args: Any) -> Any:
+        listed.append(here)
+        return real(here, *args)
+
+    monkeypatch.setattr(ingest, "_listed", counted)
+
+    said = client.post("/v1/scope", json={"paths": [str(tmp_path)]})
+
+    assert said.status_code == 400
+    assert len(listed) < 7  # the walk stopped: not every one of the seven folders was listed
+
+
+def test_a_file_kept_online_only_is_given_back_once_its_content_is_known(
+    demo: Demo, space: FakeSpace, client: TestClient, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clouded = _file(tmp_path, "cloud.docx", b"invented cloud memo")
+    local = _file(tmp_path, "local.docx", b"invented local memo")
+    space.by_hash[state.content_hash(clouded) or ""] = "cloud-id"
+    monkeypatch.setattr(state, "online_only", lambda path: Path(path) == clouded)
+    given: list[Path] = []
+    monkeypatch.setattr(state, "evict", lambda paths: given.extend(paths) or len(paths))
+
+    said = client.post("/v1/scope", json={"paths": [str(clouded), str(local)]}).json()
+
+    assert said["document_ids"] == ["cloud-id"]
+    assert given == [clouded]  # the one downloaded to be hashed, and only it
+
+
+def test_another_sites_page_cannot_ask_for_a_scope(demo: Demo, tmp_path: Path) -> None:
+    memo = _file(tmp_path, "memo.docx", b"invented memo")
+    demo.settings = demo.settings.model_copy(update={"server_key": "invented-server-key"})
+    key = {"Authorization": "Bearer invented-server-key"}
+    foreign = TestClient(create_app(demo), base_url="http://elsewhere.invented")
+    local = TestClient(create_app(demo), base_url="http://127.0.0.1:8765")
+
+    # the key is no licence from another site: a scope reads this machine's files
+    told = foreign.post("/v1/scope", json={"paths": [str(memo)]}, headers=key)
+    page = local.post("/v1/scope", json={"paths": [str(memo)]},
+                      headers={**key, "origin": "https://elsewhere.invented"})
+    ours = local.post("/v1/scope", json={"paths": [str(memo)]}, headers=key)
+
+    assert told.status_code == 403 and page.status_code == 403
+    assert ours.status_code == 200
+
+
+def test_a_scope_is_found_without_the_server(
+    demo: Demo, space: FakeSpace, tmp_path: Path
+) -> None:
+    held = _file(tmp_path, "memo.docx", b"invented memo")
+    space.by_hash[state.content_hash(held) or ""] = "memo-id"
+
+    said = demo.scope_of([str(held), str(tmp_path / "gone.docx")],
+                         space_of=lambda workspace: space)
+
+    assert said["document_ids"] == ["memo-id"]
+    assert said["missing"] == [str(tmp_path / "gone.docx")]

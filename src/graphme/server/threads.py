@@ -4,18 +4,29 @@ browser's storage -- so deleting a workspace deletes its threads with its folder
 from __future__ import annotations
 
 import builtins
+import contextlib
 import logging
-import os
 import re
 import secrets
-import tempfile
 import threading
 import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from pydantic import ValidationError
 
-from graphme.server.models import Thread, ThreadSummary, ThreadTurn
+from graphme.files import write_atomic
+from graphme.server.models import (
+    Answer,
+    Found,
+    Question,
+    Thread,
+    ThreadSummary,
+    ThreadTurn,
+    Turn,
+    TurnRequest,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -25,6 +36,16 @@ _ID = re.compile(r"[0-9a-f]{16}")
 _WRITING = threading.Lock()
 """Every change is read, changed and written under it: two turns at once both kept."""
 # ponytail: one lock for every store; a lock a thread if conversations ever contend.
+
+
+def question_of(thread: Thread, body: TurnRequest) -> Question:
+    """A turn's question as it is asked: after the thread's answered turns, about its scope,
+    in its workspace."""
+    return Question(
+        question=body.question, documents=body.documents, workspace=thread.workspace,
+        only=thread.scope, exclude=body.exclude,
+        history=[Turn(question=t.question, answer=t.answer.answer)
+                 for t in thread.turns if t.answer is not None])
 
 
 class ThreadStore:
@@ -102,6 +123,37 @@ class ThreadStore:
             self._write(thread)
         return thread
 
+    def keep_turn(self, thread_id: str, made: ThreadTurn, got: Mapping[str, Any]) -> bool:
+        """`made` with what the turn got (`found`, `answer`) added to the thread; False when
+        the thread was deleted meanwhile. An answer cut off before its check is kept
+        unchecked."""
+        if "found" in got:
+            made.found = Found.model_validate(got["found"])
+        if "answer" in got:
+            made.answer = Answer.model_validate({
+                **(made.found.model_dump(include={"queries", "text_only"})
+                   if made.found else {}), **got["answer"]})
+        try:
+            self.append(thread_id, made)
+        except KeyError:
+            return False
+        return True
+
+    def rescoped(self, thread: Thread, exclude: builtins.list[str] | None,
+                 current: Callable[[frozenset[str]], Mapping[str, str]],
+                 ) -> builtins.list[str] | None:
+        """The thread's scope as the graph holds it now (`current`: each id to the one the
+        graph holds it under): a document edited and built again since it was chosen is named
+        by its new reading, and the thread keeps that."""
+        if not thread.scope:
+            return thread.scope
+        now = current(frozenset(thread.scope) | frozenset(exclude or ()))
+        scope = list(dict.fromkeys(now.get(i, i) for i in thread.scope))
+        if scope != thread.scope:
+            with contextlib.suppress(KeyError):  # deleted meanwhile: the turn says so
+                self.patch(thread.id, scope=scope, scope_given=True)
+        return scope
+
     def _path(self, thread_id: str) -> Path:
         if not _ID.fullmatch(thread_id):
             raise KeyError(thread_id)
@@ -109,14 +161,4 @@ class ThreadStore:
 
     def _write(self, thread: Thread) -> None:
         """Written whole beside the file, then put in its place: a crash leaves the old one."""
-        self.folder.mkdir(parents=True, exist_ok=True)
-        handle, temporary = tempfile.mkstemp(dir=self.folder, suffix=".tmp")
-        try:
-            with os.fdopen(handle, "w", encoding="utf-8") as file:
-                file.write(thread.model_dump_json())
-                file.flush()
-                os.fsync(file.fileno())  # on disk before it takes the old file's place
-            os.replace(temporary, self._path(thread.id))
-        except BaseException:
-            Path(temporary).unlink(missing_ok=True)
-            raise
+        write_atomic(self._path(thread.id), thread.model_dump_json())

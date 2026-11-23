@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import contextlib
-import os
-import tempfile
 from pathlib import Path
 
 from graphme.domain.ids import sha256_bytes
+from graphme.files import write_atomic
 
 
 class LocalAssetStore:
@@ -22,15 +21,7 @@ class LocalAssetStore:
         target = self.path_for(digest, suffix)
         if target.exists():
             return digest
-        target.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(dir=target.parent, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "wb") as stream:
-                stream.write(content)
-            os.replace(tmp_name, target)
-        except BaseException:
-            Path(tmp_name).unlink(missing_ok=True)
-            raise
+        write_atomic(target, content, sync=False)
         return digest
 
     def read(self, content_hash: str, suffix: str = "") -> bytes:

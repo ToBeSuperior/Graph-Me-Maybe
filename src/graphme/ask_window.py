@@ -9,8 +9,11 @@ be asked there (`useScopeDrop`)."""
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
+import time
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -19,6 +22,7 @@ import httpx
 
 from graphme import agent, agent_file, processes
 from graphme.agent_file import pid_alive, read_server_file
+from graphme.files import write_atomic
 
 PLACE = "mini-window.json"
 """Where the window was last left and how see-through, in the app home: the page's storage is no
@@ -51,9 +55,49 @@ def _kept(home: Path) -> dict[str, Any]:
 
 
 def _keep(home: Path, **changed: Any) -> None:
-    fresh = home / f"{PLACE}.tmp"
-    fresh.write_text(json.dumps({**_kept(home), **changed}), encoding="utf-8")
-    fresh.replace(home / PLACE)  # whole: a write cut short leaves the last place
+    write_atomic(home / PLACE, json.dumps({**_kept(home), **changed}))
+
+
+PENDING = "ask-pending"
+LOCK = "ask-collector.lock"
+_STALE = 30.0
+"""Seconds after which a collector's lock is taken to be left by a process that died."""
+
+
+def collect(home: Path, path: str, *, window: float = 0.7) -> list[str] | None:
+    """Windows starts the right-click verb once per picked file. Each process leaves its path in
+    `ask-pending/`, and the first to take the lock waits `window` seconds and returns every path
+    left (its own too); the others return None -- theirs is handed over. A path is claimed by
+    deleting its file, so none is opened twice or lost."""
+    pending = home / PENDING
+    pending.mkdir(parents=True, exist_ok=True)
+    mine = pending / f"{os.getpid()}-{uuid.uuid4().hex}"
+    mine.write_text(path, encoding="utf-8")
+    lock = home / LOCK
+    for _ in range(2):
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime < _STALE:
+                    return None
+                lock.unlink()
+            except FileNotFoundError:
+                pass
+    else:
+        return None
+    time.sleep(window)
+    lock.unlink(missing_ok=True)  # before reading: a late file is seen, or its owner leads
+    claimed: list[str] = []
+    for file in sorted(pending.iterdir()):
+        try:
+            text = file.read_text(encoding="utf-8")
+            file.unlink()
+        except OSError:  # claimed by another collector
+            continue
+        claimed.append(text)
+    return claimed or None
 
 
 def clamped(value: float) -> float:

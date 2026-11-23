@@ -280,3 +280,46 @@ def test_a_thread_deleted_mid_turn_says_so(demo: Demo, client: TestClient,
                                  json={"question": "Hold time?"}).text)
     assert [name for name, _ in events] == ["searched", "answered", "checked", "error"]
     assert "deleted" in events[-1][1]["message"]
+
+
+def test_another_sites_page_cannot_change_a_thread(demo: Demo, rag: StagedRag) -> None:
+    from graphme.server import create_app
+
+    demo.settings = demo.settings.model_copy(update={"server_key": "invented-server-key"})
+    key = {"Authorization": "Bearer invented-server-key"}
+    local = TestClient(create_app(demo), base_url="http://127.0.0.1:8765", headers=key)
+    foreign = TestClient(create_app(demo), base_url="http://elsewhere.invented", headers=key)
+    page = {"origin": "https://elsewhere.invented"}
+    thread = local.post("/v1/threads", json={}).json()
+    one = f"/v1/threads/{thread['id']}"
+
+    for told in (foreign.post("/v1/threads", json={}),
+                 local.post("/v1/threads", json={}, headers=page),
+                 foreign.patch(one, json={"title": "Taken"}),
+                 foreign.delete(one),
+                 foreign.post(f"{one}/turns", json={"question": "Hold time?"},
+                              headers={"Accept": "application/json"})):
+        assert told.status_code == 403, told
+    assert local.get(one).json()["title"] == "" and local.get(one).json()["turns"] == []
+    assert local.patch(one, json={"title": "Ovens"}).status_code == 200
+
+
+def test_a_turn_is_kept_without_the_server(tmp_path: Path) -> None:
+    from graphme.server.threads import question_of
+
+    store = ThreadStore(tmp_path)
+    thread = store.create(["d", "e"], "default")
+    asked = question_of(thread, api.TurnRequest(question="Hold time?", exclude=["e"]))
+    assert asked.only == ["d", "e"] and asked.exclude == ["e"] and asked.workspace == "default"
+
+    scope = store.rescoped(thread, ["e"], lambda ids: {"d": "d2", "e": "e"})
+    made = api.ThreadTurn(question="Hold time?", scope=scope, asked_at=1.0)
+    got = {"found": {"sources": [], "text_only": False, "queries": ["q"]},
+           "answer": {"answer": "4 h", "sources": []}}
+
+    assert store.keep_turn(thread.id, made, got)
+    kept = store.get(thread.id)
+    assert kept.scope == ["d2", "e"] and kept.turns[0].answer is not None
+    assert kept.turns[0].answer.queries == ["q"]  # the search's, carried onto the answer
+    store.delete(thread.id)
+    assert not store.keep_turn(thread.id, made, got)  # deleted meanwhile

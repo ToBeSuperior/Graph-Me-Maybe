@@ -3,20 +3,16 @@
 // unpinned. Its address names the conversation only; the window hands the page the picked paths,
 // which are asked as dropped paths are: files no graph holds built first, showing how far, and
 // those another workspace holds offered to be asked there.
-import { useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, MessagesSquare, Pin, PinOff } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
-import { api, call, errorText } from '../../api/client';
+import { errorText } from '../../api/client';
 import { Button, Empty, Skeleton } from '../../components/ui';
 import { useT } from '../../lib/i18n';
-import { graphStamp } from '../../lib/kept';
-import { keys, useBuild, useCorpusMap, useThread, useWorkspaces } from '../../lib/queries';
-import { Composer, withoutDocument } from './Composer';
-import { Turn, type TurnShape } from './Turn';
-import { useScopeDrop } from './useScopeDrop';
-import { useTurnStream } from './useTurnStream';
+import { useWorkspaces } from '../../lib/queries';
+import { Composer } from './Composer';
+import { Turn } from './Turn';
+import { useConversation } from './useConversation';
 
 /** What the small window lets its page ask of it (`MiniApi`); none in a browser. */
 export interface MiniApi {
@@ -45,45 +41,15 @@ function useWindowApi(): MiniApi | undefined {
 
 export function MiniPage({ id }: { id: string }) {
   const t = useT();
-  const client = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
-  const thread = useThread(id);
-  const map = useCorpusMap();
   const workspaces = useWorkspaces();
-  const { data: build } = useBuild();
-  const { live, ask, stop } = useTurnStream(id);
   const bridge = useWindowApi();
   const [pinned, setPinned] = useState(true);
   const [opacity, setOpacity] = useState(100);
   useEffect(() => { void bridge?.opacity?.().then((v) => setOpacity(Math.round(v * 100))).catch(() => {}); }, [bridge]);
-  const [queued, setQueued] = useState<{ question: string; documents?: number } | null>(null);
-  const end = useRef<HTMLDivElement>(null);
-
-  const kept = thread.data;
-  const active = workspaces.data?.active ?? kept?.workspace ?? '';
-  const here = !!kept && kept.workspace === active;
-  const stamp = useMemo(() => (map.data && here ? graphStamp(map.data) : null), [map.data, here]);
-  const labels = useMemo(() => new Map(map.data?.documents.map((d) => [d.id, d.label])), [map.data]);
-
-  const setScope = useCallback(async (scope: string[] | null) => {
-    try {
-      const changed = await call(api.PATCH('/v1/threads/{thread_id}', { params: { path: { thread_id: id } }, body: { scope } }));
-      client.setQueryData(keys.thread(id), changed);
-    } catch (error) {
-      toast.error(t('scopeFailed'), { description: errorText(error) });
-      throw error;
-    }
-  }, [client, id, t]);
-
-  const onScope = useCallback(async (documents: string[], workspace: string) => {
-    if (kept && workspace !== kept.workspace) {
-      // another workspace holds them: asked there, in a conversation of its own
-      const made = await call(api.POST('/v1/threads', { body: { scope: documents, workspace } }));
-      navigate(`/mini/${made.id}`, { state: { scoped: true } });
-    } else await setScope(documents);
-  }, [kept, navigate, setScope]);
-  const scoped = useScopeDrop({ active, onScope });
+  const chat = useConversation(id, { openThere: (made) => navigate(`/mini/${made}`, { state: { scoped: true } }) });
+  const { thread, build, kept, here, stamp, dropped: scoped, queued, end, all, running, askNow } = chat;
 
   // The picked files, asked once the conversation and the workspaces are known: built first
   // when no graph holds them. Only the first conversation does it -- one begun for the files
@@ -96,29 +62,15 @@ export function MiniPage({ id }: { id: string }) {
     void bridge.paths().then((paths) => (paths.length ? askPaths(paths) : undefined));
   }, [bridge, kept, workspaces.data, askPaths]);
 
-  const askNow = useCallback((question: string, documents?: number, exclude?: string[]) => {
-    void ask(question, { documents, stamp, exclude });
-  }, [ask, stamp]);
-  useEffect(() => {
-    if (queued && !scoped.waiting) { askNow(queued.question, queued.documents); setQueued(null); }
-  }, [queued, scoped.waiting, askNow]);
-
-  const turns: TurnShape[] = kept?.turns ?? [];
-  const showLive = !!live && turns.length <= live.after;
-  const all = showLive ? [...turns, live] : turns;
-  const latest = all.length - 1;
-  const last = all[latest];
-  useEffect(() => { end.current?.scrollIntoView?.({ block: 'end' }); }, [all.length, last?.found, last?.answer]);
-
   const pin = () => {
     const on = !pinned;
     setPinned(on);
     void bridge?.pin(on);
   };
-  const openMain = () => {
+  const openMain = useCallback(() => {
     if (bridge) void bridge.open_main(id);
     else window.open(`/c/${id}`, '_blank', 'noopener');
-  };
+  }, [bridge, id]);
 
   if (thread.isError) {
     return (
@@ -128,21 +80,19 @@ export function MiniPage({ id }: { id: string }) {
     );
   }
 
-  const shownWorkspace = (ws: string) => workspaces.data?.items?.find((i) => i.id === ws)?.name ?? ws;
   const groups = [...new Set(scoped.elsewhere.map((e) => e.workspace))];
   const note = (scoped.waiting || queued || groups.length || !here) && (
     <div className="flex flex-col gap-1">
       {scoped.waiting && <span role="status">{build && build.total ? t('scopeBuilding', build.done, build.total) : t('scopePreparing')}{queued && ` · ${t('askWhenReady')}`}</span>}
       {groups.map((ws) => (
         <span key={ws}>
-          {t('scopeElsewhere', scoped.elsewhere.filter((e) => e.workspace === ws).length, shownWorkspace(ws))}{' '}
+          {t('scopeElsewhere', scoped.elsewhere.filter((e) => e.workspace === ws).length, chat.shownWorkspace(ws))}{' '}
           <button type="button" className="font-medium text-accent-fg hover:underline" onClick={() => scoped.askThere(ws)}>{t('askThere')}</button>
         </span>
       ))}
-      {kept && !here && <span>{t('threadWorkspace', shownWorkspace(kept.workspace))}</span>}
+      {kept && !here && <span>{t('threadWorkspace', chat.shownWorkspace(kept.workspace))}</span>}
     </div>
   );
-  const running = showLive && live.stage !== 'stopped' && live.stage !== 'failed';
 
   return (
     <div className="flex h-dvh flex-col bg-bg text-fg">
@@ -166,21 +116,21 @@ export function MiniPage({ id }: { id: string }) {
         <div className="flex flex-col gap-6 px-3 py-3">
           {!kept ? <div className="space-y-3"><Skeleton className="h-10" /><Skeleton className="h-24" /></div>
             : all.map((turn, i) => (
-              <Turn key={i} turn={turn} stage={showLive && i === latest ? live.stage : undefined} now={stamp} compact
-                onOpenDocument={openMain} onStop={stop} onAskAgain={askNow} />
+              <Turn key={i} index={i} turn={turn} stage={chat.stage(i)} now={stamp} compact busy={running}
+                onOpenDocument={openMain} onStop={chat.stop} onAskAgain={askNow} />
             ))}
           <div ref={end} />
         </div>
       </div>
       <div className="px-3 pb-3">
         <Composer
-          scope={kept?.scope ? kept.scope.map((d) => ({ id: d, label: labels.get(d) ?? d })) : null}
+          scope={chat.scope}
           note={note || undefined}
           busy={running}
           compact
           autoFocus
-          onAsk={(question, documents) => (scoped.waiting ? setQueued({ question, documents }) : askNow(question, documents))}
-          onRemove={(doc) => { void setScope(doc ? withoutDocument(kept?.scope ?? null, doc) : null).catch(() => {}); }}
+          onAsk={chat.askBox}
+          onRemove={chat.removeScope}
           onDrop={scoped.drop}
         />
       </div>

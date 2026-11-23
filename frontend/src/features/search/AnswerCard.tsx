@@ -63,7 +63,7 @@ function drawn(text: string, inline: (part: string) => ReactNode[]): ReactNode[]
   });
 }
 
-export function AnswerCard({ state, answer, claims = [], checking = false, error, byLabel, onCite, onHover, onRetry, onCancel }: {
+export function AnswerCard({ state, answer, claims = [], checking = false, error, byLabel, onCite, onHover, onRetry, onCancel, busy }: {
   state: 'off' | 'pending' | 'done' | 'error';
   answer?: string;
   /** What the check said of the answer's statements. */
@@ -76,6 +76,8 @@ export function AnswerCard({ state, answer, claims = [], checking = false, error
   onHover: (doc: TrailDoc | null) => void;
   onRetry: () => void;
   onCancel: () => void;
+  /** Why the retry waits: another answer is being written. */
+  busy?: string;
 }) {
   const t = useT();
   const [more, setMore] = useState(false);
@@ -103,7 +105,7 @@ export function AnswerCard({ state, answer, claims = [], checking = false, error
         <span className="min-w-0 text-xs text-faint">{t('answerNote')}</span>
         <div className="ml-auto">
           {state === 'pending' && <Button size="sm" variant="ghost" onClick={onCancel}><Square className="size-3" />{t('stop')}</Button>}
-          {(state === 'error' || state === 'off') && <Button size="sm" variant="ghost" onClick={onRetry}><RotateCw className="size-3" />{t(state === 'off' ? 'writeAnswer' : 'retry')}</Button>}
+          {(state === 'error' || state === 'off') && <Button size="sm" variant="ghost" disabled={!!busy} title={busy} onClick={onRetry}><RotateCw className="size-3" />{t(state === 'off' ? 'writeAnswer' : 'retry')}</Button>}
         </div>
       </header>
       <div className="px-4 pb-3">

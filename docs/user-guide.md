@@ -213,7 +213,8 @@ its original.
   is written (see [retrieval](retrieval.md)).
 
 **Versions.** Copies and versions of one document — the same file under another name, or an
-edited version whose passages are mostly the same — are one group, told by what they say, never
+edited version whose passages are mostly the same, or the same text with an annex
+appended — are one group, told by what they say, never
 by their names. A search shows a group once, by its best-ranked file, with **+N versions**
 opening the others, their dates and the latest marked; the answer reads that one file. A document
 the question is scoped to is never folded away, and **ask again without this** leaves the whole

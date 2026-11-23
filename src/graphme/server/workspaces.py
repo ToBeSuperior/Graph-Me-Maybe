@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from graphme.files import write_atomic
 from graphme.server.jobs import Busy
 
 FIRST = "default"
@@ -143,9 +144,7 @@ class Workspaces:
     def mark_moved(self, workspace: str) -> None:
         said = sorted(self.moved() | {workspace})
         with self._lock:
-            kept = self.home / "moved.tmp"
-            kept.write_text(json.dumps(said), encoding="utf-8")
-            kept.replace(self.home / "moved.json")
+            write_atomic(self.home / "moved.json", json.dumps(said))
 
     def refuse_open(self, workspace: str) -> None:
         """Busy for the workspace open now; LookupError for one not listed."""
@@ -173,10 +172,7 @@ class Workspaces:
                            "kind": "documents", "account": None}]}
 
     def _write(self, said: dict[str, Any]) -> None:
-        self.home.mkdir(parents=True, exist_ok=True)
-        kept = self._file.with_suffix(".tmp")
-        kept.write_text(json.dumps(said, ensure_ascii=False, indent=1), encoding="utf-8")
-        kept.replace(self._file)
+        write_atomic(self._file, json.dumps(said, ensure_ascii=False, indent=1))
 
     @staticmethod
     def _find(said: dict[str, Any], workspace: str) -> dict[str, Any]:

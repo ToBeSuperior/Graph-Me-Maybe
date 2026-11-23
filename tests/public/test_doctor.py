@@ -225,3 +225,28 @@ def test_an_app_that_does_not_answer_says_to_quit_and_reopen(tmp_path: Path) -> 
 
     assert found["app"].fix == ("quit the app from its menu bar or tray icon (Quit completely), "
                                 "then open it again")
+
+
+def test_a_claude_code_entry_in_a_project_scope_counts_and_names_the_scope(
+        tmp_path: Path) -> None:
+    (tmp_path / ".claude.json").write_text(json.dumps({"projects": {"/work/x": {"mcpServers": {
+        "graph-me-maybe": {"command": sys.executable, "args": ["mcp"]}}}}}), encoding="utf-8")
+
+    found = _run(tmp_path)["MCP in Claude Code"]
+
+    assert found.ok and "project /work/x" in found.note
+
+
+def test_an_invalid_dotenv_is_a_fail_row_with_its_fix_not_a_crash(
+        tmp_path: Path, monkeypatch) -> None:
+    from graphme.cli import app
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("GRAPHME_HOME", str(tmp_path / "home"))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("this is not an entry\n", encoding="utf-8")
+
+    out = CliRunner().invoke(app, ["doctor"])
+
+    assert out.exit_code == 1
+    assert "FAIL settings" in out.stdout and ".env" in out.stdout and "fix:" in out.stdout

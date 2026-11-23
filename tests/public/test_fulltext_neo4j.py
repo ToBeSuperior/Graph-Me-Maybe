@@ -51,3 +51,30 @@ def test_a_bare_identifier_finds_the_korean_sentence_naming_it_too() -> None:
 
     assert {name: sorted(keys) for name, keys in found.items()} == {
         "held": ["en", "ko"], "every": ["en", "ko"]}
+
+
+def test_a_korean_word_with_its_particle_finds_the_word_with_another() -> None:
+    """"보증금은" asked as a phrase was 보증 증금 금은 under `cjk`: a passage saying "보증금을"
+    never held every word. Invented sentences."""
+    tag = uuid.uuid4().hex[:8]
+    label, index = f"Probe{tag}", f"probe_{tag}"
+    sentences = {"deposit": "임대차 보증금을 반환한다", "term": "보증 기간은 2년이다"}
+    with graphme.GraphMe() as g:
+        driver = g.graph_space().driver
+        driver.execute_query(
+            f"CREATE FULLTEXT INDEX {index} FOR (p:{label}) ON EACH [p.text] "
+            "OPTIONS {indexConfig: {`fulltext.analyzer`: 'cjk'}}")
+        try:
+            for key, text in sentences.items():
+                driver.execute_query(f"CREATE (:{label} {{key: $key, text: $text}})",
+                                     key=key, text=text)
+            driver.execute_query("CALL db.awaitIndex($index, 60)", index=index)
+            found = sorted(record["key"] for record in driver.execute_query(
+                "CALL db.index.fulltext.queryNodes($index, $words) YIELD node "
+                "RETURN node.key AS key", index=index,
+                words=every_word("보증금은 반환을")).records)
+        finally:
+            driver.execute_query(f"MATCH (p:{label}) DETACH DELETE p")
+            driver.execute_query(f"DROP INDEX {index} IF EXISTS")
+
+    assert found == ["deposit"]
