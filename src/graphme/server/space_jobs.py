@@ -151,8 +151,8 @@ class SpaceJobs(DemoBase):
                        before=started - state.SWEEP_GRACE)
         # And the passages' vectors kept by their text: those of the passages the graph holds.
         sweep_vectors(settings.readings_dir / "passages",
-                      model=settings.embedding_model,
-                      texts=(text[:PASSAGE_CHARS] for text in space.passage_texts()),
+                      model=settings.embedding_model, address=settings.embedding_address,
+                      hashes=space.passage_hashes(PASSAGE_CHARS),
                       before=started - state.SWEEP_GRACE)
         for folder in [f for f in self.root.iterdir() if f.is_dir()]:
             if folder.name not in self.sessions:  # a reading's folder, left empty

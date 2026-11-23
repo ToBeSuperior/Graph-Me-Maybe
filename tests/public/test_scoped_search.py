@@ -43,15 +43,10 @@ def test_only_naming_nothing_in_the_graph_finds_nothing() -> None:
     assert rag._found("invented", 3, only=frozenset({"deleted-since"})) == []
 
 
-def test_a_chosen_document_below_the_unscoped_depth_is_still_found() -> None:
+def _scoped_query(text_only: bool) -> tuple[str, dict[str, object]]:
     from types import SimpleNamespace
 
-    from graphme.adapters.storage.hybrid_search import (
-        _FUSED,
-        SCOPED_REACH,
-        SEARCH_DEPTH,
-        _OnceRetriever,
-    )
+    from graphme.adapters.storage.hybrid_search import _OnceRetriever
 
     sent: list[tuple[str, dict[str, object]]] = []
 
@@ -63,14 +58,33 @@ def test_a_chosen_document_below_the_unscoped_depth_is_still_found() -> None:
     retriever = object.__new__(_OnceRetriever)  # the constructor checks real indexes
     retriever.__dict__.update(
         driver=Driver(), floor=0.0, dense_weight=0.6, rrf_k=60, vector_index_name="v",
-        fulltext_index_name="t", retrieval_query="RETURN 1", embedder=None, text_only=True,
-        scope=SimpleNamespace(cypher=lambda q: q), neo4j_database=None)
+        fulltext_index_name="t", retrieval_query="RETURN 1", vector_property="embedding",
+        embedder=None if text_only else SimpleNamespace(embed_query=lambda q: [1.0, 0.0]),
+        text_only=text_only, scope=SimpleNamespace(cypher=lambda q: q), neo4j_database=None)
     retriever.fused("invented", {"b"})
+    return sent[0]
 
-    query, params = sent[0]
-    assert params["only"] == ["b"] and params["reach"] == SCOPED_REACH > SEARCH_DEPTH
-    assert query.count("WHERE node.document_id IN $only") == 2  # each search keeps the chosen
-    assert "{limit: $reach}" in query and "WHERE node.document_id IN $only" not in _FUSED
+
+def test_a_chosen_document_below_the_unscoped_depth_is_still_found() -> None:
+    """Only the chosen documents' passages are scored: the dense side by their own vectors,
+    the words side read to the end of the index's matches, keeping the chosen ones."""
+    from graphme.adapters.storage.hybrid_search import _FUSED
+
+    query, params = _scoped_query(text_only=False)
+
+    assert params["only"] == ["b"] and params["vector_property"] == "embedding"
+    assert "vector.similarity.cosine(node[$vector_property], $query_vector)" in query
+    assert query.count("node.document_id IN $only") == 3  # dense, words, every word
+    assert "node.document_id IN $only" not in _FUSED  # the unscoped search is untouched
+
+
+def test_a_scoped_query_never_asks_for_the_whole_index_top_k() -> None:
+    for text_only in (False, True):
+        query, params = _scoped_query(text_only)
+
+        assert "db.index.vector.queryNodes" not in query
+        assert "limit:" not in query and "reach" not in params
+        assert query.count("db.index.fulltext.queryNodes") == 2
 
 
 def test_linked_documents_left_out_are_not_brought_nor_what_hangs_from_them() -> None:

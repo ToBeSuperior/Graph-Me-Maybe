@@ -79,12 +79,15 @@ class _OnceRetriever(HybridCypherRetriever):
 
     scope: WorkspaceScope = DEFAULT_SCOPE
     """The workspace searched: the indexes named are its own, and every pattern names it."""
+    vector_property: str = "embedding"
+    """The passages' vector property, which a scoped question scores them by."""
 
     def __init__(self, driver: neo4j.Driver, *, floor: float, dense_weight: float, rrf_k: int,
                  text_only: bool = False, scope: WorkspaceScope = DEFAULT_SCOPE,
-                 **kwargs: Any) -> None:
+                 vector_property: str = "embedding", **kwargs: Any) -> None:
         super().__init__(driver, **kwargs)
         self.scope = scope
+        self.vector_property = vector_property
         self.text_only = text_only
         """The fulltext index alone (`_FUSED_WORDS`): passages embedded with another search
         model, which a question embedded with this one cannot be compared with."""
@@ -105,9 +108,8 @@ class _OnceRetriever(HybridCypherRetriever):
         cosine (arXiv:2504.05324). A weight already leaning on the words stays as set.
         Highest score first: the query's later steps keep no order.
 
-        `only` searches the passages of those documents alone: the two searches read
-        SCOPED_REACH candidates and keep the chosen documents' within the query, so a chosen
-        document ranked below SEARCH_DEPTH among all is still found."""
+        `only` searches the passages of those documents alone (`_SCOPED`): only theirs are
+        scored, so a chosen document ranked below SEARCH_DEPTH among all is still found."""
         dense, text = round(self.dense_weight, 6), round(1.0 - self.dense_weight, 6)
         # A code no passage holds says nothing about where the answer is (a page number dropped
         # as furniture, a code inside a picture): the question is searched as one naming none.
@@ -125,9 +127,11 @@ class _OnceRetriever(HybridCypherRetriever):
         if not self.text_only:
             assert self.embedder is not None
             asked["query_vector"] = self.embedder.embed_query(question)
-        fused = _FUSED_WORDS if self.text_only else _FUSED
-        if only is not None:
-            fused, asked = _scoped(fused), {**asked, "only": list(only), "reach": SCOPED_REACH}
+        if only is None:
+            fused = _FUSED_WORDS if self.text_only else _FUSED
+        else:
+            fused = _SCOPED_TEXT if self.text_only else _SCOPED
+            asked |= {"only": list(only), "vector_property": self.vector_property}
         records, _, _ = self.driver.execute_query(
             self.scope.cypher(fused + self.retrieval_query),
             asked,
@@ -189,23 +193,44 @@ fulltext match on some of them is not that: a nonsense question shares a common 
 something. What follows is the retrieval query, which reads `node` and `score`."""
 
 
-SCOPED_REACH = 10_000
-"""How many passages each search of a scoped question reads before keeping the chosen
-documents'. ponytail: a flat reach; a corpus with far more passages needs the index to
-filter by document."""
-
-
-def _scoped(fused: str) -> str:
-    """`fused` reading SCOPED_REACH candidates from each search and keeping the passages of
-    the documents in `$only`."""
-    return (fused.replace("$candidates, $query_vector)\n    YIELD node, score",
-                          "$reach, $query_vector)\n    YIELD node, score\n"
-                          "    WHERE node.document_id IN $only")
-            .replace("{limit: $candidates})\n    YIELD node, score",
-                     "{limit: $reach})\n    YIELD node, score\n"
-                     "    WHERE node.document_id IN $only")
-            .replace("{limit: $candidates})\n    YIELD node\n",
-                     "{limit: $reach})\n    YIELD node\n    WHERE node.document_id IN $only\n"))
+_SCOPED_DENSE = """
+  MATCH (node:Chunk) WHERE node.document_id IN $only AND node[$vector_property] IS NOT NULL
+  WITH node, vector.similarity.cosine(node[$vector_property], $query_vector) AS score
+  ORDER BY score DESC, elementId(node)
+  LIMIT $candidates
+  WITH collect({node: node, near: 2 * score - 1 >= $floor}) AS ranked
+  UNWIND range(0, size(ranked) - 1) AS at
+  RETURN ranked[at].node AS node, $dense_weight / ($rrf_k + at + 1) AS part,
+         ranked[at].near AS about
+  UNION ALL"""
+_SCOPED_WORDS = """
+  CALL db.index.fulltext.queryNodes($fulltext_index_name, $query_text)
+    YIELD node, score
+  WITH node WHERE node.document_id IN $only
+  LIMIT $candidates
+  WITH collect(node) AS ranked
+  UNWIND range(0, size(ranked) - 1) AS at
+  RETURN ranked[at] AS node, $text_weight / ($rrf_k + at + 1) AS part, false AS about
+  UNION ALL
+  WITH $every_word AS words WHERE words <> ''
+  CALL db.index.fulltext.queryNodes($fulltext_index_name, words)
+    YIELD node
+  WITH node WHERE node.document_id IN $only
+  LIMIT $candidates
+  RETURN node, 0.0 AS part, true AS about
+}
+WITH node, sum(part) * ($rrf_k + 1) AS score, true IN collect(about) AS about
+WHERE about
+ORDER BY score DESC, elementId(node)
+LIMIT $candidates
+"""
+_SCOPED = "CALL () {" + _SCOPED_DENSE + _SCOPED_WORDS
+_SCOPED_TEXT = "CALL () {" + _SCOPED_WORDS
+"""`_FUSED` over the passages of the documents in `$only` alone. The dense side scores each
+of their passages by its own vector (`vector.similarity.cosine`, (1 + cos) / 2 like the
+index), not the index's top-k of the whole workspace; the fulltext index cannot filter by
+document, so its matches are read in rank order, unlimited, until `candidates` of the chosen
+documents' are kept. The same fusion and floor follow."""
 
 
 def every_word(question: str) -> str:

@@ -205,7 +205,8 @@ def test_the_links_ask_the_workspaces_own_database() -> None:
 
     linked = [{"document_id": "original", "passages": [
         {"id": "original:0", "score": 1.0, "quote_of": ORIGINAL}]}]
-    driver = _Driver([{"document_id": "reply", "linked": linked}], {ORIGINAL})
+    driver = _Driver([{"documents": [{"document_id": "reply", "linked": linked}], "near": []}],
+                     {ORIGINAL})
     asked: list[Any] = []
     real = driver.execute_query
 

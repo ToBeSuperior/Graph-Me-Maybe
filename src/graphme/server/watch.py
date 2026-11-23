@@ -266,6 +266,11 @@ class Watcher:
         self._keep_paths(workspace, paths)
         return paths
 
+    def graph_changed(self) -> None:
+        """A document deleted or the graph reset: the files each graph holds asked again."""
+        with self._lock:
+            self._in_graph.clear()
+
     def _keep_paths(self, workspace: str, paths: dict[str, str] | None) -> None:
         if paths is not None:  # one the graph could not give is asked again
             self._in_graph[workspace] = (self._build_now(), paths)
@@ -301,13 +306,22 @@ class Watcher:
 
     def _choose_folder(self, kind: str, id: str, mode: str, at: str | None,
                        path: str | None, workspace: str | None) -> None:
+        # A new target's folder is listed and its graph asked outside the lock: a slow drive
+        # holds up no other choice. Kept under it, checked again against the targets then.
+        targets = self._read()
+        new = None
+        if not any(t.id == id for t in targets):
+            new = self._new(kind, id, path, workspace, targets)
         with self._lock:
             targets = self._read()
             target = next((t for t in targets if t.id == id), None)
             if target is not None and target.kind != kind:
                 raise ValueError(f"{id} is a {target.kind} target")
             if target is None:
-                target = self._new(kind, id, path, workspace, targets)
+                if new is None:
+                    raise LookupError(f"{id} was forgotten meanwhile -- choose it again")
+                self._refuse(Path(new.path or ""), targets)
+                target = new
                 targets.append(target)
             target.mode, target.at = mode, at
             target.ran = self._now().isoformat()  # a daily time from now on, not one past
@@ -410,9 +424,11 @@ class Watcher:
     # The looks ----------------------------------------------------------------------------
 
     def tick(self) -> None:
-        """One look at every chosen folder target; a build started for each that is due."""
+        """One look at every chosen folder target; a build started for each that is due. Each
+        workspace's graph is asked once a look, whatever number of its targets."""
+        graphs: dict[str, dict[str, str] | None] = {}
         for listed in self._read():
-            walk = self._look(listed)  # outside the lock: a drive can take minutes to list
+            walk = self._look(listed, graphs)  # outside the lock: a drive can take minutes
             with self._lock:
                 target = next((t for t in self._read() if t.id == listed.id), None)
                 if target is None:
@@ -426,12 +442,17 @@ class Watcher:
                 except Exception:  # noqa: BLE001 -- one target's trouble stops no other
                     traceback.print_exc(file=sys.stderr)
 
-    def _look(self, target: WatchTarget) -> _Walk:
-        """The target's folder walked, and its graph's files asked for: no lock held."""
+    def _look(self, target: WatchTarget,
+              graphs: dict[str, dict[str, str] | None] | None = None) -> _Walk:
+        """The target's folder walked, and its graph's files asked for unless `graphs` (this
+        look's, by workspace) holds them: no lock held."""
+        graphs = {} if graphs is None else graphs
         walk = _walk(target)
         if walk.error is None:
-            walk.in_graph = self._graph_paths(target.workspace)
-            self._keep_paths(target.workspace, walk.in_graph)  # what the page reads till the next
+            if target.workspace not in graphs:
+                graphs[target.workspace] = self._graph_paths(target.workspace)
+                self._keep_paths(target.workspace, graphs[target.workspace])  # the page's
+            walk.in_graph = graphs[target.workspace]
         return walk
 
     def _take(self, target: WatchTarget, walk: _Walk) -> None:
@@ -553,14 +574,24 @@ class Watcher:
         self._write([target if t.id == target.id else t for t in self._read()])
 
     def _read(self) -> list[WatchTarget]:
+        """The targets; none when there is no file. Any other OSError is raised: the empty list
+        a read that failed gave would be written over the targets by the next change."""
         try:
-            said = json.loads(self._file.read_text(encoding="utf-8"))
-            return [WatchTarget(**t) for t in said["targets"]]
-        except OSError:
+            text = self._file.read_text(encoding="utf-8")
+        except FileNotFoundError:
             return []
+        try:
+            return [WatchTarget(**t) for t in json.loads(text)["targets"]]
         except (ValueError, KeyError, TypeError):
             # Kept aside, not written over by the next choice: the targets can be read back.
-            self._file.replace(self._file.with_suffix(".json.bad"))
+            with self._lock:  # every write holds it: a file written since the read is kept
+                try:
+                    now = self._file.read_text(encoding="utf-8")
+                except FileNotFoundError:
+                    return []  # set aside by another read
+                if now != text:
+                    return self._read()
+                self._file.replace(self._file.with_suffix(".json.bad"))
             return []
 
     def _write(self, targets: list[WatchTarget]) -> None:

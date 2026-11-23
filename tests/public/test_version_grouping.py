@@ -26,6 +26,8 @@ class _Graph(neo4j.Driver):
                 "rule": None} for n, i in enumerate(ids, start=1)}
         self.pairs: set[frozenset[str]] = set()
         self.sent: list[str] = []
+        self.read = 0
+        """How many documents' signatures were read."""
 
     def _answer(self, query: str, p: dict[str, Any]) -> list[dict[str, Any]]:
         self.sent.append(query)
@@ -42,10 +44,22 @@ class _Graph(neo4j.Driver):
                 docs[p["document"]].update(keys=p["keys"], signature=p["signature"])
                 if "REMOVE d.versions_rule" in query:
                     docs[p["document"]]["rule"] = None
-        elif "AS stamped" in query:
-            return [{"id": i, "hash": d["hash"], "signature": d["signature"],
-                     "stamped": d["rule"] == p["rule"], "cut": d["texts"] is not None,
-                     "keyed": d["keys"] is not None} for i, d in docs.items()]
+        elif "AS keyed" in query:  # the documents cut since they were grouped
+            rows = [{"id": i, "hash": d["hash"], "signature": d["signature"],
+                     "keyed": d["keys"] is not None} for i, d in docs.items()
+                    if d["rule"] != p["rule"] and d["texts"] is not None]
+            self.read += len(rows)
+            return rows
+        elif "IN $bands" in query:  # the grouped ones a copy of or sharing a band with them
+            step = p["rows"]
+            rows = [{"id": i, "hash": d["hash"], "signature": d["signature"]}
+                    for i, d in docs.items()
+                    if d["rule"] == p["rule"] and d["texts"] is not None
+                    and (d["hash"] in p["hashes"] or len(d["signature"] or []) == p["permutations"]
+                         and any(d["signature"][b * step:(b + 1) * step] in band
+                                 for b, band in enumerate(p["bands"])))]
+            self.read += len(rows)
+            return rows
         elif "AS ungrouped" in query:  # the grouping before signatures were kept
             return [{"ungrouped": i} for i, d in docs.items() if d["rule"] != p["rule"]][:1]
         elif "collect(c.text)" in query:
@@ -134,6 +148,35 @@ def test_a_grouping_after_a_new_document_reads_no_passage_text() -> None:
 
     assert graph.pairs == {frozenset({"v1", "v3"})}
     assert [q for q in graph.sent if "c.text" in q] == []
+
+
+def test_a_grouping_reads_only_the_new_document_and_those_it_may_pair_with() -> None:
+    graph = _Graph("v1", "v2", "v3", "v4")
+    space = Neo4jGraphSpace(graph)  # type: ignore[arg-type]
+    _cut(space, "v1", _GATE)
+    _cut(space, "v2", [f"Other > Line {n}\nAn invented recipe step {n}." for n in range(12)])
+    _cut(space, "v3", [f"Menu > Dish {n}\nAn invented soup of day {n}." for n in range(12)])
+    space.group_versions()
+    _cut(space, "v4", _EDITED)
+    graph.read = 0
+
+    space.group_versions()
+
+    assert graph.pairs == {frozenset({"v1", "v4"})}
+    assert graph.read == 2  # v4 and v1, never the unrelated v2 and v3
+
+
+def test_nothing_cut_since_reads_no_signature() -> None:
+    graph = _Graph("v1", "v2")
+    space = Neo4jGraphSpace(graph)  # type: ignore[arg-type]
+    _cut(space, "v1", _GATE)
+    _cut(space, "v2", _EDITED)
+    space.group_versions()
+    graph.read = 0
+
+    space.group_versions()
+
+    assert graph.read == 0 and graph.pairs == {frozenset({"v1", "v2"})}
 
 
 def _handbook(edited: bool) -> list[Chunk]:

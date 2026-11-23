@@ -182,6 +182,7 @@ class CorpusBuilds(Previews):
                 state.evict(again)
 
         def feed() -> None:
+            copies = 0  # copies sent to the back in a row: a whole turn of them waits once
             try:
                 while waiting and not stop.is_set():
                     # A document read is given back before another is let in in its place.
@@ -200,8 +201,12 @@ class CorpusBuilds(Previews):
                             self.sessions[d].state not in FINISHED
                             and self.content_hash(d) == held for d in admitted):
                         waiting.append(doc)
-                        time.sleep(0.05)
+                        copies += 1
+                        if copies >= len(waiting):
+                            copies = 0
+                            stop.wait(0.2)
                         continue
+                    copies = 0
                     # A file whose content the space already holds is not read again: reading
                     # costs a model call a page. A reading alone never asks the space.
                     if put and self.already_in([doc]):

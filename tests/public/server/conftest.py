@@ -168,7 +168,7 @@ class FakeSpace:
     def crop_hashes(self) -> set[str]:
         return set(self.crops)
 
-    def passage_texts(self) -> Any:
+    def passage_hashes(self, cut: int) -> Any:
         return iter(())
 
     def close(self) -> None:

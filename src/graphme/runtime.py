@@ -270,6 +270,7 @@ def create_graph_rag(
     passages by, and the same model endpoint every other call goes to for the answer."""
     embedder = KeptVectors(create_embedder(settings), settings.readings_dir / "passages",
                            model=settings.embedding_model,
+                           address=settings.embedding_address,
                            dimensions=settings.embedding_dimensions)
     return GraphRag(
         space,

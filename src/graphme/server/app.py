@@ -736,6 +736,11 @@ def create_app(
         side = beside(workspace)
         return opened() if side is None else side.graph_space()
 
+    def graph_changed() -> None:
+        """What the watched folders' graphs hold asked again at the next poll."""
+        if demo.workspaces is not None:
+            demo.watcher.graph_changed()
+
     def unbuilt() -> None:
         if demo.build.state in BUILDING:
             raise HTTPException(409, "not while a graph is being built")
@@ -846,6 +851,7 @@ def create_app(
         opened()
         with refused():
             demo.delete_documents([document_id])
+        graph_changed()
         return {"deleted": document_id}
 
     @v1.get("/documents/{document_id}/graph", response_model=api.DocumentGraph)
@@ -937,6 +943,7 @@ def create_app(
         unbuilt()
         opened()
         deleted = demo.graph.reset()
+        graph_changed()
         demo.drop(list(demo.catalog))
         demo.forget_previews()
         demo.sweep_behind()

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import builtins
 import contextlib
+import json
 import logging
 import re
 import secrets
@@ -56,19 +57,22 @@ class ThreadStore:
 
     def list(self) -> list[ThreadSummary]:
         """Every thread readable here, latest changed first; a file that is not one (corrupt,
-        or of a shape this version does not read) is logged and left out."""
+        or of a shape this version does not read) is logged and left out. Its turns are
+        counted, not read: `get` reads them."""
         kept: list[ThreadSummary] = []
         for path in self.folder.glob("*.json"):
             try:
-                thread = Thread.model_validate_json(path.read_bytes())
-            except (OSError, ValueError, ValidationError) as error:
+                said = json.loads(path.read_bytes())
+                thread = ThreadSummary(id=said["id"], title=said.get("title", ""),
+                                       updated_at=said["updated_at"],
+                                       turns=len(said.get("turns", [])))
+            except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
                 _log.warning("thread %s not read -- %s", path.name, str(error)[:200])
                 continue
             if thread.id != path.stem:  # a copy under another name is not that thread
                 _log.warning("thread %s names another thread (%s)", path.name, thread.id)
                 continue
-            kept.append(ThreadSummary(id=thread.id, title=thread.title,
-                                      updated_at=thread.updated_at, turns=len(thread.turns)))
+            kept.append(thread)
         return sorted(kept, key=lambda t: -t.updated_at)
 
     def has(self, thread_id: str) -> bool:

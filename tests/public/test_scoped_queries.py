@@ -40,13 +40,10 @@ ANSWERS: dict[str, list[dict[str, Any]]] = {
     "count(d) AS n": [{"n": 0}],
     # versions: a document cut since it was grouped, one grouped, one whose passages were cut
     # before their hashes were kept; their bands alike
-    "AS stamped": [
-        {"id": "ab", "hash": "0" * 64, "signature": [1] * 128, "keyed": True,
-         "stamped": False, "cut": True},
-        {"id": "cd", "hash": "1" * 64, "signature": [1] * 128, "keyed": True,
-         "stamped": True, "cut": True},
-        {"id": "ef", "hash": "2" * 64, "signature": None, "keyed": False,
-         "stamped": False, "cut": True}],
+    "AS keyed": [
+        {"id": "ab", "hash": "0" * 64, "signature": [1] * 128, "keyed": True},
+        {"id": "ef", "hash": "2" * 64, "signature": None, "keyed": False}],
+    "IN $bands": [{"id": "cd", "hash": "1" * 64, "signature": [1] * 128}],
     "AS texts": [{"id": "ef", "texts": ["An invented passage."]}],
     "AS keys": [{"id": "ab", "keys": [1]}, {"id": "cd", "keys": [1]}],
 }

@@ -14,7 +14,7 @@ from typing import Any
 import pymupdf
 import pytest
 
-from graphme.adapters.embedding import BatchEmbedder, KeptVectors, sweep_vectors
+from graphme.adapters.embedding import BatchEmbedder, KeptVectors, passage_hash, sweep_vectors
 from graphme.adapters.rendering.pdf_pages import PdfPageRenderer
 from graphme.adapters.storage.assets import LocalAssetStore
 from graphme.application import page_readings
@@ -436,7 +436,7 @@ def test_vectors_no_passage_holds_are_swept(tmp_path: Path) -> None:
     kept.embed_texts(["Fill the tank.", "Trim the wick."])
     (tmp_path / "stray.part").write_bytes(b"")
 
-    sweep_vectors(tmp_path, model="invented-embedder", texts=["Fill the tank."],
+    sweep_vectors(tmp_path, model="invented-embedder", hashes=[passage_hash("Fill the tank.")],
                   before=float("inf"))
 
     inner = _Embedder()
@@ -444,6 +444,43 @@ def test_vectors_no_passage_holds_are_swept(tmp_path: Path) -> None:
     again.embed_texts(["Fill the tank.", "Trim the wick."])
     assert inner.sent == ["Trim the wick."]
     assert not (tmp_path / "stray.part").exists()
+
+
+def test_a_vector_kept_for_another_endpoint_is_embedded_again(tmp_path: Path) -> None:
+    KeptVectors(_Embedder(), tmp_path, model="invented-embedder",
+                address="openai https://one.invalid/v1").embed_texts(["Fill the tank."])
+    inner = _Embedder()
+    KeptVectors(inner, tmp_path, model="invented-embedder",
+                address="openai https://two.invalid/v1").embed_texts(["Fill the tank."])
+    assert inner.sent == ["Fill the tank."]
+
+
+def test_the_sweep_reads_each_passages_hash_and_only_an_older_ones_text() -> None:
+    from graphme.adapters.storage.neo4j_space import Neo4jGraphSpace
+    from tests.public.test_scoped_queries import ANSWERS, SCOPE, _Recording
+
+    driver = _Recording()
+    space = Neo4jGraphSpace(driver, scope=SCOPE)  # type: ignore[arg-type]
+    ANSWERS["AS h, CASE"] = [{"h": "0" * 64, "t": None},
+                             {"h": None, "t": "An invented passage cut before hashes."}]
+    try:
+        hashes = list(space.passage_hashes(cut=11))
+    finally:
+        del ANSWERS["AS h, CASE"]
+
+    assert hashes == ["0" * 64, passage_hash("An invented")]
+    read = next(q for q, _ in driver.sent if "AS h, CASE" in q)
+    assert "c.text END" in read  # a passage's text only where it has no hash
+
+
+def test_an_embedded_passage_keeps_the_hash_of_what_was_sent() -> None:
+    from tests.public.test_scoped_queries import _ran_everything, _Recording
+
+    driver = _Recording()
+    _ran_everything(driver)
+
+    written = [p for q, p in driver.sent if "setNodeVectorProperty" in q]
+    assert written and written[0]["rows"][0]["hash"] == passage_hash("An invented passage.")
 
 
 def test_a_vector_of_another_size_is_embedded_again(tmp_path: Path) -> None:

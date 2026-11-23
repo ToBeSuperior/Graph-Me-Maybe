@@ -20,6 +20,7 @@ from typing import Any
 from neo4j import Driver, GraphDatabase, ManagedTransaction
 from neo4j.exceptions import AuthError, ServiceUnavailable, SessionExpired
 
+from graphme.adapters.embedding import PASSAGE_HASH, passage_hash
 from graphme.adapters.export.neo4j import (
     CHUNK_LABEL,
     NODE_LABEL,
@@ -372,10 +373,16 @@ class Neo4jGraphSpace:
             f"RETURN DISTINCT n.meta_{CROP_ASSET_KEY} AS h")
         return {str(record["h"]) for record in records}
 
-    def passage_texts(self) -> Iterator[str]:
-        """The text of every passage the space holds, for the sweep of kept vectors."""
-        records, _, _ = self._query(f"MATCH (c:{CHUNK_LABEL}) RETURN c.text AS t")
-        return (str(record["t"]) for record in records if record["t"] is not None)
+    def passage_hashes(self, cut: int) -> Iterator[str]:
+        """The `passage_hash` of every passage the space holds, for the sweep of kept vectors:
+        kept on it when it was embedded; a passage embedded before that is hashed from its
+        text, cut to the `cut` characters sent."""
+        records, _, _ = self._query(
+            f"MATCH (c:{CHUNK_LABEL}) "
+            f"RETURN c.`{PASSAGE_HASH}` AS h, CASE WHEN c.`{PASSAGE_HASH}` IS NULL "
+            "THEN c.text END AS t")
+        return (str(r["h"]) if r["h"] is not None else passage_hash(str(r["t"])[:cut])
+                for r in records if r["h"] is not None or r["t"] is not None)
 
     def contents(self, hashes: Sequence[str]) -> set[str]:
         """Which of these file contents (SHA-256) the space already holds."""
@@ -545,21 +552,24 @@ class Neo4jGraphSpace:
     def group_versions(self) -> int:
         """Copies and versions joined by `SIMILAR_VERSION` for each document cut since it was
         last grouped by VERSIONS_RULE (`put_chunks` takes the stamp away); how many pairs.
-        Every cut document's signature is read, and the passage hashes of the pairs its bands
-        pick, never a passage's text -- a build costs what it changed. Only the pairs of those
-        documents are written again; a pair its owner split (`ungroup`) keeps its edge and its
-        mark. Nothing is asked of a model."""
+        The signatures read are those of the documents cut since, and of the grouped ones a
+        copy of one or sharing a band with one (matched in the database) -- every pair has a
+        document cut since -- and the passage hashes of the pairs the bands pick, never a
+        passage's text: a build costs what it changed. A new VERSIONS_RULE unstamps every
+        document, which regroups them all. Only the pairs of those documents are written
+        again; a pair its owner split (`ungroup`) keeps its edge and its mark. Nothing is
+        asked of a model."""
+        is_cut = f"EXISTS {{ MATCH (:{CHUNK_LABEL} {{document_id: d.id}}) }}"
         records, _, _ = self._query(
             f"""
             MATCH (d:Document)
+            WHERE coalesce(d.versions_rule, '') <> $rule AND {is_cut}
             RETURN d.id AS id, d.content_hash AS hash, d.version_minhash AS signature,
                    d.version_keys IS NOT NULL
-                     AND coalesce(d.version_keys_rule, '') = $keys_rule AS keyed,
-                   coalesce(d.versions_rule, '') = $rule AS stamped,
-                   EXISTS {{ MATCH (:{CHUNK_LABEL} {{document_id: d.id}}) }} AS cut
+                     AND coalesce(d.version_keys_rule, '') = $keys_rule AS keyed
             """, rule=VERSIONS_RULE, keys_rule=versions.KEYS_RULE)
-        cut = {r["id"]: r for r in records if r["cut"]}
-        fresh = sorted(i for i, r in cut.items() if not r["stamped"])
+        cut = {r["id"]: r for r in records}
+        fresh = sorted(cut)
         if not fresh:
             return 0
         signatures = {i: list(r["signature"] or []) for i, r in cut.items()}
@@ -578,6 +588,26 @@ class Neo4jGraphSpace:
                         "SET d.version_keys = row.keys, d.version_minhash = row.signature, "
                         "d.version_keys_rule = $keys_rule", rows=rows, keys_rule=versions.KEYS_RULE)
             signatures.update({row["id"]: row["signature"] for row in rows})
+        hashes = sorted({r["hash"] for r in cut.values() if r["hash"]})
+        step = versions.PERMUTATIONS // versions.BANDS
+        bands = [sorted({tuple(s[b * step:(b + 1) * step]) for s in signatures.values()
+                         if len(s) == versions.PERMUTATIONS}) for b in range(versions.BANDS)]
+        if hashes or bands[0]:
+            grouped, _, _ = self._query(
+                f"""
+                MATCH (d:Document)
+                WHERE coalesce(d.versions_rule, '') = $rule AND {is_cut}
+                  AND (d.content_hash IN $hashes
+                       OR (size(coalesce(d.version_minhash, [])) = $permutations
+                           AND any(b IN range(0, size($bands) - 1)
+                                   WHERE d.version_minhash[b * $rows .. (b + 1) * $rows]
+                                         IN $bands[b])))
+                RETURN d.id AS id, d.content_hash AS hash, d.version_minhash AS signature
+                """, rule=VERSIONS_RULE, hashes=hashes, permutations=versions.PERMUTATIONS,
+                rows=step, bands=[[list(band) for band in at] for at in bands])
+            for r in grouped:
+                cut[r["id"]] = r
+                signatures[r["id"]] = list(r["signature"] or [])
         copies, measure = versions.candidates(
             [Signed(i, r["hash"], signatures[i]) for i, r in cut.items()], fresh)
         ends = sorted({i for pair in measure for i in pair})

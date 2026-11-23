@@ -297,6 +297,13 @@ class Settings(BaseModel):
         return self.embedding_key is not None or (row is not None and row.model_file is not None)
 
     @property
+    def embedding_address(self) -> str:
+        """Which embedder vectors come from beside the model: its provider and endpoint, so
+        a kept vector (`KeptVectors`) is never reused from another."""
+        row = model_endpoint.EMBEDDERS.get(self.embedding_provider)
+        return f"{self.embedding_provider} {row.base_url if row else ''}"
+
+    @property
     def asset_dir(self) -> Path:
         """Where crops and pictures are kept: beside the graph they belong to -- a workspace's in
         its folder, the home's own graph's in the home -- so deleting a workspace takes them, and

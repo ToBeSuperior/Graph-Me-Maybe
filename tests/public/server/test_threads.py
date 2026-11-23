@@ -323,3 +323,19 @@ def test_a_turn_is_kept_without_the_server(tmp_path: Path) -> None:
     assert kept.turns[0].answer.queries == ["q"]  # the search's, carried onto the answer
     store.delete(thread.id)
     assert not store.keep_turn(thread.id, made, got)  # deleted meanwhile
+
+
+def test_the_list_reads_no_turn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = ThreadStore(tmp_path)
+    kept = store.create(None, "default")
+    store.append(kept.id, api.ThreadTurn(question="Hold time?", asked_at=1.0))
+    (tmp_path / "0123456789abcdef.json").write_text("{not json")
+    (tmp_path / "fedcba9876543210.json").write_text(json.dumps(["a list"]))
+    before = store.list()
+
+    def whole(*_: object, **__: object) -> api.Thread:
+        raise AssertionError("a list validates no whole thread")
+    monkeypatch.setattr(api.Thread, "model_validate_json", whole)
+
+    assert store.list() == before
+    assert [(t.id, t.title, t.turns) for t in before] == [(kept.id, "Hold time?", 1)]

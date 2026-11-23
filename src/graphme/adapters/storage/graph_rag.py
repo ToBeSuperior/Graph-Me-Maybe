@@ -35,7 +35,7 @@ from neo4j_graphrag.indexes import create_vector_index
 from neo4j_graphrag.types import RetrieverResultItem
 
 from graphme.adapters.chat import Endpoint, complete, image_part, is_transient
-from graphme.adapters.embedding import BatchEmbedder, Remembered
+from graphme.adapters.embedding import PASSAGE_HASH, BatchEmbedder, Remembered, passage_hash
 from graphme.adapters.export.neo4j import CHUNK_LABEL, NODE_LABEL
 from graphme.adapters.storage.answer_check import Claim as Claim
 from graphme.adapters.storage.answer_check import checked as _claims_checked
@@ -434,10 +434,12 @@ class GraphRag:
                 MATCH (c:{CHUNK_LABEL} {{id: row.id}})
                 CALL db.create.setNodeVectorProperty(c, $property, row.vector)
                 // Rated from the vector it had: rated again, even if this run stops here.
-                SET c.`{self._model_property}` = $model
+                // The text's hash, for the sweep of kept vectors (`passage_hashes`).
+                SET c.`{self._model_property}` = $model, c.`{PASSAGE_HASH}` = row.hash
                 REMOVE c.importance_rule
                 """,
-                rows=[{"id": i, "vector": v} for (_, i, _), v in zip(batch, vectors, strict=True)],
+                rows=[{"id": i, "vector": v, "hash": passage_hash(t)}
+                      for (_, i, t), v in zip(batch, vectors, strict=True)],
                 property=self._vector,
                 model=self._model,
             )
@@ -739,7 +741,8 @@ class GraphRag:
             database_=retriever.neo4j_database,
             routing_=neo4j.RoutingControl.READ,
         )
-        quoted = {p["quote_of"] for record in records for doc in record["linked"]
+        rows = records[0]["documents"] if records else []
+        quoted = {p["quote_of"] for record in rows for doc in record["linked"]
                   for p in doc["passages"] if p.get("quote_of")}
         held = documents_with_message_ids(self._driver, sorted(quoted),
                                           database=retriever.neo4j_database, scope=self._scope)
@@ -747,8 +750,8 @@ class GraphRag:
                      linked_without(linked_within(
                          relevant_links(record["linked"], self._floor), only), exclude),
                      in_space=held)
-                 for record in records}
-        near = {p["id"]: p["closeness"] for p in (records[0].get("near") or [] if records else [])}
+                 for record in rows}
+        near = {p["id"]: p["closeness"] for p in (records[0]["near"] or [] if records else [])}
         return [
             neo4j.Record({**dict(record),  # type: ignore[no-untyped-call]
                           "closeness": near.get(record["id"]),
@@ -902,6 +905,7 @@ class GraphRag:
                 embedder=None if self.text_only else self._embedder,
                 text_only=self.text_only,
                 scope=self._scope,
+                vector_property=self._vector,
             )
         return self._rag
 
@@ -986,7 +990,8 @@ class GraphRag:
                           modified: reached.modified_at}})
             AS linked
         }}
-        RETURN start.id AS document_id, linked, near
+        // `near` is the same for every document: handed back once, beside them all.
+        RETURN collect({{document_id: start.id, linked: linked}}) AS documents, near
         """
 
 

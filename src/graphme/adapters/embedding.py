@@ -96,33 +96,38 @@ class OpenAIBatchEmbeddings(OpenAIEmbeddings, BatchEmbedder):
 
 
 class KeptVectors(BatchEmbedder):
-    """A passage's vector kept on disk by the model and the passage's text: a passage
-    embedded once is not embedded again -- an edited document's unchanged passages, put in
-    under new ids, keep the vectors they had. A question is embedded as it always is. A kept
-    vector of another size than `dimensions` is embedded again."""
+    """A passage's vector kept on disk by the embedder (`address`: its provider and endpoint,
+    and the model) and the passage's text: a passage embedded once is not embedded again --
+    an edited document's unchanged passages, put in under new ids, keep the vectors they had.
+    A question is embedded as it always is. A kept vector of another size than `dimensions`
+    is embedded again."""
 
     def __init__(self, embedder: BatchEmbedder, folder: Path, *, model: str,
-                 dimensions: int | None = None) -> None:
+                 address: str = "", dimensions: int | None = None) -> None:
         super().__init__()
         self._embedder = embedder
         self._folder = Path(folder)
         self._model = model
+        self._address = address
         self._dimensions = dimensions
 
     def embed_query(self, text: str, **kwargs: Any) -> list[float]:
         return self._embedder.embed_query(text, **kwargs)
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        keys = [vector_key(self._model, text) for text in texts]
+        keys = [self._key(text) for text in texts]
         found = {key: vector for key in set(keys) if (vector := self._read(key)) is not None}
         missing = list(dict.fromkeys(t for t, key in zip(texts, keys, strict=True)
                                      if key not in found))
         if missing:
             for text, vector in zip(missing, self._embedder.embed_texts(missing), strict=True):
-                key = vector_key(self._model, text)
+                key = self._key(text)
                 found[key] = vector
                 self._write(key, vector)
         return [found[key] for key in keys]
+
+    def _key(self, text: str) -> str:
+        return vector_key(self._model, passage_hash(text), self._address)
 
     def _read(self, key: str) -> list[float] | None:
         try:
@@ -139,18 +144,31 @@ class KeptVectors(BatchEmbedder):
                          suffix=".part", sync=False)
 
 
-def vector_key(model: str, text: str) -> str:
-    """What a passage's vector is kept under: the model and the text sent."""
-    return sha256_bytes(f"{model}\0{text}".encode())
+PASSAGE_HASH = "text_hash"
+"""The passage property its `passage_hash` is kept under."""
 
 
-def sweep_vectors(folder: Path, *, model: str, texts: Iterable[str], before: float) -> int:
-    """Every kept vector but `model`'s of `texts` (the space's passages, as sent) deleted,
-    unless written since `before`, with any write cut short: how many."""
+def passage_hash(text: str) -> str:
+    """A passage's text as sent to the embedder, hashed: kept on the passage when it is
+    embedded, so the sweep reads it and not the text."""
+    return sha256_bytes(text.encode())
+
+
+def vector_key(model: str, hashed: str, address: str = "") -> str:
+    """What a passage's vector is kept under: the embedder's address and model, and the
+    `passage_hash` of the text sent."""
+    return sha256_bytes(f"{address}\0{model}\0{hashed}".encode())
+
+
+def sweep_vectors(folder: Path, *, model: str, hashes: Iterable[str], before: float,
+                  address: str = "") -> int:
+    """Every kept vector but `address` and `model`'s of `hashes` (the space's passages'
+    `passage_hash`) deleted, unless written since `before`, with any write cut short: how
+    many."""
     folder = Path(folder)
     if not folder.is_dir():
         return 0
-    keep = {vector_key(model, text) for text in texts}
+    keep = {vector_key(model, hashed, address) for hashed in hashes}
     removed = 0
     for path in [*folder.glob("*.vec"), *folder.glob("*.part")]:
         try:

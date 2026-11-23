@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -729,3 +730,100 @@ def test_a_file_that_failed_in_a_finished_build_is_tried_again(
 
     assert until(lambda: _built(workspace_demo, first)), workspace_demo.build
     assert workspace_demo.build.total == 1  # the memo alone, tried again
+
+
+def _asking(watcher: Watcher, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    asked: list[str] = []
+    paths = watcher._graph_paths
+    monkeypatch.setattr(watcher, "_graph_paths",
+                        lambda workspace: asked.append(workspace) or paths(workspace))
+    return asked
+
+
+def test_a_tick_asks_the_graph_once_for_every_target_and_a_delete_asks_again(
+    watched: tuple[TestClient, Watcher], workspace_demo: Demo, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, watcher = watched
+    for id, name in (("t1", "reports"), ("t2", "minutes"), ("t3", "budgets")):
+        client.put(f"/v1/watch/folder/{id}",
+                   json={"mode": "manual", "path": str(_folder(workspace_demo, tmp_path, name))})
+    asked = _asking(watcher, monkeypatch)
+
+    watcher.tick()
+    assert len(asked) == 1
+    client.get("/v1/watch")
+    assert len(asked) == 1  # the poll reads the tick's
+
+    assert client.delete("/v1/documents/d-reports-plan.docx").status_code == 200
+    client.get("/v1/watch")
+    assert len(asked) == 2  # the graph changed: asked again
+    watcher.tick()
+    assert len(asked) == 3
+
+
+def test_a_choice_does_not_wait_for_another_folder_being_listed(
+    watched: tuple[TestClient, Watcher], workspace_demo: Demo, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, watcher = watched
+    _choose(client, _folder(workspace_demo, tmp_path), "manual")
+    slow = _folder(workspace_demo, tmp_path, "archive")
+    listing, release = threading.Event(), threading.Event()
+    real = watch.scan
+
+    def slow_scan(folder: Path, skipped: list[Path]) -> watch.Seen:
+        if folder == slow.resolve() and not listing.is_set():
+            listing.set()
+            release.wait(10)
+        return real(folder, skipped)
+    monkeypatch.setattr(watch, "scan", slow_scan)
+    said: list[BaseException] = []
+
+    def choose(id: str, path: Path | None) -> None:
+        try:
+            watcher.choose("folder", id, "on_change", None, str(path) if path else None)
+        except BaseException as error:  # noqa: BLE001 -- the test reads it
+            said.append(error)
+    first = threading.Thread(target=choose, args=("t2", slow))
+    first.start()
+    assert listing.wait(5)
+    other = threading.Thread(target=choose, args=("t1", None))
+    other.start()
+    other.join(2)
+    blocked = other.is_alive()
+    # ...and a folder chosen meanwhile is checked again as the first is kept
+    taken = threading.Thread(target=choose, args=("t3", slow))
+    if not blocked:
+        taken.start()
+        taken.join(5)
+    release.set()
+    first.join(5)
+    other.join(5)
+
+    assert not blocked
+    assert _target(client)["mode"] == "on_change"
+    assert [type(e) for e in said] == [ValueError]  # t2: inside or around t3, chosen already
+    assert {t["id"] for t in client.get("/v1/watch").json()} == {"t1", "t3"}
+
+
+def test_a_watch_file_that_cannot_be_read_now_is_not_written_over(
+    watched: tuple[TestClient, Watcher], workspace_demo: Demo, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, watcher = watched
+    _choose(client, _folder(workspace_demo, tmp_path), "manual")
+    said = workspace_demo.workspace_registry().home / "watch.json"
+    before = said.read_text(encoding="utf-8")
+    read = Path.read_text
+
+    def refused(self: Path, *args: Any, **kwargs: Any) -> str:
+        if self == said:
+            raise PermissionError(13, "refused for now", str(self))
+        return read(self, *args, **kwargs)
+    monkeypatch.setattr(Path, "read_text", refused)
+
+    with pytest.raises(OSError):
+        watcher._save(WatchTarget("folder", "t1", FIRST, mode="on_change"))
+    monkeypatch.undo()
+    assert said.read_text(encoding="utf-8") == before

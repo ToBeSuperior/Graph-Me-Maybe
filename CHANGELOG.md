@@ -5,10 +5,27 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-24
+
 ### Fixed
 
 - On Windows, two writes of one settings file at the same moment no longer fail: the second
   waits for the first.
+- A question asked of chosen documents scores every passage of theirs, so one ranked far down
+  the whole graph is no longer missed, and it no longer searches the whole graph first.
+- A watched folder's settings are never written over with an empty list because `watch.json`
+  could not be read for a moment.
+- A vector kept for a passage is used again only for the same provider and address it was made
+  with. Vectors kept before this are made again once, when their documents are built again.
+
+### Changed
+
+- Opening the app reads one hash a passage, not every passage's text, to clear vectors no
+  longer used.
+- Grouping versions reads only the documents built since, and those sharing a band with them.
+- Watched folders ask the graph once a check, not once a folder; choosing a folder no longer
+  holds up the other watch requests while it is looked through.
+- The conversation list reads only each conversation's title and dates.
 
 ## [0.2.3] - 2026-11-23
 
